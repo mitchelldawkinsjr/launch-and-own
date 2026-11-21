@@ -51,7 +51,7 @@ The beta onboarding D1 is now provisioned and migrated under a dedicated Launch 
 - Reusable planner and website-only provisioner: **CI-tested**.
 - GitHub/Cloudflare authorization-code and PKCE primitives: **CI-tested**.
 - Dedicated Launch & Own beta onboarding D1: **created and schema-verified**.
-- Hosted onboarding Worker source: **CI-tested, not deployed**.
+- Hosted onboarding Worker source, including logout and provider revocation attempts: **CI-tested, not deployed**.
 - Independent live customer login/provisioning/deployment: **not yet verified**.
 - Customer-specific forms, custom domains, and AI website generation: **future milestones**.
 - No license has been selected yet: this is publicly visible source, **not automatically an open-source grant**.
