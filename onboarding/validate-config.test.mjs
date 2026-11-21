@@ -70,3 +70,13 @@ test("Cloudflare authorization failure is surfaced as a readiness blocker",async
  const h=mock();const fetchFn=async()=>new Response("denied",{status:403});
  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn}),/Cannot verify/);
 });
+test("only the single onboard Custom Domain is allowed, with workers.dev disabled",()=>{
+  const wild=copy();wild.routes=[{pattern:"*.mitchelldawkins.com/*",zone_name:"mitchelldawkins.com"}];
+  assert.throws(()=>validateConfig(wild),/Custom Domain/);
+  const apex=copy();apex.routes=[{pattern:"mitchelldawkins.com",custom_domain:true}];
+  assert.throws(()=>validateConfig(apex),/Custom Domain/);
+  const dev=copy();dev.workers_dev=true;
+  assert.throws(()=>validateConfig(dev),/workers.dev/);
+  const origin=copy();origin.vars.ONBOARDING_ORIGIN="https://www.mitchelldawkins.com";
+  assert.throws(()=>validateConfig(origin),/ONBOARDING_ORIGIN/);
+});

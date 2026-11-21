@@ -3,6 +3,17 @@
   "name": "launch-and-own-onboarding-beta",
   "main": "worker.mjs",
   "compatibility_date": "2026-11-21",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "onboard.mitchelldawkins.com",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "ONBOARDING_ORIGIN": "https://onboard.mitchelldawkins.com"
+  },
   "compatibility_flags": [
     "nodejs_compat"
   ],
