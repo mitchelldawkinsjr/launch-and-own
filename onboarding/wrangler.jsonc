@@ -3,6 +3,17 @@
   "name": "launch-and-own-onboarding-beta",
   "main": "worker.mjs",
   "compatibility_date": "2026-11-21",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "onboard.360web.cloud",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "ONBOARDING_ORIGIN": "https://onboard.360web.cloud"
+  },
   "compatibility_flags": [
     "nodejs_compat"
   ],

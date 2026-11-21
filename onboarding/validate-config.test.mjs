@@ -79,6 +79,15 @@ test("missing token-rotation migration columns block remote readiness",async()=>
  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/token-rotation migration missing/);
  assert.equal(h.calls.length,3);
 });
+test("only the single onboard Custom Domain is allowed, with workers.dev disabled",()=>{
+  const wild=copy();wild.routes=[{pattern:"*.360web.cloud/*",zone_name:"360web.cloud"}];
+  assert.throws(()=>validateConfig(wild),/Custom Domain/);
+  const apex=copy();apex.routes=[{pattern:"360web.cloud",custom_domain:true}];
+  assert.throws(()=>validateConfig(apex),/Custom Domain/);
+  const dev=copy();dev.workers_dev=true;
+  assert.throws(()=>validateConfig(dev),/workers.dev/);
+  const origin=copy();origin.vars.ONBOARDING_ORIGIN="https://www.360web.cloud";
+  assert.throws(()=>validateConfig(origin),/ONBOARDING_ORIGIN/);
 
 test("missing durable receipt migration stops onboarding readiness",async()=>{
  const h=mock({schema:schemaNames.filter(x=>!x.includes("receipts"))});
