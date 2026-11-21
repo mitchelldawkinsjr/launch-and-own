@@ -75,6 +75,15 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
   const existingFile=await api.github(filePath,{allow404:true});
   if(existingFile){
     if(existingFile.type!=="file")throw Error("Expected homepage path is not a file; stopping without replacing it");
+    if(input.site!==undefined){
+      // An approved preview may only be retried against the identical HTML.
+      // Do not silently accept a different, older live website as approved.
+      if(existingFile.encoding!=="base64"||typeof existingFile.content!=="string")
+        throw Error("Existing homepage cannot be verified against the approved preview");
+      const actual=Buffer.from(existingFile.content.replace(/\\s/g,""),"base64").toString("utf8");
+      if(actual!==homepageHtml)
+        throw Error("Existing homepage differs from the approved preview; refusing to reuse it");
+    }
     journal.push({resource:"homepage",name:"public/index.html",action:"preserved"});
   }else{
     await api.github(filePath,{method:"PUT",body:{message:"Initialize website for Cloudflare Pages",branch,content:Buffer.from(homepageHtml,"utf8").toString("base64")}});
