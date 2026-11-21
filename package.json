@@ -8,6 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test pipeline/*.test.mjs onboarding/worker.test.mjs"
+    "test": "node --test pipeline/*.test.mjs onboarding/*.test.mjs",
+    "preflight:onboarding": "node onboarding/validate-config.mjs"
   }
 }
