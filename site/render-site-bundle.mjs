@@ -104,3 +104,13 @@ export function renderSiteBundle(input){
     Object.freeze({path:BUNDLE_PATHS[3],html:contactPage})
   ])};
 }
+
+// A review records the digest of ALL approved page paths and HTML, not just
+// the homepage. Any changed page, ordering or content invalidates the approval.
+export async function siteBundleApprovalSha256(input){
+  const bundle=renderSiteBundle(input);
+  const canonical=JSON.stringify(bundle.pages.map(p=>[p.path,p.html]));
+  const encoded=new TextEncoder().encode(canonical);
+  const hashed=await crypto.subtle.digest("SHA-256",encoded);
+  return Array.from(new Uint8Array(hashed),byte=>byte.toString(16).padStart(2,"0")).join("");
+}
