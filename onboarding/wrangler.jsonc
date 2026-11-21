@@ -36,7 +36,7 @@
     {
       "binding": "DB",
       "database_name": "launch-and-own-onboarding-beta",
-      "database_id": "REPLACE_WITH_INDEPENDENT_D1_UUID",
+      "database_id": "b89fb8aa-67a2-49fa-b48c-584e305b5bb2",
       "migrations_dir": "migrations"
     }
   ]
