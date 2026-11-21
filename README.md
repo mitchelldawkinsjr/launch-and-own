@@ -35,20 +35,22 @@ Node.js 22+ required:
 ```sh
 npm test
 node --check onboarding/worker.mjs
+npm run preflight:onboarding
 ```
 
 Tests use simulated provider APIs and an in-memory D1-compatible SQLite adapter. Passing tests do **not** establish real customer OAuth or deployment.
 
 ## Operator onboarding prerequisites
 
-Before enabling hosted onboarding, register a GitHub App and Cloudflare OAuth client with minimally sufficient permissions, configure an owned HTTPS callback domain, create an independent onboarding D1 database, apply `onboarding/migrations/0001_initial.sql`, and install Worker secrets using a secure provider secret store. Cloudflare's own Workers & Pages GitHub App must also be authorized for the customer's repository. Read [onboarding/README.md](onboarding/README.md).
+Before enabling hosted onboarding, register a GitHub App and Cloudflare OAuth client with minimally sufficient permissions, configure an owned HTTPS callback domain, use the independently created beta onboarding D1 database, apply `onboarding/migrations/0001_initial.sql`, and install Worker secrets using a secure provider secret store. Cloudflare's own Workers & Pages GitHub App must also be authorized for the customer's repository. Read [onboarding/README.md](onboarding/README.md).
 
-`onboarding/wrangler.jsonc` deliberately contains the invalid ID `REPLACE_WITH_INDEPENDENT_D1_UUID`; never deploy that template directly or replace it with a reference customer's database.
+The beta onboarding D1 is now provisioned and migrated under a dedicated Launch & Own database binding. This nonsecret identifier is recorded in `onboarding/wrangler.jsonc`. Real hosting remains blocked on approved OAuth app registrations, secret configuration, and a verified HTTPS onboarding hostname. Never replace this with another customer's database.
 
 ## Project status
 
 - Reusable planner and website-only provisioner: **CI-tested**.
 - GitHub/Cloudflare authorization-code and PKCE primitives: **CI-tested**.
+- Dedicated Launch & Own beta onboarding D1: **created and schema-verified**.
 - Hosted onboarding Worker source: **CI-tested, not deployed**.
 - Independent live customer login/provisioning/deployment: **not yet verified**.
 - Customer-specific forms, custom domains, and AI website generation: **future milestones**.
