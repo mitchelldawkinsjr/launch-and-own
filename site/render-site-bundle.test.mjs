@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {BUNDLE_PATHS,renderSiteBundle} from "./render-site-bundle.mjs";
+import {BUNDLE_PATHS,renderSiteBundle,siteBundleApprovalSha256} from "./render-site-bundle.mjs";
 
 const input={name:"Willow Studio",tagline:"Every moment matters",
   about:"Portrait photography for families and community events.",
@@ -70,4 +70,13 @@ test("multi-page bundles are immutable to avoid output mutation between preview 
  const bundle=renderSiteBundle(input);
  assert(Object.isFrozen(bundle.pages));
  for(const item of bundle.pages)assert(Object.isFrozen(item));
+});
+
+test("one changed page invalidates the cryptographic approval digest",async()=>{
+ const first=await siteBundleApprovalSha256(input);
+ assert.match(first,/^[a-f0-9]{64}$/);
+ assert.equal(first,await siteBundleApprovalSha256(input));
+ assert.notEqual(first,await siteBundleApprovalSha256({...input,services:[...input.services,"Wedding photography"]}));
+ assert.notEqual(first,await siteBundleApprovalSha256({...input,contactEmail:"new@willow.example"}));
+ assert.notEqual(first,await siteBundleApprovalSha256({...input,about:"New about story"}));
 });
