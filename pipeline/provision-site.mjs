@@ -5,7 +5,7 @@ import {readFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 import {planCustomer} from "./plan-customer.mjs";
 import {renderSite} from "../site/render-site.mjs";
-import {renderSiteBundle} from "../site/render-site-bundle.mjs";
+import {renderSiteBundle,siteBundleApprovalSha256} from "../site/render-site-bundle.mjs";
 
 const mark = slug => "Launch & Own managed site: "+slug;
 // Preserve safe retries for previously provisioned beta sites with the original ownership marker.
@@ -54,10 +54,17 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
   const multiPage=input.site?.layout==="multi-page";
   if(input.site?.layout!==undefined&&!multiPage)
     throw Error("Unsupported website layout");
+  if(multiPage){
+    if(typeof input.approvedBundleSha256!=="string"||
+      !/^[a-f0-9]{64}$/i.test(input.approvedBundleSha256))
+      throw Error("Approval of the complete website bundle is required");
+    const digest=await siteBundleApprovalSha256({...input.site,name:input.name});
+    if(digest!==input.approvedBundleSha256.toLowerCase())
+      throw Error("Website bundle differs from the exact approved preview");
+  }
   const assets=multiPage?
     renderSiteBundle({...input.site,name:input.name}).pages:
     [{path:"public/index.html",html:renderSite({...input.site,name:input.name})}];
-  const homepageHtml=assets[0].html;
   const api=requestFactory({githubToken,cloudflareToken,fetchFn});
   const name=checkedName("esp-"+plan.customer);
   const pages=checkedName(name+"-site");
@@ -135,7 +142,8 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
 }
 export function previewWebsite(input) {
   const plan=planCustomer(input);
-  return {...plan, pageCount:input.site?.layout==="multi-page"?4:1, executable:!plan.forms&&!input.hostname, note:plan.forms?"Forms provisioning is gated until Worker/Access setup and live acceptance are automated":input.hostname?"Custom-domain attachment is not yet automated":"Use --apply with authorized account tokens to create/reuse a private repository and connected Pages project"};
+  return {...plan, pageCount:input.site?.layout==="multi-page"?4:1,
+    requiresBundleApproval:input.site?.layout==="multi-page", executable:!plan.forms&&!input.hostname, note:plan.forms?"Forms provisioning is gated until Worker/Access setup and live acceptance are automated":input.hostname?"Custom-domain attachment is not yet automated":"Use --apply with authorized account tokens to create/reuse a private repository and connected Pages project"};
 }
 async function main(args=process.argv.slice(2)) {
   const apply=args.includes("--apply");
