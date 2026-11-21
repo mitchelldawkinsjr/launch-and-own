@@ -28,7 +28,7 @@ export function validateConfig(config){
   return {status:"configuration-valid",worker:config.name,databaseId,databaseName:db[0].database_name};
 }
 export async function checkRemoteSchema({accountId,token,databaseId,expectedDatabaseName="launch-and-own-onboarding-beta",fetchFn=fetch}){
-  if(typeof accountId!=="string"||!/^[a-f\\d]{32}$/i.test(accountId))throw Error("CLOUDFLARE_ACCOUNT_ID must be 32 hex characters");
+  if(typeof accountId!=="string"||!/^[a-f0-9]{32}$/i.test(accountId))throw Error("CLOUDFLARE_ACCOUNT_ID must be 32 hex characters");
   if(typeof token!=="string"||!token)throw Error("CLOUDFLARE_API_TOKEN is required for --remote");
   if(typeof databaseId!=="string"||!UUID.test(databaseId)||databaseId===REFERENCE_D1)throw Error("Unsafe onboarding database ID");
   if(expectedDatabaseName!=="launch-and-own-onboarding-beta")throw Error("Unexpected onboarding database name");
