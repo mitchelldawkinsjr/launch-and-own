@@ -80,7 +80,7 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
       // Do not silently accept a different, older live website as approved.
       if(existingFile.encoding!=="base64"||typeof existingFile.content!=="string")
         throw Error("Existing homepage cannot be verified against the approved preview");
-      const actual=Buffer.from(existingFile.content.replace(/\\s/g,""),"base64").toString("utf8");
+      const actual=Buffer.from(existingFile.content.replace(/\s/g,""),"base64").toString("utf8");
       if(actual!==homepageHtml)
         throw Error("Existing homepage differs from the approved preview; refusing to reuse it");
     }
