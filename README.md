@@ -42,7 +42,7 @@ Tests use simulated provider APIs and an in-memory D1-compatible SQLite adapter.
 
 ## Domain and OAuth agent handoff
 
-If another agent manages `*.mitchelldawkins.com`, give them [**the domain + OAuth handoff checklist**](docs/HANDOFF_DOMAIN_OAUTH.md). It specifies only the proposed `onboard.mitchelldawkins.com` hostname, exact GitHub/Cloudflare callback URLs, Cloudflare domain-publisher TXT verification, required permissions, owner approvals, and the nonsecret acceptance report. **Do not create a wildcard DNS record or publish OAuth visibility without owner approval.**
+If another agent manages `*.360web.cloud`, give them [**the domain + OAuth handoff checklist**](docs/HANDOFF_DOMAIN_OAUTH.md). It specifies only the proposed `onboard.360web.cloud` hostname, exact GitHub/Cloudflare callback URLs, Cloudflare domain-publisher TXT verification, required permissions, owner approvals, and the nonsecret acceptance report. **Do not create a wildcard DNS record or publish OAuth visibility without owner approval.**
 
 ## Operator onboarding prerequisites
 

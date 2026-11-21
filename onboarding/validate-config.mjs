@@ -27,8 +27,8 @@ export function validateConfig(config){
     throw Error("Potential credentials must not be stored as plain vars");
   // Only the single approved onboarding host; never wildcard routes or workers.dev exposure.
   const routes=config.routes||[];
-  if(routes.length>1||routes.some(r=>r?.pattern!=="onboard.mitchelldawkins.com"||r.custom_domain!==true))
-    throw Error("Onboarding may only use the onboard.mitchelldawkins.com Custom Domain");
+  if(routes.length>1||routes.some(r=>r?.pattern!=="onboard.360web.cloud"||r.custom_domain!==true))
+    throw Error("Onboarding may only use the onboard.360web.cloud Custom Domain");
   if(routes.length&&(config.workers_dev!==false||config.preview_urls!==false))throw Error("Disable workers.dev and preview URLs for the onboarding Worker");
   if(config.vars?.ONBOARDING_ORIGIN!==undefined&&config.vars.ONBOARDING_ORIGIN!=="https://"+routes[0]?.pattern)
     throw Error("ONBOARDING_ORIGIN must match the Custom Domain");

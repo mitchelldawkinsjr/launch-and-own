@@ -7,12 +7,12 @@
   "preview_urls": false,
   "routes": [
     {
-      "pattern": "onboard.mitchelldawkins.com",
+      "pattern": "onboard.360web.cloud",
       "custom_domain": true
     }
   ],
   "vars": {
-    "ONBOARDING_ORIGIN": "https://onboard.mitchelldawkins.com"
+    "ONBOARDING_ORIGIN": "https://onboard.360web.cloud"
   },
   "compatibility_flags": [
     "nodejs_compat"
