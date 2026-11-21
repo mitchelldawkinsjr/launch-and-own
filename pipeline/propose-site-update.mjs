@@ -16,8 +16,8 @@ async function digest(text){
   return Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");
 }
 function details(input){
+  if(input?.forms||input?.hostname)throw Error("Site updates support static template content only; forms and domains cannot be modified");
   const plan=planCustomer(input);
-  if(plan.forms||input.hostname)throw Error("Site updates support static template content only; forms and domains cannot be modified");
   if(!input.site||typeof input.site!=="object"||Array.isArray(input.site))
     throw Error("Proposed website content is required");
   const html=renderSite({...input.site,name:input.name});
