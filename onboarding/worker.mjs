@@ -360,7 +360,7 @@ async function getLaunch(env,current,id){
   const time=now();
   const item=await env.DB.prepare(`SELECT p.*, COALESCE(j.approved_html,p.preview_html) AS approved_html,
       j.approval_digest AS saved_digest,
-      j.status AS job_status, j.expected_commit_sha, j.site_slug, j.error_code AS job_error,
+      j.status AS job_status, j.expected_commit_sha, j.error_code AS job_error,
       j.attempts, j.next_attempt_at,
       a.session_hash AS authorizing_session, a.authorization_epoch AS approved_epoch
     FROM onboarding_launches p
@@ -394,7 +394,7 @@ async function review(env,current,id){
   if(!item)return fail('This launch request is not accessible.',404);
   const {slug,digest}=await itemSnapshot(item,current);
   const website='https://esp-'+slug+'-site.pages.dev';
-  const details=`<p><strong>Name:</strong> ${escape(item.customer_name)}</p><p><strong>GitHub:</strong> ${escape(item.github_login)}</p><p><strong>Cloudflare:</strong> ${escape(item.cloudflare_account_id)}</p><p><strong>Private repository:</strong> ${escape('esp-'+slug)}</p><p><strong>Public Pages URL:</strong> ${escape(website)}</p><p>Approval allows Launch &amp; Own to create the private repository, publish the reviewed website, and retry while this session and both provider grants stay valid.</p><p>Cloudflare's Workers &amp; Pages GitHub App needs access to the repository. <a href="https://github.com/settings/installations">Review GitHub App access</a>.</p>`;
+  const details=`<p><strong>Name:</strong> ${escape(item.customer_name)}</p><p><strong>GitHub:</strong> ${escape(item.github_login)}</p><p><strong>Cloudflare:</strong> ${escape(item.cloudflare_account_id)}</p><p><strong>Private repository:</strong> ${escape('esp-'+slug)}</p><p><strong>Public Pages URL:</strong> ${escape(website)}</p><p>Approval allows Launch &amp; Own to create the private repository, publish the reviewed website, and retry while this session and both provider grants stay valid. Changes to the repository's production branch can trigger future Pages deployments.</p><p>Cloudflare's Workers &amp; Pages GitHub App needs access to the repository. <a href="https://github.com/settings/installations">Review GitHub App access</a>.</p>`;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open your website preview</a></p>';
   let status=item.status;
   let controls='';
@@ -418,7 +418,11 @@ async function review(env,current,id){
       output='<p>Launch is paused. <a href="/history">Open launch history</a> to review and reapprove it when available.</p>';
     }
     if(item.job_error)output+=`<p>Last result: <code>${escape(item.job_error)}</code></p>`;
-    if(status==='live')output=`<p class="pill">Public website deployment verified</p><p><a href="${escape(website)}">${escape(website)}</a></p>`;
+    if(item.attempts>0&&['queued','pending_deployment'].includes(status)&&item.next_attempt_at>now()){
+      const timestamp=new Date(item.next_attempt_at*1000).toISOString();
+      output+=`<p>Attempts used: ${escape(item.attempts)}. Next eligible retry <time datetime="${timestamp}">${timestamp}</time>.</p>`;
+    }
+    if(status==='live')output=`<p class="pill">Public website deployment verified</p><p><a href="${escape(website)}">${escape(website)}</a></p><p>Verified revision <code>${escape(item.expected_commit_sha)}</code></p>`;
   }
   return view('Review website launch',`${details}<p class="pill">Status: ${escape(status)}</p>${previewLink}${output}${controls}<p><a href="/">Back to setup</a></p>`);
 }

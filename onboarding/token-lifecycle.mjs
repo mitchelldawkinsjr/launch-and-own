@@ -53,8 +53,8 @@ async function refreshWithProvider({provider,refreshToken,clientId,clientSecret,
   });
   if(!res.ok)throw Error("Account authorization renewal failed; reconnect the provider");
   const grant=await res.json();
-  if(grant?.error||typeof grant?.refresh_token!=="string"||!grant.refresh_token)
-    throw Error("Provider did not rotate the refresh credential; reconnect the provider");
+  if(grant?.error||typeof grant?.refresh_token!=="string"||!grant.refresh_token||!safeInt(grant.expires_in))
+    throw Error("Provider did not return a new expiring grant; reconnect the provider");
   grantLifetime(grant,Math.floor(Date.now()/1000));
   return grant;
 }

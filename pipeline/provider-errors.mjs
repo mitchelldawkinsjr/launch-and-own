@@ -9,7 +9,7 @@ export class ProviderRequestError extends Error {
       : Math.ceil((Date.parse(retryAfter) - Date.now()) / 1000);
     this.retryAfter = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
     const rateLimited = this.status === 429 || (this.status === 403 &&
-      (retryAfter || response.headers.get('x-ratelimit-remaining') === '0'));
+      (Boolean(retryAfter) || response.headers.get('x-ratelimit-remaining') === '0'));
     this.retryable = !response || rateLimited || this.status === 408 || this.status >= 500 ||
       (conflictCanRetry && (this.status === 409 || this.status === 422));
     this.authorizationLost = this.status === 401 || (this.status === 403 && !rateLimited);

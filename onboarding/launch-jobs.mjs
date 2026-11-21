@@ -17,7 +17,7 @@ const idPattern = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
 export const isLaunchId = id => typeof id === 'string' && idPattern.test(id);
 const ownerBindings = (session, time) => [session.github_user_id, session.cloudflare_account_id, time];
 
-export function jobInput(job) {
+function jobInput(job) {
   const plan = JSON.parse(job.plan_json);
   const input = { name: job.customer_name, githubOwner: job.github_login,
     accountId: job.cloudflare_account_id, forms: false };
@@ -30,7 +30,7 @@ export function jobInput(job) {
 }
 
 export async function approvalSnapshot(item, githubUserId) {
-  const { plan } = jobInput(item);
+  const { input, plan } = jobInput(item);
   const id = item.job_id ?? item.id;
   const html = item.approved_html ?? renderSite({ ...plan.site, name: item.customer_name });
   if (!isLaunchId(id) || !Number.isSafeInteger(githubUserId) || githubUserId < 1 ||
@@ -39,7 +39,7 @@ export async function approvalSnapshot(item, githubUserId) {
   }
   const digest = await sha256(JSON.stringify([1, id, item.legacy_receipt_id ?? null, githubUserId,
     item.github_login, item.cloudflare_account_id, item.customer_name, item.plan_json, html]));
-  return { id, slug: plan.customer, html, digest };
+  return { id, slug: plan.customer, html, digest, input };
 }
 
 const HAS_REVIEW = `EXISTS (
@@ -103,7 +103,7 @@ const deletable = `(${UNCLAIMED} AND (NOT (${RUNNABLE}) OR NOT ${HAS_APPROVAL}))
 
 export async function listOwnedJobs(env, session, time) {
   const result = await env.DB.prepare(`SELECT j.id, j.customer_name, j.site_slug, j.updated_at,
-      j.error_code, j.attempts, j.next_attempt_at, ${statusColumn},
+      j.error_code, ${statusColumn},
       (${resumable}) AS can_restore, ${deletable} AS can_delete
     FROM onboarding_launch_jobs j WHERE ${OWNED} ORDER BY j.updated_at DESC LIMIT 20`)
     .bind(time, time, time, time, time, ...ownerBindings(session, time)).all();

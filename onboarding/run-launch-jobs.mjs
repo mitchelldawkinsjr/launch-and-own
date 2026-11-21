@@ -3,7 +3,7 @@ import { verifyCloudflareAccount } from '../pipeline/cloudflare-oauth.mjs';
 import { applyWebsite } from '../pipeline/provision-site.mjs';
 import { ProviderRequestError } from '../pipeline/provider-errors.mjs';
 import { verifyWebsite } from '../pipeline/verify-site.mjs';
-import { activeJobSession, approvalSnapshot, HAS_APPROVAL, jobInput, RUNNABLE, UNCLAIMED } from './launch-jobs.mjs';
+import { activeJobSession, approvalSnapshot, HAS_APPROVAL, RUNNABLE, UNCLAIMED } from './launch-jobs.mjs';
 import { AuthorizationRefreshBusy, getFreshAccessToken } from './token-lifecycle.mjs';
 
 const clock = () => Math.floor(Date.now() / 1000);
@@ -129,15 +129,15 @@ async function verifiedConnections(env, job, input) {
 }
 
 async function performClaim(env, job) {
-  let snapshot, input;
+  let snapshot;
   try {
     snapshot = await approvalSnapshot(job, job.github_user_id);
-    ({ input } = jobInput(job));
   } catch {
     return await finishAttempt(env, job, 'approval_snapshot_mismatch');
   }
   if (snapshot.digest !== job.approval_digest || snapshot.slug !== job.site_slug)
     return await finishAttempt(env, job, 'approval_snapshot_mismatch');
+  const { input } = snapshot;
   const connection = await verifiedConnections(env, job, input);
   const checkpoint = job.expected_commit_sha ? { repositoryId: job.repository_id,
     branch: job.production_branch, headCommitSha: job.expected_commit_sha, projectId: job.pages_project_id } : null;

@@ -233,6 +233,21 @@ test('the matching canonical SHA still requires production and the exact approve
  }finally{globalThis.fetch=originalFetch}
 });
 
+test('a replacement Pages project is rejected even if the source and deployed SHA match',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {cookie,csrf}=await connectTenant(h);
+  const id=await newPreview(h,{cookie,csrf});
+  await approvePreview(h,cookie,csrf,id);
+  assert.equal(jobRow(h).pages_project_id,'pages-stable-101');
+  h.resourceState.pages.id='different-project';
+  await worker.scheduled({},h.env);
+  assert.equal(jobRow(h).status,'failed');
+  assert.equal(jobRow(h).error_code,'launch_target_conflict');
+  assert(!h.calls.some(call=>call.url.endsWith('.pages.dev/')));
+ }finally{globalThis.fetch=originalFetch}
+});
+
 test('the owner can delete completed history without mutating provider resources',async()=>{
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
