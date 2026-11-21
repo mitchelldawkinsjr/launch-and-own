@@ -23,3 +23,14 @@ Customer login and launch approval are separate actions. Never paste provider to
 `POST /logout` is CSRF-protected. It removes the encrypted local session **before** sending best-effort revocation calls to GitHub and Cloudflare. GitHub uses its OAuth grant revocation API; Cloudflare uses the OAuth revocation endpoint. A provider outage cannot leave the customer signed into the onboarding Worker. The UI distinguishes confirmed revocation from locally signed-out but **unconfirmed remote revocation** and advises the user to review provider-connected applications. App installation permissions are distinct from user OAuth grants and may still require separate removal.
 
 Provider tokens and errors are never echoed to the browser or logged. See `onboarding/revoke-connections.test.mjs` and `onboarding/worker.test.mjs` for success, outage and cross-session regressions.
+
+
+## Expiring OAuth tokens and refresh-token rotation
+
+`onboarding/migrations/0002_token_rotation.sql` adds **encrypted refresh credentials** and independent expiry/refresh leases for GitHub and Cloudflare. Apply this migration **once** to the dedicated Launch & Own beta D1 before deploying any Worker code from this change. Do not apply it to customer contact-form databases.
+
+The Worker now preserves `refresh_token` / `expires_in` returned from GitHub and Cloudflare authorization, encrypts them using per-session contextual AES-GCM, and renews expiring access tokens before provider API actions. It uses an atomic, short-lived D1 lease to avoid concurrent use of a one-time rotating token; renewal updates both encrypted access and refresh tokens together. An expired or missing refresh credential results in an explicit *reconnect* requirement, not a silent bypass or reuse of expired credentials. Provider errors remain server-side only.
+
+**Provider registration detail:** GitHub App user tokens should be configured to expire (GitHub supports `offline_access` and rotating refresh tokens). The Cloudflare OAuth client must support `refresh_token` as an allowed grant type to return refresh credentials. Without an available refresh credential, the user must reauthorize when the access token expires. The `onboarding_sessions` cookie still expires after one hour; refresh handling does not create indefinite login sessions or unattended authorization.
+
+**Before deployment:** verify `0002` migration on the product-owned D1, `npm test`, the exact provider scopes/grants, and the real callback/refresh/revocation flows with a consenting beta account. This is CI-tested against simulated endpoints, **not** live OAuth acceptance.
