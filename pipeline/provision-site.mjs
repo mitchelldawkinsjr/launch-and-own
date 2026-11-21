@@ -4,17 +4,11 @@
 import {readFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 import {planCustomer} from "./plan-customer.mjs";
+import {renderSite} from "../site/render-site.mjs";
 
 const mark = slug => "Launch & Own managed site: "+slug;
 // Preserve safe retries for previously provisioned beta sites with the original ownership marker.
 const legacyMark = slug => "Elite Site Pipeline managed site: "+slug;
-const safeHtml = s => String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const homepage = name => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="${safeHtml(name)} website"><title>${safeHtml(name)}</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:18px/1.6 system-ui,sans-serif;color:#17233d;background:#f7f9fc}main{max-width:640px;margin:24px;padding:48px;border:1px solid #dce5ee;border-radius:20px;background:white}h1{font-size:clamp(2rem,5vw,3.4rem);line-height:1.15}p{color:#52627a}</style></head>
-<body><main><h1>${safeHtml(name)}</h1><p>Welcome! This site is ready for your content.</p></main></body></html>
-`;
 function checkedName(name) {
   if(!/^[a-z0-9][a-z0-9-]*$/.test(name))throw Error("Unsafe generated resource name");
   return name;
@@ -52,6 +46,11 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
   const plan=planCustomer(input);
   if(plan.forms)throw Error("Form provisioning is not yet automated; no resources were changed");
   if(input.hostname)throw Error("Custom domain attachment is not yet automated; no resources were changed");
+  if(input.site!==undefined&&(!input.site||typeof input.site!=="object"||Array.isArray(input.site)))
+    throw Error("Website content must be an object");
+  // Render and validate before any provider mutation. The generated HTML is
+  // the identical artifact the customer previewed and approved.
+  const homepageHtml=renderSite({...input.site,name:input.name});
   const api=requestFactory({githubToken,cloudflareToken,fetchFn});
   const name=checkedName("esp-"+plan.customer);
   const pages=checkedName(name+"-site");
@@ -78,7 +77,7 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
     if(existingFile.type!=="file")throw Error("Expected homepage path is not a file; stopping without replacing it");
     journal.push({resource:"homepage",name:"public/index.html",action:"preserved"});
   }else{
-    await api.github(filePath,{method:"PUT",body:{message:"Initialize website for Cloudflare Pages",branch,content:Buffer.from(homepage(input.name),"utf8").toString("base64")}});
+    await api.github(filePath,{method:"PUT",body:{message:"Initialize website for Cloudflare Pages",branch,content:Buffer.from(homepageHtml,"utf8").toString("base64")}});
     journal.push({resource:"homepage",name:"public/index.html",action:"created"});
   }
   // Tie launch acceptance to an exact GitHub revision, never just a live Pages URL.
