@@ -27,19 +27,27 @@ export function validateConfig(config){
     throw Error("Potential credentials must not be stored as plain vars");
   return {status:"configuration-valid",worker:config.name,databaseId,databaseName:db[0].database_name};
 }
-export async function checkRemoteSchema({accountId,token,databaseId,fetchFn=fetch}){
-  if(typeof accountId!=="string"||!/^[a-f\d]{32}$/i.test(accountId))throw Error("CLOUDFLARE_ACCOUNT_ID must be 32 hex characters");
+export async function checkRemoteSchema({accountId,token,databaseId,expectedDatabaseName="launch-and-own-onboarding-beta",fetchFn=fetch}){
+  if(typeof accountId!=="string"||!/^[a-f\\d]{32}$/i.test(accountId))throw Error("CLOUDFLARE_ACCOUNT_ID must be 32 hex characters");
   if(typeof token!=="string"||!token)throw Error("CLOUDFLARE_API_TOKEN is required for --remote");
   if(typeof databaseId!=="string"||!UUID.test(databaseId)||databaseId===REFERENCE_D1)throw Error("Unsafe onboarding database ID");
-  const url="https://api.cloudflare.com/client/v4/accounts/"+accountId+"/d1/database/"+databaseId+"/query";
-  const r=await fetchFn(url,{method:"POST",headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:JSON.stringify({sql:"SELECT name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name"}),redirect:"error"});
+  if(expectedDatabaseName!=="launch-and-own-onboarding-beta")throw Error("Unexpected onboarding database name");
+  const url="https://api.cloudflare.com/client/v4/accounts/"+accountId+"/d1/database/"+databaseId;
+  const headers={authorization:"Bearer "+token,accept:"application/json"};
+  // Fail closed if an unrelated D1 database exists at the configured ID.
+  const info=await fetchFn(url,{method:"GET",headers,redirect:"error"});
+  if(!info.ok)throw Error("Cannot verify onboarding D1 identity (HTTP "+info.status+")");
+  const metadata=await info.json();
+  if(metadata.success!==true||metadata.result?.uuid!==databaseId||metadata.result?.name!==expectedDatabaseName)
+    throw Error("Onboarding D1 identity mismatch; refusing to inspect an unrelated database");
+  const r=await fetchFn(url+"/query",{method:"POST",headers:{...headers,"content-type":"application/json"},body:JSON.stringify({sql:"SELECT name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name"}),redirect:"error"});
   if(!r.ok)throw Error("D1 read-only schema check denied (HTTP "+r.status+")");
   const body=await r.json();
   if(body.success!==true||!Array.isArray(body.result?.[0]?.results))throw Error("Cloudflare did not return schema information");
   const found=new Set(body.result[0].results.map(x=>x.name));
   const missing=[...TABLES,...INDEXES].filter(x=>!found.has(x));
   if(missing.length)throw Error("D1 schema incomplete: "+missing.join(", "));
-  return {status:"schema-ready",databaseId,tables:TABLES.length,indexes:INDEXES.length};
+  return {status:"schema-ready",databaseId,databaseName:expectedDatabaseName,tables:TABLES.length,indexes:INDEXES.length};
 }
 async function main(){
   const cfg=JSON.parse(readFileSync(DEFAULT_PATH,"utf8"));
