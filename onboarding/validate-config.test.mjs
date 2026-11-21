@@ -88,7 +88,7 @@ test("only the single onboard Custom Domain is allowed, with workers.dev disable
   assert.throws(()=>validateConfig(dev),/workers.dev/);
   const origin=copy();origin.vars.ONBOARDING_ORIGIN="https://www.360web.cloud";
   assert.throws(()=>validateConfig(origin),/ONBOARDING_ORIGIN/);
-
+});
 test("missing durable receipt migration stops onboarding readiness",async()=>{
  const h=mock({schema:schemaNames.filter(x=>!x.includes("receipts"))});
  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/schema incomplete/);
