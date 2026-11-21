@@ -4,6 +4,7 @@ import {planCustomer} from '../pipeline/plan-customer.mjs';
 import {applyWebsite} from '../pipeline/provision-site.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {randomToken,sha256,seal,unseal} from './crypto.mjs';
+import {revokeConnectedAccounts} from './revoke-connections.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -147,8 +148,9 @@ async function accountOptions(env,current){
   if(!data.success||!Array.isArray(data.result))throw Error('Cloudflare did not return a list of accounts');
   return data.result.filter(a=>typeof a.id==='string'&&/^[a-f\d]{32}$/i.test(a.id)).map(a=>({id:a.id,name:String(a.name||a.id)}));
 }
-async function home(env,current){
-  if(!current)return view('Launch your website',`<p><strong>Describe it. Launch it. Own it.</strong></p><p>Build and maintain your own website using your GitHub and Cloudflare accounts.</p><p>Connect GitHub to get started. You approve each launch before any resources are created.</p><p><a href="/connect/github">Connect GitHub</a></p><small>We do not ask for API tokens or passwords.</small>`);
+async function home(env,current,notice){
+  const disconnectNotice=notice==='unconfirmed'?'<p role="alert">Your local session was removed, but one or more provider authorizations could not be revoked automatically. Review connected applications in your GitHub and Cloudflare account settings.</p>':notice==='complete'?'<p role="status">You are signed out and provider revocation was confirmed for the connected accounts.</p>':'';
+  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>Build and maintain your own website using your GitHub and Cloudflare accounts.</p><p>Connect GitHub to get started. You approve each launch before any resources are created.</p><p><a href="/connect/github">Connect GitHub</a></p><small>We do not ask for API tokens or passwords.</small>`);
   const connected=!!current.cloudflare_token_ct;
   let accountHtml='';
   if(connected&&!current.cloudflare_account_id){
@@ -258,8 +260,27 @@ async function verify(request,env,current){
 }
 async function logout(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
+  let githubToken=null,cloudflareToken=null,unsealFailed=false;
+  try{
+    githubToken=await unseal(env.TOKEN_ENCRYPTION_KEY,current.github_token_ct,'github:'+current.hash);
+    if(current.cloudflare_token_ct)cloudflareToken=await unseal(env.TOKEN_ENCRYPTION_KEY,current.cloudflare_token_ct,'cloudflare:'+current.hash);
+  }catch{
+    unsealFailed=true;
+  }
+  // Delete the local session BEFORE attempting any external revocation.
+  // A provider outage must not leave the user signed into this Worker.
   await env.DB.prepare('DELETE FROM onboarding_sessions WHERE id_hash=?').bind(current.hash).run();
-  const result=redirect('/');result.headers.append('set-cookie',cookie(COOKIE_SESSION,'',0));
+  let fullyRevoked=!unsealFailed;
+  if(!unsealFailed){
+    const results=await revokeConnectedAccounts({
+      githubToken,cloudflareToken,ghClientId:env.GH_CLIENT_ID,ghClientSecret:env.GH_CLIENT_SECRET,
+      cfClientId:env.CF_CLIENT_ID,cfClientSecret:env.CF_CLIENT_SECRET
+    });
+    fullyRevoked=results.fullyRevoked;
+  }
+  const result=redirect(fullyRevoked?'/?disconnect=complete':'/?disconnect=unconfirmed');
+  result.headers.append('set-cookie',cookie(COOKIE_SESSION,'',0));
+  result.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
   return result;
 }
 export default {
@@ -271,7 +292,7 @@ export default {
       if(url.origin!==baseUrl(env))return fail('This service requires its registered HTTPS origin.',400);
       const current=await session(request,env);
       if(request.method==='GET'){
-        if(url.pathname==='/')return await home(env,current);
+        if(url.pathname==='/')return await home(env,current,url.searchParams.get('disconnect'));
         if(url.pathname==='/connect/github')return await gitHubStart(request,env);
         if(url.pathname==='/oauth/github/callback')return await gitHubCallback(request,env);
         if(url.pathname==='/connect/cloudflare')return await cloudflareStart(request,env,current);

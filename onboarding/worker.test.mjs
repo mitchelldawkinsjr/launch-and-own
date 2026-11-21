@@ -13,11 +13,16 @@ function harness(){
  const DB={prepare(sql){return {bind(...args){return {first:async()=>sqlite.prepare(sql).get(...args)||null,run:async()=>sqlite.prepare(sql).run(...args),all:async()=>({results:sqlite.prepare(sql).all(...args)})}}}},batch:async(stmts)=>Promise.all(stmts.map(s=>s.run()))};
  const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
  const calls=[];
- const resourceState={repo:null,homepage:false,pages:null,failPagesOnce:false};
+ const resourceState={repo:null,homepage:false,pages:null,failPagesOnce:false,failGitHubRevokeOnce:false};
  const fetchFn=async(url,opts={})=>{
   calls.push({url,method:opts.method||'GET'});
   if(url==='https://github.com/login/oauth/access_token')return Response.json({access_token:'ghu_secret_example',token_type:'bearer'});
   if(url==='https://api.github.com/user')return Response.json({login:'tester',id:42});
+  if(url==='https://api.github.com/applications/Iv1.example/grant'){
+    if(resourceState.failGitHubRevokeOnce){resourceState.failGitHubRevokeOnce=false;return new Response(null,{status:503})}
+    return new Response(null,{status:204});
+  }
+  if(url==='https://dash.cloudflare.com/oauth2/revoke')return new Response(null,{status:200});
   if(url==='https://dash.cloudflare.com/oauth2/token')return Response.json({access_token:'cf_secret_example',token_type:'bearer'});
   if(url.includes('/accounts?page=1'))return Response.json({success:true,result:[{id:accountId,name:'Demo Account'}]});
   if(url.endsWith('/accounts/'+accountId))return Response.json({success:true,result:{id:accountId,name:'Demo Account'}});
@@ -257,4 +262,38 @@ test('product onboarding shows Launch & Own identity and customer ownership tagl
  const html=await result.text();
  assert.match(html,/Launch & Own/);
  assert.match(html,/Describe it\. Launch it\. Own it\./);
+});
+
+
+test('disconnect revokes GitHub grant and Cloudflare OAuth token and removes the local session',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  const result=await h.request('/logout',{method:'POST',cookie:sessionCookie,body:form({csrf})});
+  assert.equal(result.status,303);
+  assert.equal(result.headers.get('location'),'/?disconnect=complete');
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS count FROM onboarding_sessions').get().count,0);
+  assert(h.calls.some(c=>c.url==='https://api.github.com/applications/Iv1.example/grant'&&c.method==='DELETE'));
+  assert(h.calls.some(c=>c.url==='https://dash.cloudflare.com/oauth2/revoke'&&c.method==='POST'));
+  const notice=await (await h.request('/?disconnect=complete')).text();
+  assert.match(notice,/provider revocation was confirmed/);
+  const old=await (await h.request('/',{cookie:sessionCookie})).text();
+  assert.match(old,/Connect GitHub/);
+ }finally{globalThis.fetch=originalFetch}
+});
+test('a remote revocation failure still signs out locally and displays an honest warning',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  h.resourceState.failGitHubRevokeOnce=true;
+  const result=await h.request('/logout',{method:'POST',cookie:sessionCookie,body:form({csrf})});
+  assert.equal(result.status,303);
+  assert.equal(result.headers.get('location'),'/?disconnect=unconfirmed');
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS count FROM onboarding_sessions').get().count,0);
+  const msg=await (await h.request('/?disconnect=unconfirmed')).text();
+  assert.match(msg,/could not be revoked automatically/);
+  assert(!msg.includes('ghu_secret_example'));
+ }finally{globalThis.fetch=originalFetch}
 });
