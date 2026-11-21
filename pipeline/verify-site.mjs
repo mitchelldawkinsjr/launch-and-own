@@ -3,29 +3,57 @@
 import {readFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 import {planCustomer} from "./plan-customer.mjs";
+import {matchesApprovedPagesProject} from "./approved-pages-project.mjs";
+import {ProviderRequestError} from "./provider-errors.mjs";
 
-export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fetchFn=fetch}={}) {
+async function servesApprovedHtml(response, html) {
+  const expected = new TextEncoder().encode(html);
+  const reader = response.body?.getReader();
+  if (!reader) return false;
+  let offset = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return offset === expected.length;
+      if (value.length > expected.length - offset ||
+          value.some((byte, index) => byte !== expected[offset + index])) return false;
+      offset += value.length;
+    }
+  } finally {
+    await reader.cancel();
+  }
+}
+
+export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fetchFn=fetch,approved}={}) {
   const plan=planCustomer(input);
   if(plan.forms||input.hostname)throw Error("This verifier currently supports only website-only pages.dev projects");
   if(!cloudflareToken)throw Error("CLOUDFLARE_API_TOKEN is required for deployment verification");
-  if(expectedCommitSha!==undefined&&(typeof expectedCommitSha!=="string"||!/^[a-f0-9]{40}$/i.test(expectedCommitSha)))
+  if((approved||expectedCommitSha!==undefined)&&(typeof expectedCommitSha!=="string"||!/^[a-f0-9]{40}$/i.test(expectedCommitSha)))
     throw Error("Expected commit SHA must be a full 40-character GitHub commit hash");
   const projectName="esp-"+plan.customer+"-site";
   const website="https://"+projectName+".pages.dev";
   const apiUrl="https://api.cloudflare.com/client/v4/accounts/"+encodeURIComponent(plan.accountId)+"/pages/projects/"+encodeURIComponent(projectName);
-  const response=await fetchFn(apiUrl,{headers:{authorization:"Bearer "+cloudflareToken,accept:"application/json"},signal:AbortSignal.timeout(15000)});
-  if(!response.ok)throw Error("Could not read Pages project (HTTP "+response.status+")");
+  const response=await fetchFn(apiUrl,{headers:{authorization:"Bearer "+cloudflareToken,accept:"application/json"},redirect:"error",signal:AbortSignal.timeout(15000)});
+  if(!response.ok){
+    if(approved)throw new ProviderRequestError(response);
+    throw Error("Could not read Pages project (HTTP "+response.status+")");
+  }
   const data=await response.json();
   if(!data.success||!data.result)throw Error("Cloudflare did not return a Pages project");
   const project=data.result;
   const source=project.source;
   if(project.name!==projectName||source?.type!=="github"||source.config?.owner?.toLowerCase()!==plan.githubOwner.toLowerCase()||source.config?.repo_name!=="esp-"+plan.customer)
     throw Error("Project ownership or GitHub source mismatch; refusing to verify an unrelated deployment");
+  if(approved&&!matchesApprovedPagesProject(project,{name:projectName,owner:plan.githubOwner,
+      repositoryName:"esp-"+plan.customer,repositoryId:approved.repositoryId,branch:approved.branch,
+      projectId:approved.projectId}))
+    throw Error("Pages source or build settings differ from the approved project");
   const canonical=project.canonical_deployment;
   const latest=project.latest_deployment;
   const stage=canonical?.latest_stage;
   const latestStage=latest?.latest_stage;
-  if(stage?.name!=="deploy"||stage?.status!=="success")
+  if(stage?.name!=="deploy"||stage?.status!=="success"||
+      (approved&&canonical?.environment!=="production"))
     return {status:"pending-deployment",website,project:projectName,latestStage:latestStage?.name||null,latestStatus:latestStage?.status||null};
   // A previously live deployment does not prove the newly approved revision is live.
   // Cloudflare exposes the GitHub revision on the canonical production deployment.
@@ -38,8 +66,10 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fet
   const contentType=page.headers.get("content-type")||"";
   if(!/text\/html\b/i.test(contentType))
     return {status:"unexpected-public-content",website,project:projectName,contentType};
-  const body=await page.text();
-  if(!/<html\b/i.test(body))
+  const contentMatches=approved
+    ?await servesApprovedHtml(page,approved.html)
+    :/<html\b/i.test(await page.text());
+  if(!contentMatches)
     return {status:"unexpected-public-content",website,project:projectName,contentType};
   return {status:"live",website,project:projectName,deploymentId:canonical.id,
     latestPending:latest?.id!==canonical.id&&latestStage?.status!=="success"};

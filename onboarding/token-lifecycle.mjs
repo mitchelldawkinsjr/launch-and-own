@@ -8,6 +8,7 @@ const PROVIDERS=Object.freeze({
 });
 const MIN_REFRESH_WINDOW=90; // seconds before access-token expiry
 const REFRESH_LEASE=30; // seconds; outbound refresh has a shorter deadline
+export class AuthorizationRefreshBusy extends Error {}
 const safeInt=(x)=>Number.isSafeInteger(x)&&x>0&&x<=366*24*3600;
 const right=(name)=>{
   if(!Object.hasOwn(PROVIDERS,name))throw Error("Unknown OAuth provider");
@@ -77,9 +78,9 @@ export async function getFreshAccessToken({
   // Conditional D1 write prevents concurrent one-time refresh-token use.
   const lockCol=prefix+"_refresh_locked_until",refreshCol=prefix+"_refresh_token_ct";
   const acquired=await env.DB.prepare(
-    "UPDATE onboarding_sessions SET "+lockCol+"=? WHERE id_hash=? AND expires_at>? AND "+refreshCol+"=? AND ("+lockCol+" IS NULL OR "+lockCol+"<?) RETURNING id_hash"
+    "UPDATE onboarding_sessions SET "+lockCol+"=? WHERE id_hash=? AND expires_at>? AND "+refreshCol+"=? AND ("+lockCol+" IS NULL OR "+lockCol+"<=?) RETURNING id_hash"
   ).bind(until,session.hash,clock(),refreshCt,clock()).first();
-  if(!acquired)throw Error("Authorization renewal is already running; retry the request");
+  if(!acquired)throw new AuthorizationRefreshBusy("Authorization renewal is already running; retry the request");
   const clientId=provider==="github"?env.GH_CLIENT_ID:env.CF_CLIENT_ID;
   const clientSecret=provider==="github"?env.GH_CLIENT_SECRET:env.CF_CLIENT_SECRET;
   try{
@@ -91,9 +92,9 @@ export async function getFreshAccessToken({
     const updated=await env.DB.prepare(
       "UPDATE onboarding_sessions SET "+prefix+"_token_ct=?, "+refreshCol+"=?, "+prefix+
       "_token_expires_at=?, "+prefix+"_refresh_expires_at=?, "+lockCol+
-      "=NULL WHERE id_hash=? AND "+refreshCol+"=? AND "+lockCol+"=? RETURNING id_hash"
+      "=NULL WHERE id_hash=? AND "+refreshCol+"=? AND "+lockCol+"=? AND expires_at>? RETURNING id_hash"
     ).bind(rotated.accessCipher,rotated.refreshCipher,rotated.accessExpiresAt,
-      rotated.refreshExpiresAt,session.hash,refreshCt,until).first();
+      rotated.refreshExpiresAt,session.hash,refreshCt,until,clock()).first();
     if(!updated)throw Error("Authorization changed during renewal; retry or reconnect");
     return grant.access_token;
   }catch{
