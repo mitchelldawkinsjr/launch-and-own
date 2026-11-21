@@ -5,6 +5,7 @@ import {readFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 import {planCustomer} from "./plan-customer.mjs";
 import {renderSite} from "../site/render-site.mjs";
+import {renderSiteBundle,siteBundleApprovalSha256} from "../site/render-site-bundle.mjs";
 
 const mark = slug => "Launch & Own managed site: "+slug;
 // Preserve safe retries for previously provisioned beta sites with the original ownership marker.
@@ -50,7 +51,20 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
     throw Error("Website content must be an object");
   // Render and validate before any provider mutation. The generated HTML is
   // the identical artifact the customer previewed and approved.
-  const homepageHtml=renderSite({...input.site,name:input.name});
+  const multiPage=input.site?.layout==="multi-page";
+  if(input.site?.layout!==undefined&&!multiPage)
+    throw Error("Unsupported website layout");
+  if(multiPage){
+    if(typeof input.approvedBundleSha256!=="string"||
+      !/^[a-f0-9]{64}$/i.test(input.approvedBundleSha256))
+      throw Error("Approval of the complete website bundle is required");
+    const digest=await siteBundleApprovalSha256({...input.site,name:input.name});
+    if(digest!==input.approvedBundleSha256.toLowerCase())
+      throw Error("Website bundle differs from the exact approved preview");
+  }
+  const assets=multiPage?
+    renderSiteBundle({...input.site,name:input.name}).pages:
+    [{path:"public/index.html",html:renderSite({...input.site,name:input.name})}];
   const api=requestFactory({githubToken,cloudflareToken,fetchFn});
   const name=checkedName("esp-"+plan.customer);
   const pages=checkedName(name+"-site");
@@ -71,23 +85,36 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
   }
   const branch=repository.default_branch;
   if(typeof branch!=="string"||!/^[a-zA-Z0-9._/-]+$/.test(branch))throw Error("GitHub repository has no valid default branch; repository may require initialization");
-  const filePath=repoPath+"/contents/public/index.html";
-  const existingFile=await api.github(filePath,{allow404:true});
-  if(existingFile){
-    if(existingFile.type!=="file")throw Error("Expected homepage path is not a file; stopping without replacing it");
-    if(input.site!==undefined){
-      // An approved preview may only be retried against the identical HTML.
-      // Do not silently accept a different, older live website as approved.
-      if(existingFile.encoding!=="base64"||typeof existingFile.content!=="string")
-        throw Error("Existing homepage cannot be verified against the approved preview");
-      const actual=Buffer.from(existingFile.content.replace(/\s/g,""),"base64").toString("utf8");
-      if(actual!==homepageHtml)
-        throw Error("Existing homepage differs from the approved preview; refusing to reuse it");
+  // Preflight EVERY page before writing ANY page: partial retries may safely
+  // resume, but a collision in a later page must never cause earlier writes.
+  const pageFiles=[];
+  for(const asset of assets){
+    const path=repoPath+"/contents/"+asset.path;
+    const existingFile=await api.github(path,{allow404:true});
+    if(existingFile){
+      if(existingFile.type!=="file")
+        throw Error("Expected website page is not a file; refusing to overwrite it");
+      if(input.site!==undefined){
+        if(existingFile.encoding!=="base64"||typeof existingFile.content!=="string")
+          throw Error("Existing website page cannot be verified against approved content");
+        const existingHtml=Buffer.from(existingFile.content.replace(/\s/g,""),"base64").toString("utf8");
+        if(existingHtml!==asset.html)
+          throw Error("Existing website page differs from the approved preview; refusing to reuse it");
+      }
     }
-    journal.push({resource:"homepage",name:"public/index.html",action:"preserved"});
-  }else{
-    await api.github(filePath,{method:"PUT",body:{message:"Initialize website for Cloudflare Pages",branch,content:Buffer.from(homepageHtml,"utf8").toString("base64")}});
-    journal.push({resource:"homepage",name:"public/index.html",action:"created"});
+    pageFiles.push({asset,path,exists:!!existingFile});
+  }
+  for(const item of pageFiles){
+    const resource=item.asset.path==="public/index.html"?"homepage":"site-page";
+    if(item.exists){
+      journal.push({resource,name:item.asset.path,action:"preserved"});
+      continue;
+    }
+    await api.github(item.path,{method:"PUT",body:{
+      message:"Initialize approved "+item.asset.path+" for Cloudflare Pages",
+      branch,content:Buffer.from(item.asset.html,"utf8").toString("base64")
+    }});
+    journal.push({resource,name:item.asset.path,action:"created"});
   }
   // Tie launch acceptance to an exact GitHub revision, never just a live Pages URL.
   const headInfo=await api.github(repoPath+"/branches/"+encodeURIComponent(branch));
@@ -111,11 +138,12 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn}={
   }
   // Provisioning does NOT imply successful deployment or DNS propagation.
   return {status:"awaiting-live-deployment-verification",repository:"https://github.com/"+owner+"/"+name,
-    website:"https://"+pages+".pages.dev",project:pages,branch,headCommitSha,journal,forms:false};
+    website:"https://"+pages+".pages.dev",project:pages,branch,headCommitSha,journal,forms:false,pageCount:assets.length};
 }
 export function previewWebsite(input) {
   const plan=planCustomer(input);
-  return {...plan, executable:!plan.forms&&!input.hostname, note:plan.forms?"Forms provisioning is gated until Worker/Access setup and live acceptance are automated":input.hostname?"Custom-domain attachment is not yet automated":"Use --apply with authorized account tokens to create/reuse a private repository and connected Pages project"};
+  return {...plan, pageCount:input.site?.layout==="multi-page"?4:1,
+    requiresBundleApproval:input.site?.layout==="multi-page", executable:!plan.forms&&!input.hostname, note:plan.forms?"Forms provisioning is gated until Worker/Access setup and live acceptance are automated":input.hostname?"Custom-domain attachment is not yet automated":"Use --apply with authorized account tokens to create/reuse a private repository and connected Pages project"};
 }
 async function main(args=process.argv.slice(2)) {
   const apply=args.includes("--apply");

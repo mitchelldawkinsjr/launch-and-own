@@ -72,6 +72,7 @@ The beta onboarding D1 is now provisioned and migrated under a dedicated Launch 
 - Independent live customer login/provisioning/deployment: **not yet verified**.
 - **Optional AI-assisted business copy drafts:** structured, validated and editable before private preview/approval; available only after an authorized Workers AI binding/model is configured. This does **not** generate bespoke multi-page designs.
 - **Reviewable update proposal module:** CI-tested, approval-digest-pinned GitHub feature branches and PRs for existing managed sites; not yet connected to the hosted UI.
+- **Opt-in four-page site bundles:** CI-tested Home/About/Services/Contact renderer, full-bundle SHA-256 approval and safe idempotent provisioning; **not yet connected to the onboarding UI**. See [multi-page bundle design](docs/MULTIPAGE_SITE_BUNDLES.md).
 - Customer-specific forms, custom domains, image generation and fully bespoke AI website design: **future milestones**.
 - No license has been selected yet: this is publicly visible source, **not automatically an open-source grant**.
 
