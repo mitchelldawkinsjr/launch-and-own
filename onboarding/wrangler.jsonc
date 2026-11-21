@@ -12,7 +12,8 @@
     }
   ],
   "vars": {
-    "ONBOARDING_ORIGIN": "https://onboard.360web.cloud"
+    "ONBOARDING_ORIGIN": "https://onboard.360web.cloud",
+    "CF_SCOPES": "account-settings.read page.read page.write"
   },
   "compatibility_flags": [
     "nodejs_compat"
