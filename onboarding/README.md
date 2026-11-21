@@ -18,6 +18,10 @@ The beta database identity and schema have been verified against Cloudflare. Thi
 
 Customer login and launch approval are separate actions. Never paste provider tokens into chat or commit them to GitHub.
 
+## Selected beta onboarding hostname
+
+The approved onboarding origin is **`https://onboard.360web.cloud`**. GitHub callback: `https://onboard.360web.cloud/oauth/github/callback`; Cloudflare callback: `https://onboard.360web.cloud/oauth/cloudflare/callback`. The other agent owns the Cloudflare zone, Worker Custom Domain and OAuth provider app settings. The old `onboard.mitchelldawkins.com` URL is **not** an approved alternative. Domain checks currently report zone status `pending` and an existing proxied CNAME at the target hostname, so HTTPS/public routing is **not yet verified**. Coordinate with [domain handoff](../docs/HANDOFF_DOMAIN_OAUTH.md), and do not edit live DNS as part of backend changes.
+
 ## Secure disconnect behavior
 
 `POST /logout` is CSRF-protected. It removes the encrypted local session **before** sending best-effort revocation calls to GitHub and Cloudflare. GitHub uses its OAuth grant revocation API; Cloudflare uses the OAuth revocation endpoint. A provider outage cannot leave the customer signed into the onboarding Worker. The UI distinguishes confirmed revocation from locally signed-out but **unconfirmed remote revocation** and advises the user to review provider-connected applications. App installation permissions are distinct from user OAuth grants and may still require separate removal.
