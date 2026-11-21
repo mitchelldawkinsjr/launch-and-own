@@ -53,6 +53,7 @@ The beta onboarding D1 is now provisioned and migrated under a dedicated Launch 
 ## Project status
 
 - Reusable planner and website-only provisioner: **CI-tested**.
+- **Editable business-site content and live HTML preview:** CI-tested. Customers can enter a headline, about text, services, contact email and color theme, view the exact generated HTML before approval, then publish it. This is a deterministic template, **not AI-generated multi-page design**.
 - GitHub/Cloudflare authorization-code and PKCE primitives: **CI-tested**.
 - Dedicated Launch & Own beta onboarding D1: **created and schema-verified**.
 - Hosted onboarding Worker source, including logout and provider revocation attempts: **CI-tested, not deployed**.
