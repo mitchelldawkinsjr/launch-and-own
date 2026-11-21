@@ -11,9 +11,15 @@ Its customer journey: connect GitHub, connect Cloudflare, choose an account, rev
 3. Register a GitHub App and Cloudflare OAuth client with minimal privileges and exact HTTPS callback URLs on a domain you control.
 4. Configure Worker bindings `ONBOARDING_ORIGIN`, `GH_CLIENT_ID`, `CF_CLIENT_ID`, `CF_SCOPES`, and secrets `TOKEN_ENCRYPTION_KEY`, `GH_CLIENT_SECRET`, and `CF_CLIENT_SECRET`. The encryption key needs 32 random bytes encoded as 64 hex characters.
 5. Install/authorize Cloudflare's **separate** Workers & Pages GitHub App for the customer's repository; product GitHub consent alone cannot grant access.
-6. Review refresh-token expiry and rotation, disconnect/revocation, durable job retries, retention, abuse prevention, and tenant isolation before public beta.
+6. **Disconnect:** the hosted Worker deletes the local session and attempts to revoke its GitHub OAuth grant and Cloudflare access token. If either provider cannot confirm revocation, it displays a warning to review connected apps in both providers. This does not uninstall the GitHub App or remove the customer's websites. Refresh-token rotation, durable job retries, retention, abuse prevention and a security review remain necessary before public beta.
 7. Verify an independent customer's OAuth consent, launch approval, private repository, Pages deployment, and exact GitHub revision.
 
 The beta database identity and schema have been verified against Cloudflare. This does **not** mean the Worker or OAuth login is deployed; OAuth app registrations, verified callback domain, and Worker secrets remain outstanding.
 
 Customer login and launch approval are separate actions. Never paste provider tokens into chat or commit them to GitHub.
+
+## Secure disconnect behavior
+
+`POST /logout` is CSRF-protected. It removes the encrypted local session **before** sending best-effort revocation calls to GitHub and Cloudflare. GitHub uses its OAuth grant revocation API; Cloudflare uses the OAuth revocation endpoint. A provider outage cannot leave the customer signed into the onboarding Worker. The UI distinguishes confirmed revocation from locally signed-out but **unconfirmed remote revocation** and advises the user to review provider-connected applications. App installation permissions are distinct from user OAuth grants and may still require separate removal.
+
+Provider tokens and errors are never echoed to the browser or logged. See `onboarding/revoke-connections.test.mjs` and `onboarding/worker.test.mjs` for success, outage and cross-session regressions.
