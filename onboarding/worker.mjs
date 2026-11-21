@@ -5,6 +5,7 @@ import {applyWebsite} from '../pipeline/provision-site.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {randomToken,sha256,seal,unseal} from './crypto.mjs';
 import {revokeConnectedAccounts} from './revoke-connections.mjs';
+import {encryptGrant,getFreshAccessToken} from './token-lifecycle.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -50,7 +51,7 @@ async function session(request,env){
   const raw=cookies(request)[COOKIE_SESSION];
   if(!raw||!/^[a-f\d]{64}$/.test(raw))return null;
   const hash=await sha256(raw);
-  const record=await env.DB.prepare('SELECT id_hash,github_user_id,github_login,github_token_ct,cloudflare_token_ct,cloudflare_account_id,csrf_ct,expires_at FROM onboarding_sessions WHERE id_hash=? AND expires_at>?').bind(hash,now()).first();
+  const record=await env.DB.prepare('SELECT id_hash,github_user_id,github_login,github_token_ct,github_refresh_token_ct,github_token_expires_at,github_refresh_expires_at,cloudflare_token_ct,cloudflare_refresh_token_ct,cloudflare_token_expires_at,cloudflare_refresh_expires_at,cloudflare_account_id,csrf_ct,expires_at FROM onboarding_sessions WHERE id_hash=? AND expires_at>?').bind(hash,now()).first();
   if(!record)return null;
   const csrf=await unseal(env.TOKEN_ENCRYPTION_KEY,record.csrf_ct,'csrf:'+hash);
   return {...record,hash,csrf};
@@ -111,10 +112,10 @@ async function gitHubCallback(request,env){
   const user=await apiGet('https://api.github.com/user',token.access_token);
   if(typeof user.login!=='string'||!Number.isSafeInteger(user.id))throw Error('Unable to verify the connected GitHub user');
   const raw=randomToken(),hash=await sha256(raw),csrf=randomToken();
-  const ghCipher=await seal(env.TOKEN_ENCRYPTION_KEY,token.access_token,'github:'+hash);
+  const ghGrant=await encryptGrant({grant:token,provider:'github',sessionHash:hash,encryptionKey:env.TOKEN_ENCRYPTION_KEY});
   const csrfCipher=await seal(env.TOKEN_ENCRYPTION_KEY,csrf,'csrf:'+hash);
-  await env.DB.prepare('INSERT INTO onboarding_sessions(id_hash,github_user_id,github_login,github_token_ct,csrf_ct,created_at,expires_at) VALUES(?,?,?,?,?,?,?)')
-    .bind(hash,user.id,user.login,ghCipher,csrfCipher,now(),now()+3600).run();
+  await env.DB.prepare('INSERT INTO onboarding_sessions(id_hash,github_user_id,github_login,github_token_ct,github_refresh_token_ct,github_token_expires_at,github_refresh_expires_at,csrf_ct,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .bind(hash,user.id,user.login,ghGrant.accessCipher,ghGrant.refreshCipher,ghGrant.accessExpiresAt,ghGrant.refreshExpiresAt,csrfCipher,now(),now()+3600).run();
   const response=redirect('/');
   response.headers.append('set-cookie',cookie(COOKIE_SESSION,raw,3600));
   response.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
@@ -134,13 +135,13 @@ async function cloudflareCallback(request,env,current){
   if(url.searchParams.has('error'))return fail('Cloudflare authorization was cancelled. You can try again.');
   const verifier=await consumeFlow(env,{provider:'cloudflare',binding:current.hash,state:url.searchParams.get('state')});
   const token=await completeCloudflareOAuth({clientId:env.CF_CLIENT_ID,clientSecret:env.CF_CLIENT_SECRET,redirectUri:baseUrl(env)+'/oauth/cloudflare/callback',code:url.searchParams.get('code'),receivedState:url.searchParams.get('state'),expectedState:url.searchParams.get('state'),codeVerifier:verifier});
-  const ciphertext=await seal(env.TOKEN_ENCRYPTION_KEY,token.access_token,'cloudflare:'+current.hash);
-  await env.DB.prepare('UPDATE onboarding_sessions SET cloudflare_token_ct=?,cloudflare_account_id=NULL WHERE id_hash=? AND expires_at>?')
-    .bind(ciphertext,current.hash,now()).run();
+  const encrypted=await encryptGrant({grant:token,provider:'cloudflare',sessionHash:current.hash,encryptionKey:env.TOKEN_ENCRYPTION_KEY});
+  await env.DB.prepare('UPDATE onboarding_sessions SET cloudflare_token_ct=?,cloudflare_refresh_token_ct=?,cloudflare_token_expires_at=?,cloudflare_refresh_expires_at=?,cloudflare_refresh_locked_until=NULL,cloudflare_account_id=NULL WHERE id_hash=? AND expires_at>?')
+    .bind(encrypted.accessCipher,encrypted.refreshCipher,encrypted.accessExpiresAt,encrypted.refreshExpiresAt,current.hash,now()).run();
   return redirect('/');
 }
 async function accountOptions(env,current){
-  const token=await unseal(env.TOKEN_ENCRYPTION_KEY,current.cloudflare_token_ct,'cloudflare:'+current.hash);
+  const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   const url='https://api.cloudflare.com/client/v4/accounts?page=1&per_page=50';
   const response=await fetch(url,{headers:{authorization:'Bearer '+token,accept:'application/json'},redirect:'error'});
   if(!response.ok)throw Error('Unable to list accounts: check the Cloudflare OAuth permissions');
@@ -166,7 +167,7 @@ async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
   if(!current.cloudflare_token_ct)throw Error('Connect Cloudflare before selecting an account');
   const accountId=data.get('accountId');
-  const token=await unseal(env.TOKEN_ENCRYPTION_KEY,current.cloudflare_token_ct,'cloudflare:'+current.hash);
+  const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   await verifyCloudflareAccount({accessToken:token,accountId});
   await env.DB.prepare('UPDATE onboarding_sessions SET cloudflare_account_id=? WHERE id_hash=? AND expires_at>?').bind(accountId,current.hash,now()).run();
   return redirect('/');
@@ -218,8 +219,8 @@ async function launchRequest(env,current,id){
     .bind(now(),id,current.hash,now()-300).first();
   if(!fresh)throw Error('Provisioning is already in progress or no longer authorized');
   try{
-    const githubToken=await unseal(env.TOKEN_ENCRYPTION_KEY,current.github_token_ct,'github:'+current.hash);
-    const cloudflareToken=await unseal(env.TOKEN_ENCRYPTION_KEY,current.cloudflare_token_ct,'cloudflare:'+current.hash);
+    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
     const config={name:item.customer_name,githubOwner:item.github_login,accountId:item.cloudflare_account_id,forms:false};
     const result=await applyWebsite(config,{githubToken,cloudflareToken});
     await env.DB.prepare("UPDATE onboarding_launches SET status='pending_deployment',provision_result=?,error_code=NULL,updated_at=? WHERE id=? AND session_hash=?")
@@ -249,7 +250,7 @@ async function verify(request,env,current){
   if(!item||!['pending_deployment','live'].includes(item.status))throw Error('There is no deployment to verify');
   if(item.cloudflare_account_id!==current.cloudflare_account_id)throw Error('Account changed since approval');
   if(!current.cloudflare_token_ct)throw Error('Reconnect your Cloudflare account');
-  const token=await unseal(env.TOKEN_ENCRYPTION_KEY,current.cloudflare_token_ct,'cloudflare:'+current.hash);
+  const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   const provisioned=item.provision_result?JSON.parse(item.provision_result):null;
   const expectedCommitSha=provisioned?.headCommitSha;
   if(typeof expectedCommitSha!=='string'||!/^[a-f0-9]{40}$/i.test(expectedCommitSha))

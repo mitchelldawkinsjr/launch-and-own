@@ -47,7 +47,17 @@ export async function checkRemoteSchema({accountId,token,databaseId,expectedData
   const found=new Set(body.result[0].results.map(x=>x.name));
   const missing=[...TABLES,...INDEXES].filter(x=>!found.has(x));
   if(missing.length)throw Error("D1 schema incomplete: "+missing.join(", "));
-  return {status:"schema-ready",databaseId,databaseName:expectedDatabaseName,tables:TABLES.length,indexes:INDEXES.length};
+  const columnsQuery=await fetchFn(url+"/query",{method:"POST",headers:{...headers,"content-type":"application/json"},body:JSON.stringify({sql:"PRAGMA table_info(onboarding_sessions)"}),redirect:"error"});
+  if(!columnsQuery.ok)throw Error("D1 token-rotation schema check denied (HTTP "+columnsQuery.status+")");
+  const columnBody=await columnsQuery.json();
+  if(columnBody.success!==true||!Array.isArray(columnBody.result?.[0]?.results))
+    throw Error("Cloudflare did not return onboarding session columns");
+  const columns=new Set(columnBody.result[0].results.map(x=>x.name));
+  const required=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
+    "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
+  const absent=required.filter(x=>!columns.has(x));
+  if(absent.length)throw Error("D1 token-rotation migration missing: "+absent.join(", "));
+  return {status:"schema-ready",databaseId,databaseName:expectedDatabaseName,tables:TABLES.length,indexes:INDEXES.length,tokenColumns:required.length};
 }
 async function main(){
   const cfg=JSON.parse(readFileSync(DEFAULT_PATH,"utf8"));
