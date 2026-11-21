@@ -1,0 +1,42 @@
+{
+  "product": "Launch & Own",
+  "version": 1,
+  "customerResourcesIncluded": false,
+  "sourceFiles": [
+    "pipeline/authorization-checks.mjs",
+    "pipeline/authorization-checks.test.mjs",
+    "pipeline/cloudflare-oauth.mjs",
+    "pipeline/cloudflare-oauth.test.mjs",
+    "pipeline/github-app-oauth.mjs",
+    "pipeline/github-app-oauth.test.mjs",
+    "pipeline/launch-site.mjs",
+    "pipeline/launch-site.test.mjs",
+    "pipeline/plan-customer.mjs",
+    "pipeline/plan-customer.test.mjs",
+    "pipeline/provision-site.mjs",
+    "pipeline/provision-site.test.mjs",
+    "pipeline/verify-site.mjs",
+    "pipeline/verify-site.test.mjs",
+    "onboarding/crypto.mjs",
+    "onboarding/worker.mjs",
+    "onboarding/worker.test.mjs",
+    "onboarding/validate-config.mjs",
+    "onboarding/migrations/0001_initial.sql",
+    "onboarding/wrangler.jsonc"
+  ],
+  "setupRequired": [
+    "Create dedicated onboarding D1",
+    "Register GitHub App and Cloudflare OAuth client",
+    "Authorize Cloudflare Pages GitHub integration",
+    "Set Worker secrets",
+    "Complete independent customer acceptance test"
+  ],
+  "intentionallyExcluded": [
+    "public/",
+    "forms/",
+    "tests/site.test.mjs",
+    "customer-owned Cloudflare IDs and secrets"
+  ],
+  "sourceRepository": "mitchelldawkinsjr/Brittney-Site",
+  "sourceNote": "Curated product-only extraction; customer reference site retained in original repository."
+}
