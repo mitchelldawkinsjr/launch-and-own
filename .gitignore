@@ -5,3 +5,6 @@
 .wrangler/
 node_modules/
 coverage/
+
+# Local preview artifacts may contain personal website/contact details.
+site-preview/
