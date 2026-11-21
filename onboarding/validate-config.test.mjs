@@ -7,8 +7,9 @@ const expectedId="b89fb8aa-67a2-49fa-b48c-584e305b5bb2";
 const accountId="0123456789abcdef0123456789abcdef";
 const expectedName="launch-and-own-onboarding-beta";
 const copy=()=>structuredClone(cfg);
-const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches",
- "idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session"];
+const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts",
+ "idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
+ "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry"];
 const tokenColumns=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
  "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
 const mock=(overrides={})=>{
@@ -41,7 +42,7 @@ test("placeholder, malformed ID, unrelated bindings and plain secret values are 
 test("remote readiness checks exact D1 metadata before read-only schema query",async()=>{
  const h=mock();
  const ready=await checkRemoteSchema({accountId,token:"test-secret",databaseId:expectedId,fetchFn:h.fetchFn});
- assert.equal(ready.status,"schema-ready");assert.equal(ready.indexes,3);assert.equal(ready.tokenColumns,8);
+ assert.equal(ready.status,"schema-ready");assert.equal(ready.tables,4);assert.equal(ready.indexes,5);assert.equal(ready.tokenColumns,8);
  assert.equal(h.calls.length,3);
  assert.equal(h.calls[0].options.method,"GET");
  assert.equal(JSON.parse(h.calls[2].options.body).sql,"PRAGMA table_info(onboarding_sessions)");
@@ -77,4 +78,10 @@ test("missing token-rotation migration columns block remote readiness",async()=>
  const h=mock({columns:tokenColumns.slice(0,3)});
  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/token-rotation migration missing/);
  assert.equal(h.calls.length,3);
+});
+
+test("missing durable receipt migration stops onboarding readiness",async()=>{
+ const h=mock({schema:schemaNames.filter(x=>!x.includes("receipts"))});
+ await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/schema incomplete/);
+ assert.equal(h.calls.length,2);
 });
