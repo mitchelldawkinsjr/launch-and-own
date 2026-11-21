@@ -114,7 +114,7 @@ test('customer connects both providers, selects verified account, previews and e
   home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Demo Account/);
   const csrf=csrfFrom(html);
   const selected=await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});assert.equal(selected.status,303);
-  home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Review setup/);
+  home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Generate website preview/);
   const pre=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});assert.equal(pre.status,303);
   const reviewUrl=pre.headers.get('location');assert.match(reviewUrl,/^\/review\?id=/);
   const review=await h.request(reviewUrl,{cookie:sessionCookie});assert.equal(review.status,200);assert.match(await review.text(),/Approve and create website/);
