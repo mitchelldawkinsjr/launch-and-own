@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {applyWebsite,previewWebsite} from "./provision-site.mjs";
-import {renderSiteBundle,BUNDLE_PATHS} from "../site/render-site-bundle.mjs";
+import {renderSiteBundle,BUNDLE_PATHS,siteBundleApprovalSha256} from "../site/render-site-bundle.mjs";
 
 const customer={name:"Willow Studio",accountId:"0123456789abcdef0123456789abcdef",githubOwner:"tester",
   site:{layout:"multi-page",tagline:"Photography for important moments",
     about:"Family portraits and community event photography.",
     services:["Family portraits","Community events"],theme:"forest",contactEmail:"hello@willow.example"}};
 const expectedRepo="esp-willow-studio",project=expectedRepo+"-site",head="a".repeat(40);
+customer.approvedBundleSha256=await siteBundleApprovalSha256({...customer.site,name:customer.name});
 function harness({repositoryExists=false,failPages=false}={}){
  const state={repo:repositoryExists?{id:321,name:expectedRepo,
    description:"Launch & Own managed site: willow-studio",private:true,default_branch:"main",
@@ -114,6 +115,15 @@ test("partial provider failures leave customer files unchanged and safely retry 
  assert.equal(result.journal.filter(x=>x.action==="preserved").length,4);
  assert.equal(result.journal.filter(x=>x.resource==="cloudflare-pages"&&x.action==="created").length,1);
  assert(recovered.state.history.filter(x=>x.method==="PUT").length===0);
+});
+
+test("missing or mismatched multi-page digest prevents every provider request",async()=>{
+ const h=harness();
+ const without={...customer,approvedBundleSha256:undefined};
+ await assert.rejects(applyWebsite(without,{...tokens,fetchFn:h.fetchFn}),/Approval of the complete website bundle/);
+ const changed={...customer,site:{...customer.site,about:"Different content after customer approval"}};
+ await assert.rejects(applyWebsite(changed,{...tokens,fetchFn:h.fetchFn}),/differs from the exact approved preview/);
+ assert.equal(h.state.history.length,0);
 });
 test("legacy default site remains one page and rejects unsupported layouts before any network request",async()=>{
  const h=harness();
