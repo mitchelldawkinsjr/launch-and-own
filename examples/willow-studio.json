@@ -1,0 +1,13 @@
+{
+  "name": "Willow Studio",
+  "layout": "multi-page",
+  "tagline": "Your moments, beautifully remembered",
+  "about": "Willow Studio is a fictional family and event photography business used to demonstrate Launch & Own. We offer approachable photo sessions for portraits and community gatherings.",
+  "services": [
+    "Family portraits",
+    "Community event photography",
+    "Photo editing"
+  ],
+  "theme": "forest",
+  "contactEmail": "hello@willow.example"
+}
