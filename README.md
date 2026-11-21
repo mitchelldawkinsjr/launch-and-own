@@ -52,6 +52,10 @@ Customers can enter a plain-language business brief and ask for an **editable fi
 
 This option is **disabled unless the backend operator configures** an approved Cloudflare Workers AI binding named `AI` and a model identifier in `SITE_AI_MODEL`. Inference can incur usage charges; no AI binding is automatically enabled or deployed by this repository. See [onboarding setup](onboarding/README.md). The domain/OAuth agent owns the Wrangler file and must coordinate configuration with the product owner.
 
+## Reviewable website updates (backend foundation)
+
+Once a site is live, a proposed content update should **not** overwrite its live GitHub branch directly. The reusable [safe website updates](docs/SAFE_WEBSITE_UPDATES.md) module accepts the exact customer-reviewed site HTML digest and GitHub base commit, verifies immutable owner identity and the private managed repository, and opens/reuses a separate feature-branch pull request. The customer reviews and merges the PR; Cloudflare production must then be verified against the merged SHA. This module is CI-tested but **not yet wired into the onboarding UI**. The domain agent must coordinate the additional GitHub App **Pull requests: write** permission before live use.
+
 ## Operator onboarding prerequisites
 
 Before enabling hosted onboarding, register a GitHub App and Cloudflare OAuth client with minimally sufficient permissions, configure an owned HTTPS callback domain, use the independently created beta onboarding D1 database, apply `onboarding/migrations/0001_initial.sql`, and install Worker secrets using a secure provider secret store. Cloudflare's own Workers & Pages GitHub App must also be authorized for the customer's repository. Read [onboarding/README.md](onboarding/README.md).
@@ -67,6 +71,7 @@ The beta onboarding D1 is now provisioned and migrated under a dedicated Launch 
 - Hosted onboarding Worker source, including logout and provider revocation attempts: **CI-tested, not deployed**.
 - Independent live customer login/provisioning/deployment: **not yet verified**.
 - **Optional AI-assisted business copy drafts:** structured, validated and editable before private preview/approval; available only after an authorized Workers AI binding/model is configured. This does **not** generate bespoke multi-page designs.
+- **Reviewable update proposal module:** CI-tested, approval-digest-pinned GitHub feature branches and PRs for existing managed sites; not yet connected to the hosted UI.
 - Customer-specific forms, custom domains, image generation and fully bespoke AI website design: **future milestones**.
 - No license has been selected yet: this is publicly visible source, **not automatically an open-source grant**.
 
