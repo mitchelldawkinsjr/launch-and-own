@@ -13,4 +13,5 @@ jobs:
         with:
           node-version: "22"
       - run: npm test
+      - run: npm run preflight:onboarding
       - run: node --check onboarding/worker.mjs
