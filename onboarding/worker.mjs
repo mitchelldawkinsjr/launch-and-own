@@ -1,6 +1,7 @@
 import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app-oauth.mjs';
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount} from '../pipeline/cloudflare-oauth.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
+import {normalizeSite,renderSite} from '../site/render-site.mjs';
 import {applyWebsite} from '../pipeline/provision-site.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {randomToken,sha256,seal,unseal} from './crypto.mjs';
@@ -160,7 +161,17 @@ async function home(env,current,notice){
       accountHtml=accounts.length?`<section><h2>Choose your Cloudflare account</h2><p>Only the selected account will be used.</p>${button('/account','Select account',current.csrf,`<label for="account">Cloudflare account</label><select id="account" name="accountId" required>${accounts.map(a=>`<option value="${escape(a.id)}">${escape(a.name)}</option>`).join('')}</select>`)}</section>`:'<p>No authorized Cloudflare accounts were found. Check the connection permissions.</p>';
     }catch{accountHtml='<p>Could not list your Cloudflare accounts. Reconnect with the required permissions.</p>';}
   }
-  const next=connected&&current.cloudflare_account_id?`<section><h2>Preview your website</h2><p>Website-only beta: contact forms and custom domains will be supported after their isolated security configuration is automated.</p>${button('/preview','Review setup',current.csrf,`<label for="name">Business or website name</label><input id="name" name="name" maxlength="80" required placeholder="e.g. Green Willow Studio">`)}</section>`:'';
+  const siteFields=[
+    '<label for="name">Business or website name</label><input id="name" name="name" maxlength="80" required placeholder="e.g. Green Willow Studio">',
+    '<label for="tagline">Homepage headline</label><input id="tagline" name="tagline" maxlength="140" placeholder="e.g. Your story, beautifully told">',
+    '<label for="about">Describe your business</label><textarea id="about" name="about" maxlength="650" rows="4" placeholder="What makes your business special?"></textarea>',
+    '<label for="services">Services (one per line, up to six)</label><textarea id="services" name="services" rows="4" placeholder="Portraits&#10;Events&#10;Editing"></textarea>',
+    '<label for="contactEmail">Contact email (optional)</label><input id="contactEmail" name="contactEmail" type="email" maxlength="254" placeholder="hello@example.com">',
+    '<label for="theme">Choose a color theme</label><select id="theme" name="theme"><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="graphite">Graphite</option></select>'
+  ].join('');
+  const next=connected&&current.cloudflare_account_id?
+    '<section><h2>Design your website</h2><p>Review your generated homepage before approving publication. Forms and custom domains remain a future beta milestone.</p>'+
+    button('/preview','Generate website preview',current.csrf,siteFields)+'</section>':'';
   return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p><p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${next}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
 }
 async function selectAccount(request,env,current){
@@ -176,13 +187,13 @@ async function preview(request,env,current){
   await limitAttempts(request,env);
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
   if(!current.cloudflare_account_id||!current.cloudflare_token_ct)throw Error('Choose your authorized Cloudflare account first');
-  const name=data.get('name');
-  if(typeof name!=='string'||!name.trim()||name.length>80)throw Error('Enter a website name no longer than 80 characters');
-  const config={name,accountId:current.cloudflare_account_id,githubOwner:current.github_login,forms:false};
+  const site=normalizeSite({name:data.get('name'),tagline:data.get('tagline')||'',about:data.get('about')||'',
+    services:data.get('services')||'',theme:data.get('theme')||'ocean',contactEmail:data.get('contactEmail')||''});
+  const config={name:site.name,accountId:current.cloudflare_account_id,githubOwner:current.github_login,forms:false};
   const plan=planCustomer(config);
   const id=crypto.randomUUID(),ts=now();
   await env.DB.prepare('INSERT INTO onboarding_launches(id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
-    .bind(id,current.hash,name,current.cloudflare_account_id,current.github_login,JSON.stringify(plan),'preview',ts,ts).run();
+    .bind(id,current.hash,site.name,current.cloudflare_account_id,current.github_login,JSON.stringify({...plan,site}),'preview',ts,ts).run();
   return redirect('/review?id='+encodeURIComponent(id));
 }
 async function getLaunch(env,current,id){
@@ -190,11 +201,23 @@ async function getLaunch(env,current,id){
   return await env.DB.prepare('SELECT id,customer_name,github_login,cloudflare_account_id,plan_json,status,provision_result,error_code,updated_at FROM onboarding_launches WHERE id=? AND session_hash=?')
     .bind(id,current.hash).first();
 }
+async function sitePreview(env,current,id){
+  const item=await getLaunch(env,current,id);
+  if(!item)return fail('This website preview is not accessible.',404);
+  const plan=JSON.parse(item.plan_json);
+  const html=renderSite({...plan.site,name:item.customer_name});
+  return new Response(html,{status:200,headers:{
+    'content-type':'text/html; charset=utf-8','cache-control':'private, no-store',
+    'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'no-referrer',
+    'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  }});
+}
 async function review(env,current,id){
   const item=await getLaunch(env,current,id);
   if(!item)return fail('This launch request is not accessible.',404);
   const plan=JSON.parse(item.plan_json);
   const details=`<p><strong>Name:</strong> ${escape(item.customer_name)}</p><p><strong>GitHub:</strong> ${escape(item.github_login)}</p><p><strong>Cloudflare:</strong> ${escape(item.cloudflare_account_id)}</p><p><strong>Private repository:</strong> ${escape('esp-'+plan.customer)}</p><p><strong>Public Pages URL:</strong> https://${escape('esp-'+plan.customer+'-site.pages.dev')}</p><p>Approving creates a private GitHub repository and a publicly accessible starter website. No forms, email, domain changes, billing changes, or deletions are included.</p><p>Cloudflare's Workers &amp; Pages GitHub App must have permission to access the new repository. <a href="https://github.com/settings/installations">Review GitHub App access</a>.</p>`;
+  const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open your website preview</a></p>';
   const formId=`<input type="hidden" name="id" value="${escape(item.id)}">`;
   const approveForm=item.status==='preview'?button('/approve','Approve and create website',current.csrf,formId):'';
   const retryForm=(item.status==='failed'||(item.status==='provisioning'&&item.updated_at<now()-300))?button('/launch','Retry provisioning safely',current.csrf,formId):'';
@@ -207,7 +230,7 @@ async function review(env,current,id){
   if(item.status==='pending_deployment')output+='<p>Cloudflare is building your website. It is not marked live until production verification succeeds.</p>';
   if(item.status==='failed')output+='<p>Setup stopped. Check account permissions, especially the Cloudflare Workers &amp; Pages GitHub App installation, then retry. Existing resources are preserved.</p>';
   if(item.status==='live')output+='<p class="pill">Public website deployment verified</p>';
-  return view('Review website launch',`${details}<p class="pill">Status: ${escape(item.status)}</p>${output}${approveForm}${retryForm}${verifyForm}<p><a href="/">Back to setup</a></p>`);
+  return view('Review website launch',`${details}<p class="pill">Status: ${escape(item.status)}</p>${previewLink}${output}${approveForm}${retryForm}${verifyForm}<p><a href="/">Back to setup</a></p>`);
 }
 async function launchRequest(env,current,id){
   const item=await getLaunch(env,current,id);
@@ -221,7 +244,8 @@ async function launchRequest(env,current,id){
   try{
     const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
     const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
-    const config={name:item.customer_name,githubOwner:item.github_login,accountId:item.cloudflare_account_id,forms:false};
+    const storedPlan=JSON.parse(item.plan_json);
+    const config={name:item.customer_name,githubOwner:item.github_login,accountId:item.cloudflare_account_id,forms:false,site:storedPlan.site};
     const result=await applyWebsite(config,{githubToken,cloudflareToken});
     await env.DB.prepare("UPDATE onboarding_launches SET status='pending_deployment',provision_result=?,error_code=NULL,updated_at=? WHERE id=? AND session_hash=?")
       .bind(JSON.stringify(result),now(),id,current.hash).run();
@@ -351,6 +375,7 @@ export default {
         if(url.pathname==='/connect/cloudflare')return await cloudflareStart(request,env,current);
         if(url.pathname==='/oauth/cloudflare/callback')return await cloudflareCallback(request,env,current);
         if(url.pathname==='/review')return await review(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
       }
       if(request.method==='POST'){
         if(url.pathname==='/account')return await selectAccount(request,env,current);
