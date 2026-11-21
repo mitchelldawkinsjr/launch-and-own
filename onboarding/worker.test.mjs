@@ -11,10 +11,11 @@ function harness(){
  sqlite.exec('PRAGMA foreign_keys = ON');
  sqlite.exec(readFileSync(new URL('./migrations/0001_initial.sql',import.meta.url),'utf8'));
  sqlite.exec(readFileSync(new URL('./migrations/0002_token_rotation.sql',import.meta.url),'utf8'));
+ sqlite.exec(readFileSync(new URL('./migrations/0003_launch_receipts.sql',import.meta.url),'utf8'));
  const DB={prepare(sql){return {bind(...args){return {first:async()=>sqlite.prepare(sql).get(...args)||null,run:async()=>sqlite.prepare(sql).run(...args),all:async()=>({results:sqlite.prepare(sql).all(...args)})}}}},batch:async(stmts)=>Promise.all(stmts.map(s=>s.run()))};
  const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
  const calls=[];
- const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,failPagesOnce:false,failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false};
+ const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,failPagesOnce:false,failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42};
  const fetchFn=async(url,opts={})=>{
   calls.push({url,method:opts.method||'GET'});
   if(url==='https://github.com/login/oauth/access_token'){
@@ -27,7 +28,7 @@ function harness(){
       Response.json({access_token:'ghu_secret_example',token_type:'bearer',expires_in:180,refresh_token:'ghr_initial',refresh_token_expires_in:15897600}):
       Response.json({access_token:'ghu_secret_example',token_type:'bearer'});
   }
-  if(url==='https://api.github.com/user')return Response.json({login:'tester',id:42});
+  if(url==='https://api.github.com/user')return Response.json({login:'tester',id:resourceState.githubUserId});
   if(url==='https://api.github.com/applications/Iv1.example/grant'){
     if(resourceState.failGitHubRevokeOnce){resourceState.failGitHubRevokeOnce=false;return new Response(null,{status:503})}
     return new Response(null,{status:204});
@@ -484,5 +485,120 @@ test('unsafe color/theme configuration cannot create launch records or provider 
   assert.equal(invalid.status,400);
   assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS c FROM onboarding_launches').get().c,0);
   assert.equal(h.resourceState.repo,null);
+ }finally{globalThis.fetch=originalFetch}
+});
+
+
+test('approved launch survives logout as a secret-free receipt and can be reapproved after reconnect',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const first=await bootstrap(h);await connectCloudflare(h,first.sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:first.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:first.sessionCookie,body:form({csrf,accountId})});
+  const initial=await h.request('/preview',{method:'POST',cookie:first.sessionCookie,body:form({csrf,name:'Willow Studio',
+    tagline:'An original customer design',theme:'forest',services:'Portraits'})});
+  const id=new URL(origin+initial.headers.get('location')).searchParams.get('id');
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_launch_receipts').get().n,0,'Unapproved previews are not durable');
+  await h.request('/approve',{method:'POST',cookie:first.sessionCookie,body:form({csrf,id})});
+  const receipt=h.sqlite.prepare('SELECT * FROM onboarding_launch_receipts').get();
+  assert.equal(receipt.id,id);assert.equal(receipt.github_user_id,42);
+  assert.equal(receipt.status,'pending_deployment');
+  const encoded=JSON.stringify(receipt);
+  for(const secret of ['ghu_secret_example','cf_secret_example','ghr_initial','TOKEN_ENCRYPTION_KEY','session_hash']){
+   assert(!encoded.includes(secret),'Receipt contained sensitive token/session data');
+  }
+  const count=h.calls.filter(x=>x.url==='https://api.github.com/user/repos').length;
+  const logout=await h.request('/logout',{method:'POST',cookie:first.sessionCookie,body:form({csrf})});
+  assert.equal(logout.status,303);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_sessions').get().n,0);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_launches').get().n,0,'Session-owned launch rows cascade');
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_launch_receipts').get().n,1,'Approved history survives logout');
+  const anonymous=await h.request('/history');assert.equal(anonymous.status,401);
+  const second=await bootstrap(h);await connectCloudflare(h,second.sessionCookie);
+  const csrf2=csrfFrom(await (await h.request('/',{cookie:second.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:second.sessionCookie,body:form({csrf:csrf2,accountId})});
+  const history=await (await h.request('/history',{cookie:second.sessionCookie})).text();
+  assert.match(history,/Willow Studio/);assert.match(history,/Review and reapprove/);
+  const restored=await h.request('/restore',{method:'POST',cookie:second.sessionCookie,body:form({csrf:csrf2,id})});
+  assert.equal(restored.status,303);
+  const newId=new URL(origin+restored.headers.get('location')).searchParams.get('id');
+  assert.notEqual(newId,id);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'preview');
+  const html=await (await h.request('/site-preview?id='+newId,{cookie:second.sessionCookie})).text();
+  assert.match(html,/An original customer design/);
+  assert.equal(h.calls.filter(x=>x.url==='https://api.github.com/user/repos').length,count,'Restore did not mutate providers');
+  await h.request('/approve',{method:'POST',cookie:second.sessionCookie,body:form({csrf:csrf2,id:newId})});
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'pending_deployment');
+  assert.equal(h.calls.filter(x=>x.url==='https://api.github.com/user/repos').length,count,'Safe repeat reused private repository');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('another GitHub identity cannot read or restore an approved customer launch',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const one=await bootstrap(h);await connectCloudflare(h,one.sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:one.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:one.sessionCookie,body:form({csrf,accountId})});
+  const p=await h.request('/preview',{method:'POST',cookie:one.sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+p.headers.get('location')).searchParams.get('id');
+  await h.request('/approve',{method:'POST',cookie:one.sessionCookie,body:form({csrf,id})});
+  h.resourceState.githubUserId=9999;
+  const other=await bootstrap(h);await connectCloudflare(h,other.sessionCookie);
+  const otherCsrf=csrfFrom(await (await h.request('/',{cookie:other.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:other.sessionCookie,body:form({csrf:otherCsrf,accountId})});
+  const history=await (await h.request('/history',{cookie:other.sessionCookie})).text();
+  assert(!history.includes('Willow Studio'));
+  const denied=await h.request('/restore',{method:'POST',cookie:other.sessionCookie,body:form({csrf:otherCsrf,id})});
+  assert.equal(denied.status,400);
+ }finally{globalThis.fetch=originalFetch}
+});
+test('reconnect must select the same verified Cloudflare account for history access',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const one=await bootstrap(h);await connectCloudflare(h,one.sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:one.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:one.sessionCookie,body:form({csrf,accountId})});
+  const p=await h.request('/preview',{method:'POST',cookie:one.sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+p.headers.get('location')).searchParams.get('id');
+  await h.request('/approve',{method:'POST',cookie:one.sessionCookie,body:form({csrf,id})});
+  const second=await bootstrap(h);await connectCloudflare(h,second.sessionCookie);
+  const secondRaw=second.sessionCookie.split('=')[1];
+  const secondHash=await (await import('./crypto.mjs')).sha256(secondRaw);
+  h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_account_id=? WHERE id_hash=?').run('f'.repeat(32),secondHash);
+  const secondCsrf=csrfFrom(await (await h.request('/',{cookie:second.sessionCookie})).text());
+  const history=await (await h.request('/history',{cookie:second.sessionCookie})).text();
+  assert(!history.includes('Willow Studio'));
+  const denied=await h.request('/restore',{method:'POST',cookie:second.sessionCookie,body:form({csrf:secondCsrf,id})});
+  assert.equal(denied.status,400);
+ }finally{globalThis.fetch=originalFetch}
+});
+test('an active approved launch is not duplicated by premature restoration',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const first=await bootstrap(h);await connectCloudflare(h,first.sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:first.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:first.sessionCookie,body:form({csrf,accountId})});
+  const p=await h.request('/preview',{method:'POST',cookie:first.sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+p.headers.get('location')).searchParams.get('id');
+  await h.request('/approve',{method:'POST',cookie:first.sessionCookie,body:form({csrf,id})});
+  const other=await bootstrap(h);await connectCloudflare(h,other.sessionCookie);
+  const csrf2=csrfFrom(await (await h.request('/',{cookie:other.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:other.sessionCookie,body:form({csrf:csrf2,accountId})});
+  const denied=await h.request('/restore',{method:'POST',cookie:other.sessionCookie,body:form({csrf:csrf2,id})});
+  assert.equal(denied.status,400);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_launches').get().n,1);
+ }finally{globalThis.fetch=originalFetch}
+});
+test('receipt retention is bounded and expired receipts are purged on scheduled maintenance',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const one=await bootstrap(h);await connectCloudflare(h,one.sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:one.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:one.sessionCookie,body:form({csrf,accountId})});
+  const p=await h.request('/preview',{method:'POST',cookie:one.sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+p.headers.get('location')).searchParams.get('id');
+  await h.request('/approve',{method:'POST',cookie:one.sessionCookie,body:form({csrf,id})});
+  h.sqlite.prepare('UPDATE onboarding_launch_receipts SET expires_at=1').run();
+  await worker.scheduled({},h.env);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_launch_receipts').get().n,0);
  }finally{globalThis.fetch=originalFetch}
 });
