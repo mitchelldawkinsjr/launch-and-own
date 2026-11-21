@@ -1,0 +1,13 @@
+{
+  "name": "launch-and-own",
+  "version": "0.1.0-beta",
+  "private": true,
+  "type": "module",
+  "description": "Customer-owned conversational website launch and maintenance pipeline",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test pipeline/*.test.mjs onboarding/worker.test.mjs"
+  }
+}
