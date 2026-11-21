@@ -602,3 +602,105 @@ test('receipt retention is bounded and expired receipts are purged on scheduled 
   assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_launch_receipts').get().n,0);
  }finally{globalThis.fetch=originalFetch}
 });
+
+
+test("AI drafting is invisible until operator configures optional model binding",async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request("/",{cookie:sessionCookie})).text());
+  await h.request("/account",{method:"POST",cookie:sessionCookie,body:form({csrf,accountId})});
+  const page=await (await h.request("/",{cookie:sessionCookie})).text();
+  assert(!page.includes("Draft my website copy"));
+  assert.match(page,/Generate website preview/);
+  const disabled=await h.request("/draft",{method:"POST",cookie:sessionCookie,body:form({
+    csrf,name:"Willow Studio",description:"Photography services for local families and community events."
+  })});
+  assert.equal(disabled.status,503);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_launches").get().n,0);
+ }finally{globalThis.fetch=originalFetch}
+});
+test("AI draft is user initiated, editable, private and requires a separate preview/approval",async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ const description="Willow Studio provides local family portrait sessions and photography for neighborhood events.";
+ let modelCalls=0;
+ h.env.SITE_AI_MODEL="@cf/meta/llama-3.1-8b-instruct";
+ h.env.AI={run:async(model,req)=>{
+   modelCalls++;
+   assert.equal(model,h.env.SITE_AI_MODEL);
+   assert.match(req.messages[1].content,/Willow Studio/);
+   assert(!JSON.stringify(req).includes("hello@willow.example"),"Customer email not passed to model");
+   return {response:JSON.stringify({tagline:"Your memories matter",about:"Family portraits and community event photography.",
+     services:["Family portraits","Community events"],contactEmail:"malicious@example.com"})};
+ }};
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request("/",{cookie:sessionCookie})).text());
+  await h.request("/account",{method:"POST",cookie:sessionCookie,body:form({csrf,accountId})});
+  const page=await (await h.request("/",{cookie:sessionCookie})).text();
+  assert.match(page,/Draft my website copy/);
+  assert.equal(modelCalls,0,"GET homepage must never call an AI model");
+  const draft=await h.request("/draft",{method:"POST",cookie:sessionCookie,
+    body:form({csrf,name:"Willow Studio",description,theme:"sunset",contactEmail:"hello@willow.example"})});
+  assert.equal(draft.status,200);
+  const html=await draft.text();
+  assert.match(html,/Your memories matter/);
+  assert.match(html,/Family portraits/);
+  assert.match(html,/Review your AI-assisted draft/);
+  assert.match(html,/Preview this edited draft/);
+  assert.match(html,/value="hello@willow.example"/);
+  assert(!html.includes("malicious@example.com"));
+  assert.equal(modelCalls,1);
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_launches").get().n,0,
+    "Unreviewed AI drafts must not create launch plans");
+  assert.equal(h.resourceState.repo,null);
+  const preview=await h.request("/preview",{method:"POST",cookie:sessionCookie,body:form({
+    csrf,name:"Willow Studio",tagline:"Your memories matter",about:"Family portraits and community event photography.",
+    services:"Family portraits\nCommunity events",theme:"sunset",contactEmail:"hello@willow.example"
+  })});
+  assert.equal(preview.status,303);
+  const id=new URL(origin+preview.headers.get("location")).searchParams.get("id");
+  const site=await (await h.request("/site-preview?id="+id,{cookie:sessionCookie})).text();
+  assert.match(site,/Your memories matter/);
+  assert.equal(modelCalls,1,"Regular preview must not trigger a second paid model call");
+  assert.equal(h.resourceState.repo,null,"Public repo must not be created until explicit approval");
+ }finally{globalThis.fetch=originalFetch}
+});
+test("AI draft endpoint is CSRF protected and requires selected provider account",async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ let calls=0;
+ h.env.AI={run:async()=>{calls++;return {response:{tagline:"Title",about:"About",services:[]}}}};
+ h.env.SITE_AI_MODEL="@cf/meta/llama-3.1-8b-instruct";
+ try{
+  const unauth=await h.request("/draft",{method:"POST",body:form({csrf:"fake",name:"Studio",
+    description:"A community photo studio offering portraits and event coverage."})});
+  assert.equal(unauth.status,400);
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request("/",{cookie:sessionCookie})).text());
+  const noAccount=await h.request("/draft",{method:"POST",cookie:sessionCookie,
+    body:form({csrf,name:"Studio",description:"A community photo studio offering portraits and event coverage."})});
+  assert.equal(noAccount.status,400);
+  await h.request("/account",{method:"POST",cookie:sessionCookie,body:form({csrf,accountId})});
+  const badCsrf=await h.request("/draft",{method:"POST",cookie:sessionCookie,
+    body:form({csrf:"wrong",name:"Studio",description:"A community photo studio offering portraits and event coverage."})});
+  assert.equal(badCsrf.status,400);
+  assert.equal(calls,0);
+ }finally{globalThis.fetch=originalFetch}
+});
+test("AI provider failure never reveals provider error or stores an unapproved plan",async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ h.env.SITE_AI_MODEL="@cf/meta/llama-3.1-8b-instruct";
+ h.env.AI={run:async()=>{throw Error("provider token secret in external error")}};
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request("/",{cookie:sessionCookie})).text());
+  await h.request("/account",{method:"POST",cookie:sessionCookie,body:form({csrf,accountId})});
+  const result=await h.request("/draft",{method:"POST",cookie:sessionCookie,
+    body:form({csrf,name:"Willow Studio",description:"Local family photography and community event services."})});
+  assert.equal(result.status,502);
+  const html=await result.text();
+  assert.match(html,/manual website editor/);
+  assert(!html.includes("provider token secret"));
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_launches").get().n,0);
+ }finally{globalThis.fetch=originalFetch}
+});
