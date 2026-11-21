@@ -46,6 +46,12 @@ If another agent manages the Cloudflare zone for `360web.cloud`, give them [**th
 
 **Current domain setup blockers:** Cloudflare reports the `360web.cloud` zone as pending and a proxied `onboard.360web.cloud` CNAME already points at the zone apex. The domain agent owns activation and safe resolution of that record before attaching the Worker. No public OAuth service should be represented as live yet.
 
+## Optional AI-assisted website copy
+
+Customers can enter a plain-language business brief and ask for an **editable first draft** of their headline, about section and service labels. AI output is strictly validated as structured text, not HTML/JavaScript. The customer's supplied business name, theme and contact email remain under their control. The draft is **never provisioned or saved as an approved plan** until the customer submits a separate preview and explicitly approves it. The manual editor works without AI.
+
+This option is **disabled unless the backend operator configures** an approved Cloudflare Workers AI binding named `AI` and a model identifier in `SITE_AI_MODEL`. Inference can incur usage charges; no AI binding is automatically enabled or deployed by this repository. See [onboarding setup](onboarding/README.md). The domain/OAuth agent owns the Wrangler file and must coordinate configuration with the product owner.
+
 ## Operator onboarding prerequisites
 
 Before enabling hosted onboarding, register a GitHub App and Cloudflare OAuth client with minimally sufficient permissions, configure an owned HTTPS callback domain, use the independently created beta onboarding D1 database, apply `onboarding/migrations/0001_initial.sql`, and install Worker secrets using a secure provider secret store. Cloudflare's own Workers & Pages GitHub App must also be authorized for the customer's repository. Read [onboarding/README.md](onboarding/README.md).
@@ -60,7 +66,8 @@ The beta onboarding D1 is now provisioned and migrated under a dedicated Launch 
 - Dedicated Launch & Own beta onboarding D1: **created and schema-verified**.
 - Hosted onboarding Worker source, including logout and provider revocation attempts: **CI-tested, not deployed**.
 - Independent live customer login/provisioning/deployment: **not yet verified**.
-- Customer-specific forms, custom domains, and AI website generation: **future milestones**.
+- **Optional AI-assisted business copy drafts:** structured, validated and editable before private preview/approval; available only after an authorized Workers AI binding/model is configured. This does **not** generate bespoke multi-page designs.
+- Customer-specific forms, custom domains, image generation and fully bespoke AI website design: **future milestones**.
 - No license has been selected yet: this is publicly visible source, **not automatically an open-source grant**.
 
 **Product:** Launch & Own · **Tagline:** Describe it. Launch it. Own it.

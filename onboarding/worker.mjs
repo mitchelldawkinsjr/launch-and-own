@@ -2,6 +2,7 @@ import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount} from '../pipeline/cloudflare-oauth.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
 import {normalizeSite,renderSite} from '../site/render-site.mjs';
+import {draftSiteFromBrief,aiDraftConfigured} from '../site/draft-site.mjs';
 import {applyWebsite} from '../pipeline/provision-site.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {randomToken,sha256,seal,unseal} from './crypto.mjs';
@@ -170,11 +171,20 @@ async function home(env,current,notice){
     '<label for="contactEmail">Contact email (optional)</label><input id="contactEmail" name="contactEmail" type="email" maxlength="254" placeholder="hello@example.com">',
     '<label for="theme">Choose a color theme</label><select id="theme" name="theme"><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="graphite">Graphite</option></select>'
   ].join('');
+  const aiFields=[
+    '<label for="ai-name">Business name</label><input id="ai-name" name="name" maxlength="80" required placeholder="e.g. Green Willow Studio">',
+    '<label for="ai-description">Describe your business in your own words</label><textarea id="ai-description" name="description" minlength="20" maxlength="1400" rows="5" required placeholder="Tell us what you do, who you serve, and what makes your work special. Share only details you want sent to the AI provider."></textarea>',
+    '<label for="ai-theme">Color theme</label><select id="ai-theme" name="theme"><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="graphite">Graphite</option></select>',
+    '<label for="ai-email">Contact email (optional)</label><input id="ai-email" name="contactEmail" type="email" maxlength="254" placeholder="hello@example.com">'
+  ].join('');
+  const aiEntry=connected&&current.cloudflare_account_id&&aiDraftConfigured(env)?
+    '<section><h2>Describe it. Get a draft.</h2><p>Optional AI-assisted copy: your business name and description will be sent to the configured AI provider. AI may make mistakes; you must review and edit every claim before publishing. Contact email is not sent to the model.</p>'+
+    button('/draft','Draft my website copy',current.csrf,aiFields)+'</section>':'';
   const next=connected&&current.cloudflare_account_id?
     '<section><h2>Design your website</h2><p>Review your generated homepage before approving publication. Forms and custom domains remain a future beta milestone.</p>'+
     button('/preview','Generate website preview',current.csrf,siteFields)+'</section>':'';
   const historyLink=connected&&current.cloudflare_account_id?'<p><a href="/history">View previous approved launches</a></p>':'';
-  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p><p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
+  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p><p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
@@ -184,6 +194,39 @@ async function selectAccount(request,env,current){
   await verifyCloudflareAccount({accessToken:token,accountId});
   await env.DB.prepare('UPDATE onboarding_sessions SET cloudflare_account_id=? WHERE id_hash=? AND expires_at>?').bind(accountId,current.hash,now()).run();
   return redirect('/');
+}
+async function draft(request,env,current){
+  await limitAttempts(request,env);
+  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
+  if(!current?.cloudflare_account_id||!current.cloudflare_token_ct)
+    throw Error('Choose your authorized Cloudflare account first');
+  if(!aiDraftConfigured(env))
+    return fail('AI drafting is not configured. Use the manual website editor on the setup page.',503);
+  let site;
+  try{
+    site=await draftSiteFromBrief({
+      ai:env.AI,model:env.SITE_AI_MODEL,
+      name:data.get('name'),description:data.get('description'),
+      theme:data.get('theme')||'ocean',contactEmail:data.get('contactEmail')||''
+    });
+  }catch{
+    // Provider error details, raw model output and submitted prompts never
+    // enter logs or browser responses.
+    return fail('Could not prepare an AI draft. Use the manual website editor or try again.',502);
+  }
+  const themes=['ocean','forest','sunset','graphite'];
+  const fields=[
+    '<label for="draft-name">Business name</label><input id="draft-name" name="name" required maxlength="80" value="'+escape(site.name)+'">',
+    '<label for="draft-tagline">Homepage headline</label><input id="draft-tagline" name="tagline" maxlength="140" value="'+escape(site.tagline)+'">',
+    '<label for="draft-about">About your business</label><textarea id="draft-about" name="about" maxlength="650" rows="5">'+escape(site.about)+'</textarea>',
+    '<label for="draft-services">Services (one per line; up to six)</label><textarea id="draft-services" name="services" rows="5">'+escape(site.services.join('\n'))+'</textarea>',
+    '<label for="draft-theme">Theme</label><select id="draft-theme" name="theme">'+themes.map(t=>'<option value="'+t+'"'+(t===site.theme?' selected':'')+'>'+escape(t.charAt(0).toUpperCase()+t.slice(1))+'</option>').join('')+'</select>',
+    '<label for="draft-email">Contact email (optional)</label><input id="draft-email" name="contactEmail" type="email" maxlength="254" value="'+escape(site.contactEmail)+'">'
+  ].join('');
+  return view('Review your AI-assisted draft',
+    '<p role="status">This is an editable draft, not a live website. AI can make mistakes. Review all claims and contact details before previewing or approving.</p>'+
+    button('/preview','Preview this edited draft',current.csrf,fields)+
+    '<p><a href="/">Return to the manual editor</a></p>');
 }
 async function preview(request,env,current){
   await limitAttempts(request,env);
@@ -433,6 +476,7 @@ export default {
       if(request.method==='POST'){
         if(url.pathname==='/account')return await selectAccount(request,env,current);
         if(url.pathname==='/preview')return await preview(request,env,current);
+        if(url.pathname==='/draft')return await draft(request,env,current);
         if(url.pathname==='/approve')return await approve(request,env,current);
         if(url.pathname==='/launch')return await launch(request,env,current);
         if(url.pathname==='/verify')return await verify(request,env,current);
