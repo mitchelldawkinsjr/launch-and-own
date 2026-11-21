@@ -10,13 +10,21 @@ const copy=()=>structuredClone(cfg);
 const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts",
  "idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
  "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry"];
+const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql"];
 const tokenColumns=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
  "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
 const mock=(overrides={})=>{
  const calls=[];
  const fetchFn=async(url,options)=>{
   calls.push({url,options});
-  if(url.endsWith("/query"))return Response.json({success:true,result:[{results:(JSON.parse(options.body).sql.startsWith("PRAGMA")?(overrides.columns||tokenColumns):(overrides.schema||schemaNames)).map(name=>({name}))}]});
+  if(url.endsWith("/query")){
+    const sql=JSON.parse(options.body).sql;
+    if(sql==="SELECT name FROM d1_migrations ORDER BY id"){
+      if(overrides.ledgerUnavailable)return Response.json({success:false,result:[{success:false,errors:[{message:"missing ledger"}]}]});
+      return Response.json({success:true,result:[{results:(overrides.migrations??migrationNames).map(name=>({name}))}]});
+    }
+    return Response.json({success:true,result:[{results:(sql.startsWith("PRAGMA")?(overrides.columns||tokenColumns):(overrides.schema||schemaNames)).map(name=>({name}))}]});
+  }
   return Response.json({success:true,result:{name:overrides.name||expectedName,uuid:overrides.uuid||expectedId}});
  };
  return {fetchFn,calls};
@@ -42,9 +50,10 @@ test("placeholder, malformed ID, unrelated bindings and plain secret values are 
 test("remote readiness checks exact D1 metadata before read-only schema query",async()=>{
  const h=mock();
  const ready=await checkRemoteSchema({accountId,token:"test-secret",databaseId:expectedId,fetchFn:h.fetchFn});
- assert.equal(ready.status,"schema-ready");assert.equal(ready.tables,4);assert.equal(ready.indexes,5);assert.equal(ready.tokenColumns,8);
- assert.equal(h.calls.length,3);
+ assert.equal(ready.status,"schema-ready");assert.equal(ready.tables,4);assert.equal(ready.indexes,5);assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,3);
+ assert.equal(h.calls.length,4);
  assert.equal(h.calls[0].options.method,"GET");
+ assert.equal(JSON.parse(h.calls[3].options.body).sql,"SELECT name FROM d1_migrations ORDER BY id");
  assert.equal(JSON.parse(h.calls[2].options.body).sql,"PRAGMA table_info(onboarding_sessions)");
  assert.equal(h.calls[1].options.method,"POST");
  assert.equal(JSON.parse(h.calls[1].options.body).sql,"SELECT name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name");
@@ -93,4 +102,31 @@ test("missing durable receipt migration stops onboarding readiness",async()=>{
  const h=mock({schema:schemaNames.filter(x=>!x.includes("receipts"))});
  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/schema incomplete/);
  assert.equal(h.calls.length,2);
+});
+
+test("empty or out-of-sync Wrangler migration registry blocks remote readiness",async()=>{
+ for(const migrations of [[],["0001_initial.sql"],["0001_initial.sql","0003_launch_receipts.sql","0002_token_rotation.sql"],[...migrationNames,"0004_surprise.sql"]]){
+  const h=mock({migrations});
+  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/migration ledger differs/);
+  assert.equal(h.calls.length,4);
+ }
+});
+test("missing D1 migration ledger fails closed even if physical schema is correct",async()=>{
+ const h=mock({ledgerUnavailable:true});
+ await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/migration ledger is unavailable/);
+ assert.equal(h.calls.length,4);
+});
+test("required hostname, origin and isolation flags cannot be removed from Wrangler",()=>{
+ const invalid=[
+  x=>{delete x.routes},
+  x=>{x.routes=[]},
+  x=>{x.routes.push({pattern:"evil.360web.cloud",custom_domain:true})},
+  x=>{delete x.workers_dev},
+  x=>{delete x.preview_urls},
+  x=>{delete x.vars.ONBOARDING_ORIGIN}
+ ];
+ for(const mutate of invalid){
+  const c=copy();mutate(c);
+  assert.throws(()=>validateConfig(c),/Custom Domain|Disable workers.dev|ONBOARDING_ORIGIN/);
+ }
 });

@@ -77,3 +77,20 @@ The onboarding page offers a **Draft my website copy** form only when both an AI
 The customer **opts in per draft** by submitting a business name and 20–1400-character description, and may choose a theme and contact email. Only the business name and description are sent to Workers AI. OAuth tokens, user IDs, selected Cloudflare account IDs and contact emails are **not** sent to the model. The model is asked to return structured `tagline`, `about` and `services` text. Untrusted model output is parsed, length/schema-validated and HTML-escaped; no arbitrary HTML, scripts or externally sourced URLs are published. The resulting fields are presented in an **editable** form; the existing `POST /preview` and `POST /approve` remain separate mandatory steps. Until a customer previews and approves a plan, **no persistent launch record, GitHub repository, Pages project or site deployment is created by the draft endpoint**.
 
 The manual website editor is always available when AI is absent, expensive, unavailable or gives invalid output. The AI provider is only called on an explicit, CSRF-validated, rate-limited `POST /draft`; it is never invoked on routine page visits, retries or Cron. AI text may still contain hallucinations, so the customer must review every claim, service and optional contact detail before publication. The complete AI feature has mocked-provider tests but **no live Workers AI binding, production inference test or cost approval** yet. Do not claim the public beta has AI generation enabled until those checks pass.
+
+
+## Wrangler D1 migration history integrity
+
+On **November 21, 2026**, the dedicated product D1 had the complete physical schema from migrations `0001_initial.sql`, `0002_token_rotation.sql`, and `0003_launch_receipts.sql` (four tables, five application indexes, eight refresh-token columns), but Wrangler's `d1_migrations` registry was empty because the earlier schemas had been applied directly. After verifying the live D1 UUID/name, table/column/index schema, and no existing tracking rows, the backend workstream reconciled **only the three Wrangler tracking names**, without re-executing schema migrations. All three are now verified in `d1_migrations`.
+
+**This is a one-time reconciliation, not a migration strategy.** For future schema changes:
+
+1. Add a new, numbered `.sql` migration file in `onboarding/migrations/` and review its effect on tenant data.
+2. Confirm the target database is specifically `launch-and-own-onboarding-beta` in the correct Cloudflare account.
+3. Apply the migration through Wrangler's D1 migration command in the `onboarding/` directory, under an authorized operator connection; verify the result.
+4. Run `npm run preflight:onboarding` and the read-only remote preflight with dedicated Cloudflare credentials, supplied through environment variables rather than files or GitHub comments.
+5. Remote preflight checks the **exact identity**, all required tables/indexes/refresh columns, and the **complete ordered Wrangler migration ledger** against the SQL filenames in this repository. Missing, reordered, unexpected or unrecorded migrations fail closed.
+
+Never re-run existing `ALTER TABLE` migrations or manually add tracking names unless an authorized operator has independently confirmed the matching physical schema and a reviewed, incident-specific recovery plan. The preflight **never modifies** database schema or migration history.
+
+Cloudflare documentation: https://developers.cloudflare.com/d1/reference/migrations/.

@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 // Nonsecret beta-onboarding config and isolated D1-schema preflight.
 // Default is offline. --remote only runs a read-only query against the configured D1.
-import {readFileSync} from "node:fs";
+import {readFileSync,readdirSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 const DEFAULT_PATH=new URL("./wrangler.jsonc",import.meta.url);
+// Discover actual migration filenames so newly added SQL files block stale deployments.
+const MIGRATIONS=Object.freeze(readdirSync(new URL("./migrations/",import.meta.url))
+  .filter(name=>/^\d{4}_[a-z0-9_-]+\.sql$/i.test(name)).sort());
+if(MIGRATIONS.length===0)throw Error("No onboarding SQL migrations found");
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const REFERENCE_D1="00000000-0000-0000-0000-000000000000";
 const TABLES=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts"];
@@ -26,12 +30,14 @@ export function validateConfig(config){
   if(Object.keys(config.vars||{}).some(k=>/SECRET|KEY|TOKEN|PASSWORD/i.test(k)))
     throw Error("Potential credentials must not be stored as plain vars");
   // Only the single approved onboarding host; never wildcard routes or workers.dev exposure.
-  const routes=config.routes||[];
-  if(routes.length>1||routes.some(r=>r?.pattern!=="onboard.360web.cloud"||r.custom_domain!==true))
-    throw Error("Onboarding may only use the onboard.360web.cloud Custom Domain");
-  if(routes.length&&(config.workers_dev!==false||config.preview_urls!==false))throw Error("Disable workers.dev and preview URLs for the onboarding Worker");
-  if(config.vars?.ONBOARDING_ORIGIN!==undefined&&config.vars.ONBOARDING_ORIGIN!=="https://"+routes[0]?.pattern)
-    throw Error("ONBOARDING_ORIGIN must match the Custom Domain");
+  const routes=config.routes;
+  if(!Array.isArray(routes)||routes.length!==1||routes[0]?.pattern!=="onboard.360web.cloud"||
+      routes[0].custom_domain!==true)
+    throw Error("Onboarding requires exactly one onboard.360web.cloud Custom Domain");
+  if(config.workers_dev!==false||config.preview_urls!==false)
+    throw Error("Disable workers.dev and preview URLs for the onboarding Worker");
+  if(config.vars?.ONBOARDING_ORIGIN!=="https://onboard.360web.cloud")
+    throw Error("ONBOARDING_ORIGIN must match the approved HTTPS Custom Domain");
   return {status:"configuration-valid",worker:config.name,databaseId,databaseName:db[0].database_name};
 }
 export async function checkRemoteSchema({accountId,token,databaseId,expectedDatabaseName="launch-and-own-onboarding-beta",fetchFn=fetch}){
@@ -64,7 +70,22 @@ export async function checkRemoteSchema({accountId,token,databaseId,expectedData
     "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
   const absent=required.filter(x=>!columns.has(x));
   if(absent.length)throw Error("D1 token-rotation migration missing: "+absent.join(", "));
-  return {status:"schema-ready",databaseId,databaseName:expectedDatabaseName,tables:TABLES.length,indexes:INDEXES.length,tokenColumns:required.length};
+  // A correct physical D1 schema is insufficient when Wrangler's migration
+  // ledger is empty. Future migrations would retry old ALTER TABLE commands.
+  // This is deliberately read-only: never repair tracking from preflight.
+  const ledger=await fetchFn(url+"/query",{method:"POST",
+    headers:{...headers,"content-type":"application/json"},
+    body:JSON.stringify({sql:"SELECT name FROM d1_migrations ORDER BY id"}),redirect:"error"});
+  if(!ledger.ok)throw Error("D1 migration ledger check denied (HTTP "+ledger.status+")");
+  const ledgerBody=await ledger.json();
+  if(ledgerBody.success!==true||ledgerBody.result?.[0]?.success===false||
+     !Array.isArray(ledgerBody.result?.[0]?.results))
+    throw Error("D1 migration ledger is unavailable; deploy preflight refused");
+  const tracked=ledgerBody.result[0].results.map(x=>x.name);
+  if(tracked.length!==MIGRATIONS.length||MIGRATIONS.some((name,i)=>tracked[i]!==name))
+    throw Error("D1 migration ledger differs from repository migration files; do not reapply or auto-backfill");
+  return {status:"schema-ready",databaseId,databaseName:expectedDatabaseName,
+    tables:TABLES.length,indexes:INDEXES.length,tokenColumns:required.length,migrations:MIGRATIONS.length};
 }
 async function main(){
   const cfg=JSON.parse(readFileSync(DEFAULT_PATH,"utf8"));
