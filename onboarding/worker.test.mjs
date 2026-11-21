@@ -355,3 +355,77 @@ test('expired GitHub refresh grant prevents launch without changing customer res
   assert(!h.calls.some(c=>c.url==='https://api.github.com/user/repos'));
  }finally{globalThis.fetch=originalFetch}
 });
+
+
+test('scheduled recovery resumes a previously approved but interrupted website launch without creating duplicate repos',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  const pre=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+pre.headers.get('location')).searchParams.get('id');
+  // A crash after approval and before provider calls leaves a stale provisioning lease.
+  h.sqlite.prepare("UPDATE onboarding_launches SET status='provisioning',approved_at=1,updated_at=1 WHERE id=?").run(id);
+  await worker.scheduled({},h.env);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'pending_deployment');
+  assert(h.resourceState.repo&&h.resourceState.pages);
+  assert.equal(h.calls.filter(x=>x.url==='https://api.github.com/user/repos').length,1);
+  // Another scheduled run cannot repeat provisioning because its status changed.
+  await worker.scheduled({},h.env);
+  assert.equal(h.calls.filter(x=>x.url==='https://api.github.com/user/repos').length,1);
+ }finally{globalThis.fetch=originalFetch}
+});
+test('scheduled recovery promotes only verified, exact-commit production deploys to live',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  const pre=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+pre.headers.get('location')).searchParams.get('id');
+  await h.request('/approve',{method:'POST',cookie:sessionCookie,body:form({csrf,id})});
+  h.resourceState.pages.canonical_deployment.deployment_trigger.metadata.commit_hash='b'.repeat(40);
+  h.sqlite.prepare("UPDATE onboarding_launches SET updated_at=1 WHERE id=?").run(id);
+  await worker.scheduled({},h.env);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'pending_deployment');
+  h.resourceState.pages.canonical_deployment.deployment_trigger.metadata.commit_hash=GENERATED_SHA;
+  h.sqlite.prepare("UPDATE onboarding_launches SET updated_at=1 WHERE id=?").run(id);
+  await worker.scheduled({},h.env);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'live');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('scheduled recovery never creates resources for preview-only or expired-session launch records',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  h.sqlite.prepare('UPDATE onboarding_launches SET updated_at=1').run();
+  await worker.scheduled({},h.env);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'preview');
+  h.sqlite.prepare("UPDATE onboarding_launches SET status='provisioning',approved_at=1 WHERE 1=1").run();
+  h.sqlite.prepare('UPDATE onboarding_sessions SET expires_at=1').run();
+  await worker.scheduled({},h.env);
+  assert.equal(h.resourceState.repo,null);
+  assert(!h.calls.some(x=>x.url==='https://api.github.com/user/repos'));
+ }finally{globalThis.fetch=originalFetch}
+});
+test('scheduled recovery does not retry failed jobs until a customer explicitly retries',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  const pre=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+pre.headers.get('location')).searchParams.get('id');
+  h.resourceState.failPagesOnce=true;
+  await h.request('/approve',{method:'POST',cookie:sessionCookie,body:form({csrf,id})});
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'failed');
+  h.sqlite.prepare("UPDATE onboarding_launches SET updated_at=1 WHERE id=?").run(id);
+  await worker.scheduled({},h.env);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'failed');
+  assert.equal(h.resourceState.pages,null);
+ }finally{globalThis.fetch=originalFetch}
+});

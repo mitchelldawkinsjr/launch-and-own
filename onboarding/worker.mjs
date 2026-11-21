@@ -244,11 +244,10 @@ async function launch(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
   return await launchRequest(env,current,data.get('id'));
 }
-async function verify(request,env,current){
-  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
-  const id=data.get('id'),item=await getLaunch(env,current,id);
+async function verifyLaunchResult(env,current,item){
   if(!item||!['pending_deployment','live'].includes(item.status))throw Error('There is no deployment to verify');
-  if(item.cloudflare_account_id!==current.cloudflare_account_id)throw Error('Account changed since approval');
+  if(item.cloudflare_account_id!==current.cloudflare_account_id||item.github_login.toLowerCase()!==current.github_login.toLowerCase())
+    throw Error('Authorized account changed since approval');
   if(!current.cloudflare_token_ct)throw Error('Reconnect your Cloudflare account');
   const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   const provisioned=item.provision_result?JSON.parse(item.provision_result):null;
@@ -256,8 +255,61 @@ async function verify(request,env,current){
   if(typeof expectedCommitSha!=='string'||!/^[a-f0-9]{40}$/i.test(expectedCommitSha))
     throw Error('The approved source revision is missing. Deployment cannot be confirmed safely.');
   const result=await verifyWebsite({name:item.customer_name,accountId:item.cloudflare_account_id,githubOwner:item.github_login,forms:false},{cloudflareToken:token,expectedCommitSha});
-  if(result.status==='live')await env.DB.prepare("UPDATE onboarding_launches SET status='live',updated_at=? WHERE id=? AND session_hash=? AND status IN ('pending_deployment','live')").bind(now(),id,current.hash).run();
-  return redirect('/review?id='+encodeURIComponent(id));
+  if(result.status==='live')
+    await env.DB.prepare("UPDATE onboarding_launches SET status='live',error_code=NULL,updated_at=? WHERE id=? AND session_hash=? AND status IN ('pending_deployment','live')")
+      .bind(now(),item.id,current.hash).run();
+  else
+    await env.DB.prepare("UPDATE onboarding_launches SET updated_at=? WHERE id=? AND session_hash=? AND status='pending_deployment'")
+      .bind(now(),item.id,current.hash).run();
+  return result;
+}
+async function verify(request,env,current){
+  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
+  const item=await getLaunch(env,current,data.get('id'));
+  await verifyLaunchResult(env,current,item);
+  return redirect('/review?id='+encodeURIComponent(item.id));
+}
+// An interrupted launch is recoverable only while the customer has a valid,
+// encrypted session. Never retry a merely previewed/unapproved or failed job.
+async function recoverPendingLaunches(env){
+  const ts=now();
+  const rows=await env.DB.prepare(`SELECT
+    l.id,l.status,l.updated_at,l.customer_name,l.github_login AS launch_login,
+    l.cloudflare_account_id AS launch_account,l.provision_result,
+    s.id_hash,s.github_login,s.github_token_ct,s.github_refresh_token_ct,
+    s.github_token_expires_at,s.github_refresh_expires_at,s.cloudflare_token_ct,
+    s.cloudflare_refresh_token_ct,s.cloudflare_token_expires_at,s.cloudflare_refresh_expires_at,
+    s.cloudflare_account_id,s.expires_at
+    FROM onboarding_launches l JOIN onboarding_sessions s ON l.session_hash=s.id_hash
+    WHERE s.expires_at>? AND
+     ((l.status='provisioning' AND l.updated_at<?)
+      OR (l.status='pending_deployment' AND l.updated_at<?))
+    ORDER BY l.updated_at ASC LIMIT 5`)
+    .bind(ts,ts-300,ts-90).all();
+  for(const job of rows.results||[]){
+    const current={...job,hash:job.id_hash};
+    if(job.github_login.toLowerCase()!==String(job.launch_login).toLowerCase()||
+      job.cloudflare_account_id!==job.launch_account)continue;
+    try{
+      if(job.status==='provisioning'){
+        // launchRequest takes an atomic lease and is idempotent if the GitHub
+        // repository or Cloudflare project was already partially created.
+        await launchRequest(env,current,job.id);
+      }else if(job.status==='pending_deployment'){
+        await verifyLaunchResult(env,current,{
+          id:job.id,status:job.status,customer_name:job.customer_name,
+          github_login:job.launch_login,cloudflare_account_id:job.launch_account,
+          provision_result:job.provision_result
+        });
+      }
+    }catch{
+      // Keep provider errors and encrypted tokens out of the scheduled logs.
+      // A failed verification remains pending for later retry/owner inspection;
+      // an interrupted provisioning call is idempotently retried, not deleted.
+      await env.DB.prepare("UPDATE onboarding_launches SET updated_at=?,error_code=? WHERE id=? AND session_hash=? AND status IN ('pending_deployment','provisioning')")
+        .bind(now(),'scheduled_retry_waiting',job.id,current.hash).run();
+    }
+  }
 }
 async function logout(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
@@ -317,11 +369,14 @@ export default {
     }
   },
   async scheduled(_event,env){
-    // Remove expired authentication and temporary sessions without touching customer sites.
-    const expired=now();
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM onboarding_flows WHERE expires_at<?').bind(expired),
-      env.DB.prepare('DELETE FROM onboarding_sessions WHERE expires_at<?').bind(expired)
-    ]);
+    // Best-effort bounded recovery of approved launches with still-valid
+    // customer authorization. Does not operate across expired sessions.
+    try{await recoverPendingLaunches(env)}finally{
+      const expired=now();
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM onboarding_flows WHERE expires_at<?').bind(expired),
+        env.DB.prepare('DELETE FROM onboarding_sessions WHERE expires_at<?').bind(expired)
+      ]);
+    }
   }
 };

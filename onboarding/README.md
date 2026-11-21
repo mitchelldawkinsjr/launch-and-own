@@ -34,3 +34,17 @@ The Worker now preserves `refresh_token` / `expires_in` returned from GitHub and
 **Provider registration detail:** GitHub App user tokens should be configured to expire (GitHub supports `offline_access` and rotating refresh tokens). The Cloudflare OAuth client must support `refresh_token` as an allowed grant type to return refresh credentials. Without an available refresh credential, the user must reauthorize when the access token expires. The `onboarding_sessions` cookie still expires after one hour; refresh handling does not create indefinite login sessions or unattended authorization.
 
 **Before deployment:** verify `0002` migration on the product-owned D1, `npm test`, the exact provider scopes/grants, and the real callback/refresh/revocation flows with a consenting beta account. This is CI-tested against simulated endpoints, **not** live OAuth acceptance.
+
+
+## Bounded recovery of approved website launches
+
+The onboarding Worker now has a **five-minute Cron Trigger** (`onboarding/wrangler.jsonc`) to recover work if an approved provisioning request is interrupted. It looks for:
+
+- **Stale `provisioning` records** older than five minutes, only while the approving customer's encrypted session is valid. It reuses the existing idempotent provisioning path and refuses unrelated customer-owned resources.
+- **`pending_deployment` records** older than 90 seconds, checking the **exact expected production GitHub SHA** before changing status to `live`.
+
+Each Cron pass handles at most five records. A preview-only, failed, unapproved, or expired-session launch is **never** automatically provisioned; failed launches still require the customer's explicit retry. Provider failures remain generic and leave a safe status for a later check.
+
+**Important limit:** this is *bounded recovery*, not a durable job queue across session expiry. Sessions currently expire after one hour, and the cleanup process may remove their associated launch records. A persistent user/account authorization model, independent job runner, explicit retention policy and long-lived job history are required before promising hands-off multi-day retries or perpetual maintenance. Cron is not active until the isolated Worker is deployed by the domain/onboarding operator.
+
+Acceptance tests simulate a crashed provisioning call, a stale deployment SHA, a subsequent matching deployment, expired sessions and failed-job no-retry behavior.
