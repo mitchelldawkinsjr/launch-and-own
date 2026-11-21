@@ -40,6 +40,10 @@ npm run preflight:onboarding
 
 Tests use simulated provider APIs and an in-memory D1-compatible SQLite adapter. Passing tests do **not** establish real customer OAuth or deployment.
 
+## Domain and OAuth agent handoff
+
+If another agent manages `*.mitchelldawkins.com`, give them [**the domain + OAuth handoff checklist**](docs/HANDOFF_DOMAIN_OAUTH.md). It specifies only the proposed `onboard.mitchelldawkins.com` hostname, exact GitHub/Cloudflare callback URLs, Cloudflare domain-publisher TXT verification, required permissions, owner approvals, and the nonsecret acceptance report. **Do not create a wildcard DNS record or publish OAuth visibility without owner approval.**
+
 ## Operator onboarding prerequisites
 
 Before enabling hosted onboarding, register a GitHub App and Cloudflare OAuth client with minimally sufficient permissions, configure an owned HTTPS callback domain, use the independently created beta onboarding D1 database, apply `onboarding/migrations/0001_initial.sql`, and install Worker secrets using a secure provider secret store. Cloudflare's own Workers & Pages GitHub App must also be authorized for the customer's repository. Read [onboarding/README.md](onboarding/README.md).
