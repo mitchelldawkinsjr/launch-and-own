@@ -42,7 +42,9 @@ Tests use simulated provider APIs and an in-memory D1-compatible SQLite adapter.
 
 ## Domain and OAuth agent handoff
 
-If another agent manages `*.360web.cloud`, give them [**the domain + OAuth handoff checklist**](docs/HANDOFF_DOMAIN_OAUTH.md). It specifies only the proposed `onboard.360web.cloud` hostname, exact GitHub/Cloudflare callback URLs, Cloudflare domain-publisher TXT verification, required permissions, owner approvals, and the nonsecret acceptance report. **Do not create a wildcard DNS record or publish OAuth visibility without owner approval.**
+If another agent manages the Cloudflare zone for `360web.cloud`, give them [**the domain + OAuth handoff checklist**](docs/HANDOFF_DOMAIN_OAUTH.md). It specifies only the selected `onboard.360web.cloud` hostname, exact GitHub/Cloudflare callback URLs, Cloudflare domain-publisher TXT verification, required permissions, owner approvals, and the nonsecret acceptance report. **Do not create a wildcard DNS record or publish OAuth visibility without owner approval.**
+
+**Current domain setup blockers:** Cloudflare reports the `360web.cloud` zone as pending and a proxied `onboard.360web.cloud` CNAME already points at the zone apex. The domain agent owns activation and safe resolution of that record before attaching the Worker. No public OAuth service should be represented as live yet.
 
 ## Operator onboarding prerequisites
 
@@ -53,6 +55,7 @@ The beta onboarding D1 is now provisioned and migrated under a dedicated Launch 
 ## Project status
 
 - Reusable planner and website-only provisioner: **CI-tested**.
+- **Editable business-site content and live HTML preview:** CI-tested. Customers can enter a headline, about text, services, contact email and color theme, view the exact generated HTML before approval, then publish it. This is a deterministic template, **not AI-generated multi-page design**.
 - GitHub/Cloudflare authorization-code and PKCE primitives: **CI-tested**.
 - Dedicated Launch & Own beta onboarding D1: **created and schema-verified**.
 - Hosted onboarding Worker source, including logout and provider revocation attempts: **CI-tested, not deployed**.

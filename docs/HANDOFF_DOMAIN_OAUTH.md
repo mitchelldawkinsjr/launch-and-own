@@ -3,12 +3,12 @@
 **Project:** [Launch & Own](https://github.com/mitchelldawkinsjr/launch-and-own) — *Describe it. Launch it. Own it.*  
 **Tracking:** [Beta launch issue #2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2)  
 **Owner of this handoff:** agent responsible for `360web.cloud`, its Cloudflare zone, and provider-application registration  
-**As of:** November 21, 2026  
+**As of:** November 21, 2026 (revised after approved hostname switch)  
 **Status:** Ready for authorized domain/app setup. **Do not interpret this handoff as approval to publish a public OAuth app or expose a customer login service.**
 
 ## Objective and exact hostname
 
-Prepare **`https://onboard.360web.cloud`** as the dedicated **Launch & Own onboarding application** hostname. This is a proposed, consistent choice for the beta. Use the same exact HTTPS origin across the Worker, GitHub App, Cloudflare OAuth client, and callback registrations.
+Prepare **`https://onboard.360web.cloud`** as the dedicated **Launch & Own onboarding application** hostname. This is the currently selected hostname for the beta. The previous `onboard.mitchelldawkins.com` hostname is retired from this plan; do not register OAuth callbacks or routes there. Use the same exact HTTPS origin across the Worker, GitHub App, Cloudflare OAuth client, and callback registrations.
 
 `*.360web.cloud` in this task means **work within the domain/zone**, not creation of a wildcard DNS record or `*/*` Worker route. **Only claim the single host `onboard.360web.cloud`.** Do not change `360web.cloud` apex, `www`, other subdomains, domain nameservers, mail records, or unrelated websites.
 
@@ -29,9 +29,9 @@ The proposed hostname and exact callback paths match `onboarding/worker.mjs`. Do
 
 ## Current verified state (read this before making changes)
 
-- **Hostname changed by the owner on 2026-11-21** from `onboard.mitchelldawkins.com` to `onboard.360web.cloud`. `360web.cloud` (registered at Hostinger) was moved to Cloudflare DNS the same day; its apex, `www` and mail records were imported and are not part of this task.
-- The `360web.cloud` zone is delegated to Cloudflare nameservers.
-- The Cloudflare DNS query returned **no record for `onboard.360web.cloud`** at the time of this handoff. Recheck just before attachment; do not overwrite a record if another agent creates one meanwhile.
+- **Current Cloudflare read-only audit:** The `360web.cloud` zone is **pending**, not active. Its nameserver/ownership verification must be completed before production proxying; do not claim it is live.
+- A **proxied CNAME already exists** for `onboard.360web.cloud`, pointing to `360web.cloud`. Do **not** overwrite it without the zone agent's authorization and a documented safe cutover. It may conflict with attachment of a Worker Custom Domain. Recheck live state before any change.
+- **Domain agent owns resolving both blockers:** zone activation and the existing DNS record's intended use/removal/replacement. Backend agent should not alter either.
 - The reusable product lives at `mitchelldawkinsjr/launch-and-own`; `Brittney-Site` is an **independent customer reference**, not the platform hosting target.
 - `onboarding/wrangler.jsonc` has the existing beta Worker name and a **dedicated, already created/migrated** D1 binding: `launch-and-own-onboarding-beta` with UUID `b89fb8aa-67a2-49fa-b48c-584e305b5bb2`. The application migration has three onboarding tables and three indexes, confirmed in Cloudflare. **Do not create a second database or point this Worker at Brittney's database.**
 - The Worker implementation exists in `onboarding/worker.mjs`, but the hosted OAuth application has **not been publicly deployed or live accepted**.
@@ -61,13 +61,13 @@ If domain-side or backend-side work is blocked by missing permission, **stop and
 
 ### 1. Reserve and audit the hostname
 
-- [ ] Verify you control the active Cloudflare zone for `360web.cloud`.
-- [ ] Recheck DNS/Workers Custom Domains/Worker routes for `onboard.360web.cloud`. Report collisions rather than replacing records.
+- [ ] Verify you control the Cloudflare zone for `360web.cloud` **and activate it** (currently pending). Follow the zone's actual nameserver/verification setup; do not change unrelated zones.
+- [ ] Audit the existing **proxied CNAME `onboard.360web.cloud` → `360web.cloud`**, plus any Worker routes/Custom Domains. Determine its ownership and intended purpose before a controlled correction; never delete or replace it blindly.
 - [ ] Choose the single Custom Domain `onboard.360web.cloud` for **`launch-and-own-onboarding-beta`**, not a wildcard subdomain.
 - [ ] Verify that the hostname is not currently used by an unrelated service or certificate setup.
 - [ ] Record a before/after snapshot of relevant DNS name/type and Worker routing *without* leaking private zone export contents.
 
-**Preferred Cloudflare method:** attach a **Worker Custom Domain**. Cloudflare creates the required DNS record and TLS certificate automatically. Do **not** manually add an arbitrary A/AAAA/CNAME to guess the Worker endpoint. A Custom Domain cannot use a hostname with an existing CNAME; stop and investigate any conflict. Do not attach a public route until deployment readiness and owner approval.
+**Preferred Cloudflare method:** attach a **Worker Custom Domain**. Cloudflare creates the required DNS record and TLS certificate automatically. Do **not** manually add an arbitrary A/AAAA/CNAME to guess the Worker endpoint. A Custom Domain may conflict with the existing CNAME; stop and investigate before attaching it. Also wait for `360web.cloud` to become active before claiming HTTPS/proxy readiness. Do not attach a public route until deployment readiness and owner approval.
 
 Docs: https://developers.cloudflare.com/workers/configuration/routing/custom-domains/
 
@@ -165,7 +165,7 @@ Post a concise **nonsecret** completion note in [Issue #2](https://github.com/mi
 | Changed artifacts | Links to approved GitHub PRs and Cloudflare resources, not credentials |
 | Handoff result | **ready for backend acceptance**, **partially complete**, or **blocked** |
 
-**Definition of done for this agent:** a controlled HTTPS onboarding hostname, correctly registered OAuth callbacks, verified DNS ownership, documented scope/permission configuration, and a precise nonsecret status report. **This does not mean the whole Launch & Own product has completed a real customer launch.**
+**Definition of done for this agent:** an **active** `360web.cloud` zone, safe handling of the pre-existing `onboard` CNAME, a controlled HTTPS onboarding hostname, correctly registered OAuth callbacks, verified DNS ownership, documented scope/permission configuration, and a precise nonsecret status report. **This does not mean the whole Launch & Own product has completed a real customer launch.**
 
 ## Reusable agent starting prompt
 
