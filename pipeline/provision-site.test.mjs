@@ -5,7 +5,7 @@ const input={name:"Test Client",accountId:"0123456789abcdef0123456789abcdef",git
 const repoName="esp-test-client",pagesName=repoName+"-site";
 const EXPECTED_SHA="a".repeat(40);
 function harness({repoExisting=false,projectExisting=false,otherOwner=false,collision=false,legacyMarker=false,failPages=false}={}) {
- const history=[],state={file:repoExisting,repo:repoExisting?{id:321,name:repoName,description:collision?"Unrelated repository":legacyMarker?"Elite Site Pipeline managed site: test-client":"Launch & Own managed site: test-client",private:true,default_branch:"main",owner:{login:"tester"}}:null,
+ const history=[],state={file:repoExisting,homepageHtml:null,repo:repoExisting?{id:321,name:repoName,description:collision?"Unrelated repository":legacyMarker?"Elite Site Pipeline managed site: test-client":"Launch & Own managed site: test-client",private:true,default_branch:"main",owner:{login:"tester"}}:null,
  project:projectExisting?{name:pagesName,production_branch:"main",source:{type:"github",config:{owner:"tester",repo_name:repoName,repo_id:"321"}}}:null};
  const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{"content-type":"application/json"}});
  const fetchFn=async(url,opts={})=>{
@@ -17,10 +17,10 @@ function harness({repoExisting=false,projectExisting=false,otherOwner=false,coll
      if(path==="/repos/tester/"+repoName&&method==="GET")return state.repo?json(state.repo):json({message:"Not found"},404);
      if(path==="/user/repos"&&method==="POST"){state.repo={id:321,name:repoName,owner:{login:"tester"},description:body.description,private:body.private,default_branch:"main"};return json(state.repo,201);}
      if(path==="/repos/tester/"+repoName+"/branches/main"&&method==="GET")return json({commit:{sha:EXPECTED_SHA}});
-     if(path==="/repos/tester/"+repoName+"/contents/public/index.html"&&method==="GET")return state.file?json({type:"file",sha:"abc"}):json({},404);
+     if(path==="/repos/tester/"+repoName+"/contents/public/index.html"&&method==="GET")return state.file?json({type:"file",sha:"abc",encoding:"base64",content:state.homepageHtml?Buffer.from(state.homepageHtml).toString("base64"):undefined}):json({},404);
      if(path==="/repos/tester/"+repoName+"/contents/public/index.html"&&method==="PUT"){
        assert.equal(body.branch,"main");assert.match(Buffer.from(body.content,"base64").toString("utf8"),/Test Client/);
-       state.file=true;return json({content:{sha:"new"}},201);
+       state.file=true;state.homepageHtml=Buffer.from(body.content,"base64").toString("utf8");return json({content:{sha:"new"}},201);
      }
    }
    if(u.hostname==="api.cloudflare.com"){
@@ -106,5 +106,33 @@ test("custom host option refuses to touch resources until domain setup is implem
  const h=harness();
  assert.equal(previewWebsite({...input,hostname:"example.com"}).executable,false);
  await assert.rejects(applyWebsite({...input,hostname:"example.com"},{...tokens,fetchFn:h.fetchFn}),/Custom domain/);
+ assert.equal(h.history.length,0);
+});
+
+test("customer-approved website content is the HTML created for Cloudflare Pages",async()=>{
+ const h=harness();
+ const configured={...input,site:{tagline:"Thoughtful portraits for every milestone",about:"Family photos and creative events.",
+  services:["Portraits","Events"],theme:"forest",contactEmail:"hello@studio.example"}};
+ await applyWebsite(configured,{...tokens,fetchFn:h.fetchFn});
+ assert.match(h.state.homepageHtml,/<h1>Thoughtful portraits for every milestone<\/h1>/);
+ assert.match(h.state.homepageHtml,/Portraits/);
+ assert.match(h.state.homepageHtml,/mailto:hello@studio\.example/);
+ assert.match(h.state.homepageHtml,/--accent:#286247/);
+ // Exact matching retry is safe and makes no writes.
+ h.history.length=0;
+ const retried=await applyWebsite(configured,{...tokens,fetchFn:h.fetchFn});
+ assert.deepEqual(retried.journal.map(x=>x.action),["reused","preserved","reused"]);
+ assert(h.history.every(x=>x.method==="GET"));
+});
+test("approved preview cannot silently reuse a different existing homepage",async()=>{
+ const h=harness();
+ await applyWebsite({...input,site:{tagline:"Original design"}},{...tokens,fetchFn:h.fetchFn});
+ h.history.length=0;
+ await assert.rejects(applyWebsite({...input,site:{tagline:"Different design"}},{...tokens,fetchFn:h.fetchFn}),/differs from the approved preview/);
+ assert(h.history.every(x=>x.method==="GET"));
+});
+test("invalid site copy or theme is rejected before any infrastructure is created",async()=>{
+ const h=harness();
+ await assert.rejects(applyWebsite({...input,site:{theme:"evil-theme"}},{...tokens,fetchFn:h.fetchFn}),/Unsupported website theme/);
  assert.equal(h.history.length,0);
 });

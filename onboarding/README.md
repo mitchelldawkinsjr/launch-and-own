@@ -48,3 +48,9 @@ Each Cron pass handles at most five records. A preview-only, failed, unapproved,
 **Important limit:** this is *bounded recovery*, not a durable job queue across session expiry. Sessions currently expire after one hour, and the cleanup process may remove their associated launch records. A persistent user/account authorization model, independent job runner, explicit retention policy and long-lived job history are required before promising hands-off multi-day retries or perpetual maintenance. Cron is not active until the isolated Worker is deployed by the domain/onboarding operator.
 
 Acceptance tests simulate a crashed provisioning call, a stale deployment SHA, a subsequent matching deployment, expired sessions and failed-job no-retry behavior.
+
+## Business website preview and approval
+
+The website-only beta now accepts a business/site name, homepage headline, about text, up to six services, an optional contact email and a supported color theme. The user can open a session-protected `GET /site-preview?id=...` after submitting their details. This preview renders the exact static HTML that `applyWebsite()` will put in `public/index.html` **after** an explicit approval; unapproved previews never create repositories or Pages projects. The template is responsive, accessible, script-free and performs strict length/email/theme validation and HTML escaping. It uses no remote fonts, images or trackers.
+
+A safe retry against an existing customer repository compares the stored HTML with the approved preview and refuses to reuse a different page. Existing customer files are never overwritten. This feature does not yet generate bespoke AI design, multi-page navigation, upload images, collect contact-form submissions or manage custom domains. Future AI-assisted content drafts must still be previewed and approved by the customer before publishing.
