@@ -14,7 +14,7 @@ function harness(){
  const DB={prepare(sql){return {bind(...args){return {first:async()=>sqlite.prepare(sql).get(...args)||null,run:async()=>sqlite.prepare(sql).run(...args),all:async()=>({results:sqlite.prepare(sql).all(...args)})}}}},batch:async(stmts)=>Promise.all(stmts.map(s=>s.run()))};
  const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
  const calls=[];
- const resourceState={repo:null,homepage:false,pages:null,failPagesOnce:false,failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false};
+ const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,failPagesOnce:false,failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false};
  const fetchFn=async(url,opts={})=>{
   calls.push({url,method:opts.method||'GET'});
   if(url==='https://github.com/login/oauth/access_token'){
@@ -52,8 +52,8 @@ function harness(){
   }
   if(url===root+'/branches/main')return Response.json({commit:{sha:GENERATED_SHA}});
   if(url===root+'/contents/public/index.html'){
-    if(opts.method==='PUT'){resourceState.homepage=true;return Response.json({content:{sha:'abc'}},{status:201})}
-    return resourceState.homepage?Response.json({type:'file',sha:'abc'}):new Response('{}',{status:404});
+    if(opts.method==='PUT'){resourceState.homepage=true;resourceState.homepageHtml=Buffer.from(JSON.parse(opts.body).content,'base64').toString('utf8');return Response.json({content:{sha:'abc'}},{status:201})}
+    return resourceState.homepage?Response.json({type:'file',sha:'abc',encoding:'base64',content:Buffer.from(resourceState.homepageHtml).toString('base64')}):new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});
   if(url===pages && opts.method==='POST'){
@@ -427,5 +427,62 @@ test('scheduled recovery does not retry failed jobs until a customer explicitly 
   await worker.scheduled({},h.env);
   assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'failed');
   assert.equal(h.resourceState.pages,null);
+ }finally{globalThis.fetch=originalFetch}
+});
+
+
+test('site preview shows exactly the approved copy, and deployed HTML matches it',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  const req=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio',
+   tagline:"Moments worth remembering",about:"Family portraits with thoughtful details",
+   services:"Portraits\nEvents",theme:"sunset",contactEmail:"hello@willow.example"})});
+  assert.equal(req.status,303);
+  const id=new URL(origin+req.headers.get('location')).searchParams.get('id');
+  const page=await h.request('/site-preview?id='+id,{cookie:sessionCookie});
+  assert.equal(page.status,200);
+  assert.match(page.headers.get('content-security-policy'),/default-src 'none'/);
+  assert.match(page.headers.get('cache-control'),/no-store/);
+  const html=await page.text();
+  assert.match(html,/Moments worth remembering/);
+  assert.match(html,/Family portraits/);
+  assert.match(html,/Portraits/);
+  assert.match(html,/--accent:#994936/);
+  const review=await (await h.request('/review?id='+id,{cookie:sessionCookie})).text();
+  assert.match(review,/Open your website preview/);
+  const approved=await h.request('/approve',{method:'POST',cookie:sessionCookie,body:form({csrf,id})});
+  assert.equal(approved.status,303);
+  assert.equal(h.resourceState.homepageHtml,html);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_launches').get().status,'pending_deployment');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('a different signed-in customer cannot open the private website preview',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const first=await bootstrap(h);await connectCloudflare(h,first.sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:first.sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:first.sessionCookie,body:form({csrf,accountId})});
+  const p=await h.request('/preview',{method:'POST',cookie:first.sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL(origin+p.headers.get('location')).searchParams.get('id');
+  const second=await bootstrap(h);
+  const denied=await h.request('/site-preview?id='+id,{cookie:second.sessionCookie});
+  assert.equal(denied.status,404);
+  assert(!((await denied.text()).includes('Willow Studio')));
+ }finally{globalThis.fetch=originalFetch}
+});
+test('unsafe color/theme configuration cannot create launch records or provider resources',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  const invalid=await h.request('/preview',{method:'POST',cookie:sessionCookie,
+    body:form({csrf,name:'Willow Studio',theme:'javascript:alert(1)'})});
+  assert.equal(invalid.status,400);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS c FROM onboarding_launches').get().c,0);
+  assert.equal(h.resourceState.repo,null);
  }finally{globalThis.fetch=originalFetch}
 });
