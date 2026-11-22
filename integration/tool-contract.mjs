@@ -58,7 +58,7 @@ function validSiteSpec(spec) {
       (!textIn(spec.contactEmail, 3, 254) ||
        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(spec.contactEmail)))
     deny('invalid_arguments');
-  if (!nullable(spec.theme) ||
+  if (!nullable(spec.theme) &&
       !['ocean', 'forest', 'sunset', 'graphite'].includes(spec.theme))
     deny('invalid_arguments');
   // Untrusted model input cannot include HTML/ZIP/blob URLs or provider IDs.
