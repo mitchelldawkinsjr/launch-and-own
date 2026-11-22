@@ -165,7 +165,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     let proposal;
     try{
       proposal=await proposeWebsiteUpdate({...inputFor(item.job,site),explicitlyApproved:true,
-        approvedHtmlSha256:ticket.approvedHtmlSha256,expectedBaseCommitSha:ticket.baseCommitSha},{githubToken,fetchFn});
+        approvedHtmlSha256:ticket.approvedHtmlSha256,expectedBaseCommitSha:ticket.baseCommitSha,
+        expectedRepositoryId:item.job.repository_id},{githubToken,fetchFn});
     }catch {
       return fail('GitHub could not prepare the approved PR. Confirm the GitHub App has Pull requests: write permission and try a fresh preview. No merge or publication was performed.',409);
     }
