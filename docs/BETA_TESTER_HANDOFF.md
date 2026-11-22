@@ -6,7 +6,7 @@
 
 ## Start here: no Node.js, Git commands, or API keys
 
-Open **https://onboard.360web.cloud** in a normal browser. Launch & Own's public GitHub App and verified public Cloudflare OAuth client are available for customer consent. The website creation/deployment path is still undergoing its first independent-customer acceptance test; **a successful public website is not yet guaranteed**.
+Open **https://onboard.360web.cloud** in a normal browser. Launch & Own's public GitHub App and verified public Cloudflare OAuth client are available for customer consent. An owner-account launch has been verified end to end (exact GitHub commit and public HTML bytes, 2026-11-22); the first **independent-customer** acceptance test is still pending, so **a successful public website is not yet guaranteed**.
 
 Before starting, have:
 
@@ -18,7 +18,7 @@ No payment details, ChatGPT paid account, Node.js, Git installation, or pasted O
 
 ## Walkthrough: from description to approval
 
-1. Visit **https://onboard.360web.cloud** and choose **Connect GitHub**. Review the GitHub App consent. The app currently requests **Repository creation: read/write**, **Contents: read/write**, **Pull requests: read/write**, and **Metadata: read**, for the purposes shown in the consent screen. An existing authorization may ask you to accept newly added permissions. If the scopes shown differ, stop and report the discrepancy; do not bypass the prompt.
+1. Visit **https://onboard.360web.cloud** and choose **Connect GitHub**. Review the GitHub App consent. The app currently requests **Repository creation: read/write**, **Contents: read/write**, **Pull requests: read/write**, and **Metadata: read**, for the purposes shown in the consent screen. An existing authorization may ask you to accept newly added permissions. If the scopes shown differ, stop and report the discrepancy; do not bypass the prompt. **You must also install the app on your GitHub account** (authorizing it alone is not enough; GitHub then refuses repository creation with HTTP 403). Use the installation prompt, or https://github.com/apps/launch-and-own → Install → your personal account. Choose **All repositories**: with "Only select repositories", the new site repository may not be reachable.
 2. Choose **Connect Cloudflare** and follow the separate Cloudflare OAuth consent. The expected capabilities are account settings **read**, Pages **read/write**, and an offline refresh grant; check exactly what your provider displays.
 3. Select the Cloudflare account you actually control. The site is not created by signing in or selecting an account.
 4. Enter your business name, homepage headline, about section, services and theme in the manual form. Optional AI copy drafting is **not enabled by default**; manual editing is the supported zero-model-cost path.
@@ -36,6 +36,7 @@ No payment details, ChatGPT paid account, Node.js, Git installation, or pasted O
 | GitHub asks for additional permissions | Review the provider's updated consent, particularly Repository creation and Pull requests; allow only if you agree |
 | GitHub or Cloudflare connect did not finish | Retry the connection from the official onboarding page; do not paste codes or tokens into an issue |
 | Cloudflare account not selected | Select the account you own before creating a preview |
+| `github_http_403_need_administration_write_repository_creation_write` | Launch & Own is authorized but **not installed** on your account. Install it (All repositories) at https://github.com/apps/launch-and-own, then reapprove the same launch from History |
 | `needs_reauthorization` or a provider 401/403 | The authorization may lack the permission newly required by the app. Reconnect and review consent; if it remains blocked, report the safe status/error code to QA. Avoid duplicate launches |
 | Previewed copy looks wrong | Return to the editor and fix it before approval; no publication has occurred |
 | Pending Pages deployment | Confirm Cloudflare's Workers & Pages GitHub App has access to your **specific private repository**; leave deployment verification to QA |

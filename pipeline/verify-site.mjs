@@ -25,7 +25,33 @@ async function servesApprovedHtml(response, expected) {
   }
 }
 
-export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,expectedHtmlSha256,fetchFn=fetch,approved}={}) {
+async function assertApprovedGitHubHead(plan, {githubToken, expectedCommitSha, approved, fetchFn}) {
+  if(!githubToken||!Number.isSafeInteger(approved.githubUserId)||approved.githubUserId<1)
+    throw Error("The approved GitHub owner is required to start the first Pages build");
+  const repoName="esp-"+plan.customer;
+  const repoUrl="https://api.github.com/repos/"+encodeURIComponent(plan.githubOwner)+"/"+encodeURIComponent(repoName);
+  const headers={authorization:"Bearer "+githubToken,accept:"application/vnd.github+json",
+    "x-github-api-version":"2022-11-28","user-agent":"launch-and-own"};
+  async function readGitHub(url) {
+    const response=await fetchFn(url,{method:"GET",headers,redirect:"manual",signal:AbortSignal.timeout(15000)});
+    if(!response.ok){
+      const error=new ProviderRequestError(response);
+      error.code="github_http_"+response.status;
+      throw error;
+    }
+    return response.json().catch(()=>{throw new ProviderRequestError()});
+  }
+  const repository=await readGitHub(repoUrl);
+  if(repository?.id!==approved.repositoryId||repository.owner?.id!==approved.githubUserId||
+     repository.owner?.login?.toLowerCase()!==plan.githubOwner.toLowerCase()||repository.name!==repoName||
+     repository.private!==true||repository.default_branch!==approved.branch)
+    throw Error("GitHub repository differs from the approved first-build source");
+  const head=await readGitHub(repoUrl+"/branches/"+encodeURIComponent(approved.branch));
+  if(head?.commit?.sha?.toLowerCase()!==expectedCommitSha.toLowerCase())
+    throw Error("GitHub branch moved before the first Pages build");
+}
+
+export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedCommitSha,expectedHtmlSha256,fetchFn=fetch,approved}={}) {
   const plan=planCustomer(input);
   if(plan.forms||input.hostname)throw Error("This verifier currently supports only website-only pages.dev projects");
   if(!cloudflareToken)throw Error("CLOUDFLARE_API_TOKEN is required for deployment verification");
@@ -57,6 +83,9 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,exp
   // Pages builds on pushes made after the project exists. The approved commit lands
   // before the project is created, so nothing ever starts the first build on its own.
   if(approved&&!project.canonical_deployment&&!project.latest_deployment){
+    // The Git-backed deployment API uses current branch HEAD. Its commit_hash field
+    // describes a revision and does not offer an expected-head precondition.
+    await assertApprovedGitHubHead(plan,{githubToken,expectedCommitSha,approved,fetchFn});
     const form=new FormData();form.set("branch",approved.branch);
     const start=await fetchFn(apiUrl+"/deployments",{method:"POST",headers:{authorization:"Bearer "+cloudflareToken,accept:"application/json"},
       body:form,redirect:"manual",signal:AbortSignal.timeout(15000)});

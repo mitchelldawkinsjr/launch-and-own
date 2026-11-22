@@ -15,7 +15,7 @@ function zip(entries) {
   for (const entry of entries) {
     const name = Buffer.from(entry.path);
     const data = Buffer.from(entry.data ?? '');
-    const packed = entry.deflate ? deflateRawSync(data) : data;
+    const packed = entry.deflate ? Buffer.concat([deflateRawSync(data), Buffer.from(entry.trailing ?? [])]) : data;
     const size = entry.size ?? data.byteLength;
     const crc = crc32(data);
     const flags = 0x800 | (entry.descriptor ? 8 : 0) | (entry.flags ?? 0);
@@ -100,7 +100,8 @@ test('ZIP rejects invalid payloads, collisions, and files outside the static bui
     [{ path: 'index.html/other.html' }, /conflicting/],
     [{ path: 'encrypted.html', flags: 1 }, /unencrypted/],
     [{ path: 'large.html', data: 'x', size: 3 * 1024 * 1024, deflate: true }, /extracted website/],
-    [{ path: 'wrong-size.html', data: 'x'.repeat(8192), size: 1, deflate: true }, /invalid or corrupted/]
+    [{ path: 'wrong-size.html', data: 'x'.repeat(8192), size: 1, deflate: true }, /invalid or corrupted/],
+    [{ path: 'trailing-bytes.html', data: '<p>Contents</p>', trailing: [0], deflate: true }, /invalid or corrupted/]
   ]) {
     await assert.rejects(extractWebsiteZip(zip([bundle[0], entry])), message, entry.path);
   }

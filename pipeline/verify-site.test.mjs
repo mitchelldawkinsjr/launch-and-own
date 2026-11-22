@@ -160,30 +160,49 @@ test("old public content cannot satisfy bounded launch verification",async()=>{
 });
 
 // An approved project created after its commit has nothing to build until something starts it.
-function approvedProjectMock({latest=null,startStatus=200}={}){
+function approvedProjectMock({latest=null,startStatus=200,repositoryId=42,headSha=EXPECTED_SHA}={}){
  const posts=[];
+ const requests=[];
  const project={id:"proj-1",name:projectName,subdomain:projectName+".pages.dev",production_branch:"main",
   source:{type:"github",config:{owner:"tester",repo_name:"esp-test-client",repo_id:42,production_deployments_enabled:true}},
   build_config:{build_command:"",destination_dir:"public",root_dir:"/"},canonical_deployment:null,latest_deployment:latest};
  const fetchFn=async(url,opts={})=>{
+  requests.push(url);
   if(url.endsWith("/deployments")&&opts.method==="POST"){posts.push(opts.body.get("branch"));return Response.json({success:true},{status:startStatus});}
   if(url.includes("api.cloudflare.com"))return Response.json({success:true,result:project});
+  assert.equal(opts.headers.authorization,"Bearer github-grant");
+  if(url.endsWith("/repos/tester/esp-test-client"))return Response.json({id:repositoryId,name:"esp-test-client",
+    owner:{id:12,login:"tester"},private:true,default_branch:"main"});
+  if(url.endsWith("/repos/tester/esp-test-client/branches/main"))return Response.json({commit:{sha:headSha}});
   throw Error("Unexpected URL: "+url);
  };
- return {posts,fetchFn};
+ return {posts,requests,fetchFn};
 }
-const approvedTarget={repositoryId:42,branch:"main",projectId:"proj-1",html:DEFAULT_HTML};
+const approvedTarget={repositoryId:42,githubUserId:12,branch:"main",projectId:"proj-1",html:DEFAULT_HTML};
+const firstBuildOptions={cloudflareToken:"token",githubToken:"github-grant",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget};
 test("approved project that never deployed gets exactly one production build started",async()=>{
  const h=approvedProjectMock();
- const r=await verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget,fetchFn:h.fetchFn});
+ const r=await verifyWebsite(input,{...firstBuildOptions,fetchFn:h.fetchFn});
  assert.equal(r.status,"pending-deployment");assert.deepEqual(h.posts,["main"]);
+ assert.match(h.requests.at(-2),/github\.com\/repos\/tester\/esp-test-client\/branches\/main$/);
+});
+test("first build requires the same private GitHub repository and approved branch revision",async()=>{
+ for(const [options,message] of [
+  [{repositoryId:43},/repository differs/],
+  [{headSha:"f".repeat(40)},/branch moved/]
+ ]){
+  const h=approvedProjectMock(options);
+  await assert.rejects(verifyWebsite(input,{...firstBuildOptions,fetchFn:h.fetchFn}),message);
+  assert.deepEqual(h.posts,[]);
+ }
 });
 test("a queued or running build is never started twice",async()=>{
  const h=approvedProjectMock({latest:{id:"d1",latest_stage:{name:"build",status:"active"}}});
  const r=await verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget,fetchFn:h.fetchFn});
  assert.equal(r.status,"pending-deployment");assert.deepEqual(h.posts,[]);
+ assert.equal(h.requests.length,1);
 });
 test("a refused first build surfaces the provider status instead of waiting forever",async()=>{
  const h=approvedProjectMock({startStatus:403});
- await assert.rejects(verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget,fetchFn:h.fetchFn}),err=>err.status===403||/403/.test(String(err.message)));
+ await assert.rejects(verifyWebsite(input,{...firstBuildOptions,fetchFn:h.fetchFn}),err=>err.status===403||/403/.test(String(err.message)));
 });

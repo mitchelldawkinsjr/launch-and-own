@@ -183,7 +183,7 @@ async function performClaim(env, job) {
   }
   const result = await verifyWebsite(input, {
     ...connection, expectedCommitSha: checkpoint.headCommitSha, approved: { ...checkpoint, html: snapshot.html,
-      htmlBytes: files?.find(file => file.path === 'index.html').bytes }
+      githubUserId: job.github_user_id, htmlBytes: files?.find(file => file.path === 'index.html').bytes }
   });
   if (result.status === 'live') {
     await writeActiveClaim(env, job, `status = 'live', updated_at = ?, error_code = NULL,
