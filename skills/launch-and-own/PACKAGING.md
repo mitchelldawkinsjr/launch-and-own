@@ -31,7 +31,7 @@ Local load via `--plugin-dir` is supported for developers and beta testers. A pu
 
 ## ChatGPT packaging
 
-Owned with the shared API in [#43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43). The existing private `elite-site-pipeline` skills-only plugin is **not** a production tool-backed publisher. Do not claim it launches sites via Launch & Own APIs.
+Owned with the shared API in [#43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43). Notes: [`clients/chatgpt/README.md`](../../clients/chatgpt/README.md). The existing private `elite-site-pipeline` skills-only plugin is **not** a production tool-backed publisher. Do not claim it launches sites via Launch & Own APIs. The in-repo bridge Worker scaffold is **undeployed**.
 
 ## Compatibility limits
 
