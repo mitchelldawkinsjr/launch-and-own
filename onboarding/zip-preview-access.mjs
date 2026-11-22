@@ -6,18 +6,30 @@ const ticketLifetimeSeconds = 15 * 60;
 const aad = origin => `website-zip-preview:${origin}`;
 const now = () => Math.floor(Date.now() / 1000);
 
+// ZIP_PREVIEW_DOMAIN "preview.example.com" gives hosts "<id>.preview.example.com" (needs a
+// two-level wildcard certificate). A leading-hyphen suffix such as "-zp.example.com" gives
+// sibling hosts "<id>-zp.example.com", which a free one-level *.example.com certificate covers.
+const suffixPattern = /^-[a-z0-9](?:[a-z0-9-]{0,14}[a-z0-9])?\./;
+export const zipPreviewHost = (id, domain) => domain.startsWith('-') ? id + domain : id + '.' + domain;
+
 export function zipPreviewConfigured(env) {
   const domain = env.ZIP_PREVIEW_DOMAIN;
-  if (!env.ZIP_ARTIFACTS || typeof domain !== 'string' || domain.length > 216 || !domainPattern.test(domain)) return false;
+  if (!env.ZIP_ARTIFACTS || typeof domain !== 'string' || domain.length > 216) return false;
+  const suffix = domain.startsWith('-');
+  const base = suffix ? domain.slice(domain.indexOf('.') + 1) : domain;
+  if ((suffix && !suffixPattern.test(domain)) || !domainPattern.test(base)) return false;
   let onboarding;
   try { onboarding = new URL(env.ONBOARDING_ORIGIN).hostname; } catch { return false; }
-  return onboarding !== domain && !onboarding.endsWith('.' + domain) && !domain.endsWith('.' + onboarding)
+  // Preview hosts must never equal, contain or sit under the onboarding host.
+  const separate = suffix ? !onboarding.endsWith(domain) && !base.endsWith('.' + onboarding) && base !== onboarding
+    : onboarding !== domain && !onboarding.endsWith('.' + domain) && !domain.endsWith('.' + onboarding);
+  return separate
     && typeof env.ZIP_PREVIEW_KEY === 'string' && /^[a-f0-9]{64}$/i.test(env.ZIP_PREVIEW_KEY)
     && env.ZIP_PREVIEW_KEY.toLowerCase() !== env.TOKEN_ENCRYPTION_KEY?.toLowerCase();
 }
 
 export async function createZipPreview(env, artifact, stage, sessionExpiry) {
-  const origin = `https://${artifact.id}.${env.ZIP_PREVIEW_DOMAIN}`;
+  const origin = `https://${zipPreviewHost(artifact.id, env.ZIP_PREVIEW_DOMAIN)}`;
   const expires = Math.min(sessionExpiry, now() + ticketLifetimeSeconds);
   const ticket = await seal(env.ZIP_PREVIEW_KEY, JSON.stringify({ artifact, stage, expires }), aad(origin));
   return { origin, ticket };
@@ -28,7 +40,7 @@ export async function verifyZipPreview(env, url, ticket) {
       || !/^[a-z0-9_-]{1,768}$/i.test(ticket)) return null;
   try {
     const claim = JSON.parse(await unseal(env.ZIP_PREVIEW_KEY, ticket, aad(url.origin)));
-    if (!isZipArtifact(claim.artifact) || url.host !== `${claim.artifact.id}.${env.ZIP_PREVIEW_DOMAIN}`
+    if (!isZipArtifact(claim.artifact) || url.host !== zipPreviewHost(claim.artifact.id, env.ZIP_PREVIEW_DOMAIN)
         || (claim.stage !== 'draft' && claim.stage !== 'approved') || !Number.isSafeInteger(claim.expires)
         || claim.expires <= now() || claim.expires > now() + ticketLifetimeSeconds) return null;
     return claim;
