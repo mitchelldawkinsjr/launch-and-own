@@ -20,7 +20,7 @@ export async function verifyProviderConnections(input,{githubAccessToken,cloudfl
     if(strict){
       const err=new ProviderRequestError(resp);
       const need=resp.headers.get("x-accepted-github-permissions");
-      err.code="github_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,48)):"");
+      err.code="github_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/;/g,"_or_").replace(/[^a-z0-9_]+/g,"_").replace(/^_|_$/g,"").slice(0,64)):"");
       throw err;
     }
     throw Error("GitHub authorization is unavailable (HTTP "+resp.status+")");
