@@ -104,7 +104,7 @@ function harness({withJobs=true}={}){
     resourceState.updateBranch=JSON.parse(opts.body).ref.replace(/^refs\/heads\//,'');
     return Response.json({ref:'refs/heads/'+resourceState.updateBranch},{status:201});
   }
-  if(url===root+'/pulls'&&opts.method==='GET')return Response.json(resourceState.updatePr?[resourceState.updatePr]:[]);
+  if(url.startsWith(root+'/pulls?')&&opts.method==='GET')return Response.json(resourceState.updatePr?[resourceState.updatePr]:[]);
   if(url===root+'/pulls'&&opts.method==='POST'){
     if(resourceState.denyPullRequests)return new Response('{}',{status:403});
     const payload=JSON.parse(opts.body);
