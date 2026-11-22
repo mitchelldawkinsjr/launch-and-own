@@ -1,0 +1,34 @@
+name: Local Worker recovery rehearsal
+
+on:
+  pull_request:
+    paths:
+      - "onboarding/**"
+      - "pipeline/**"
+      - "scripts/worker-recovery/**"
+      - "package.json"
+      - ".github/workflows/recovery-rehearsal.yml"
+  push:
+    branches: [main]
+    paths:
+      - "onboarding/**"
+      - "pipeline/**"
+      - "scripts/worker-recovery/**"
+      - ".github/workflows/recovery-rehearsal.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  local-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned test-only Worker runtime
+        run: npm ci --prefix scripts/worker-recovery
+      - name: Rehearse local D1 and Worker launch recovery
+        run: npm run qa:rehearse:recovery
