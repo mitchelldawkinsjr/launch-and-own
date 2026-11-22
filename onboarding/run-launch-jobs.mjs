@@ -102,11 +102,14 @@ async function requireProviderAccess(check) {
   } catch (error) {
     if (error instanceof JobStorageUnavailable || error instanceof AuthorizationEnded ||
         (error instanceof ProviderRequestError && error.retryable)) throw error;
-    const detail = error instanceof ProviderRequestError
-      ? `provider_http_${error.status || 'unknown'}`
-      : (typeof error?.message === 'string' && /^[a-z0-9_:-]{3,64}$/i.test(error.message)
-        ? error.message.slice(0, 64)
-        : 'provider_authorization_required');
+    let detail = 'provider_authorization_required';
+    if (error instanceof ProviderRequestError) {
+      detail = `provider_http_${error.status || 'unknown'}`;
+    } else if (typeof error?.message === 'string' && error.message.trim()) {
+      // Safe, stable operator code: no spaces/PII, still more specific than a generic pause.
+      detail = ('provider_' + error.message.toLowerCase().replace(/[^a-z0-9]+/g, '_')).replace(/_+/g, '_').slice(0, 64).replace(/^_|_$/g, '');
+      if (detail.length < 12) detail = 'provider_authorization_required';
+    }
     throw new AuthorizationEnded(detail);
   }
 }
