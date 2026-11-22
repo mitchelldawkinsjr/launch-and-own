@@ -18,6 +18,7 @@ import {
   RESOURCE_METADATA_PATH, RESOURCE_URI, protectedResourceMetadata
 } from './protected-resource.mjs';
 import {MemorySiteDraftStore} from './site-draft-store.mjs';
+import {MemoryJobPublicationStore} from './job-publication-store.mjs';
 import {randomBytes} from 'node:crypto';
 
 const deny = code => { throw new BridgeContractError(code); };
@@ -55,6 +56,7 @@ export function createBridgeHost({
   tokens = new MemoryAgentTokenStore(),
   links = new MemoryOwnerLinkStore(),
   sites = new MemorySiteDraftStore(),
+  jobs = new MemoryJobPublicationStore(),
   nowSeconds = () => Math.floor(Date.now() / 1000),
   resourceUri = RESOURCE_URI,
   // Trusted provider facts for update fences — supplied by host, never by model.
@@ -62,7 +64,7 @@ export function createBridgeHost({
   currentRepositoryId = null
 } = {}) {
   return {
-    tokens, links, sites, nowSeconds, resourceUri,
+    tokens, links, sites, jobs, nowSeconds, resourceUri,
     currentCommitSha, currentRepositoryId
   };
 }
@@ -241,7 +243,12 @@ function dispatchToolCall(host, request) {
       idempotencyKey: call.arguments.idempotency_key
     }, {nowSeconds: now}));
 
-  // Job status / verify_publication need the durable D1 runner adapter.
+  if (call.name === 'get_job_status')
+    return jsonOk(host.jobs.getJob(call.scope, call.arguments.job_id));
+
+  if (call.name === 'verify_publication')
+    return jsonOk(host.jobs.verifyPublication(call.scope, call.arguments.job_id));
+
   return jsonError('not_implemented', 501);
 }
 

@@ -56,8 +56,9 @@ In-repo pieces (still **not** a production MCP server or ChatGPT connector):
 | [`integration/owner-link-store.mjs`](../integration/owner-link-store.mjs) | One-time link challenges + owner bind, with current-link and authorization-epoch fencing (memory adapter for tests only) |
 | [`integration/bridge-transport.mjs`](../integration/bridge-transport.mjs) | Opaque bearer → server principal, tool dispatch; **no HTTP link-completion route** |
 | [`integration/site-draft-store.mjs`](../integration/site-draft-store.mjs) | Tenant-fenced site inventory + immutable draft digests + approval handoff (memory adapter) |
+| [`integration/job-publication-store.mjs`](../integration/job-publication-store.mjs) | Tenant-fenced `get_job_status` / `verify_publication` via `publicationStatus` (memory adapter) |
 
-HTTP-shaped negative coverage lives in `integration/bridge-transport.test.mjs` and `integration/site-draft-store.test.mjs`, including rejection of forged `verified` provider identities and stale link challenges. The happy-path owner bind is a **direct in-memory test harness stand-in for a separately authenticated browser callback**; it is not a callable API. `get_job_status` / `verify_publication` still return **501** until a D1 job-runner adapter exists. Draft digests here hash normalized `site_spec` JSON — production must use exact Worker-rendered HTML bytes.
+HTTP-shaped negative coverage lives in the `integration/*.test.mjs` suite, including rejection of forged `verified` provider identities and stale link challenges. The happy-path owner bind is a **direct in-memory test harness stand-in for a separately authenticated browser callback**; it is not a callable API. Job `live` requires host-attached trusted commit + HTML proof; incomplete proof projects `pending_deployment`. Draft digests here hash normalized `site_spec` JSON — production must use exact Worker-rendered HTML bytes.
 
 ## Critical trust boundary: completing owner linking
 
@@ -69,4 +70,4 @@ The in-memory store also rechecks the **current linked identity and authorizatio
 
 ## Next implementation slice for #43
 
-Wire this transport to a real Worker route **without** editing the contested onboarding UI surface until #31/#53 coordination allows it (prefer a sibling Worker or isolated module). Persist link/site/draft records in D1, bind job status/verification to the existing runner, and replace JSON digests with exact HTML artifact hashes. Run provider-backed QA with one **independent consenting** user, and release review through #2/#55 before promoting `shared_mcp_api` in the distribution matrix.
+Wire this transport to a real Worker route **without** editing the contested onboarding UI surface until #31/#53 coordination allows it (prefer a sibling Worker or isolated module). Persist link/site/draft/job records in D1, connect verification to the existing runner’s provider checks, and replace JSON digests with exact HTML artifact hashes. Run provider-backed QA with one **independent consenting** user, and release review through #2/#55 before promoting `shared_mcp_api` in the distribution matrix.
