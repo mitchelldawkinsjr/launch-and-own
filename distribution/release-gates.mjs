@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 
 const IMPLEMENTATION = ['planned', 'in_pr', 'merged', 'deployed'];
-const ACCESS = ['not_available', 'hosted_beta', 'external_beta', 'public'];
+const ACCESS = ['not_available', 'instructions_only', 'hosted_beta', 'external_beta', 'public'];
 const VERIFICATION = ['not_tested', 'ci_only', 'owner_live', 'independent_live'];
 export const REQUIRED_SURFACES = Object.freeze([
   'browser_manual', 'browser_zip', 'site_updates', 'portable_skill',
@@ -53,10 +53,14 @@ export function validateDistributionMatrix(matrix) {
     if (s.implementation === 'planned' &&
         (s.access !== 'not_available' || s.verification !== 'not_tested'))
       errors.push(id + ': a planned feature cannot have beta access or verified results');
-    if (['in_pr', 'merged'].includes(s.implementation) && s.access !== 'not_available')
+    if (['in_pr', 'merged'].includes(s.implementation) && s.access !== 'not_available' &&
+        !(id === 'portable_skill' && s.implementation === 'merged' && s.access === 'instructions_only'))
       errors.push(id + ': PR or merged code does not constitute a hosted release');
-    if (s.access !== 'not_available' && s.implementation !== 'deployed')
+    if (!['not_available', 'instructions_only'].includes(s.access) && s.implementation !== 'deployed')
       errors.push(id + ': access cannot be advertised before deployment');
+    if (s.access === 'instructions_only' && (id !== 'portable_skill' ||
+        !['merged', 'deployed'].includes(s.implementation) || s.verification === 'not_tested'))
+      errors.push(id + ': instructions-only distribution requires a reviewed, tested portable skill, not connected publishing');
     if (['owner_live', 'independent_live'].includes(s.verification) && s.implementation !== 'deployed')
       errors.push(id + ': live QA requires a deployed implementation');
     if (s.access === 'hosted_beta' && !['owner_live', 'independent_live'].includes(s.verification))
