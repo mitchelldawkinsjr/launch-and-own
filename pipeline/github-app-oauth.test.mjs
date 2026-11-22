@@ -38,7 +38,7 @@ test("valid callback exchanges code and verifier using server secret",async()=>{
     calls++;
     assert.equal(url,GITHUB_TOKEN_URL);
     assert.equal(opts.method,"POST");
-    assert.equal(opts.redirect,"error");
+    assert.equal(opts.redirect,"manual");
     assert.equal(opts.headers.accept,"application/json");
     const body=new URLSearchParams(opts.body);
     assert.equal(body.get("client_id"),options.clientId);

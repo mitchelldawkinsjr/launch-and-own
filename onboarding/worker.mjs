@@ -96,7 +96,7 @@ async function consumeFlow(env,{provider,binding,state}){
   return await unseal(env.TOKEN_ENCRYPTION_KEY,row.verifier_ct,'flow:'+key);
 }
 async function apiGet(url,token){
-  const resp=await fetch(url,{headers:{'authorization':'Bearer '+token,'accept':'application/json','x-github-api-version':'2022-11-28','user-agent':'launch-and-own'},redirect:'error'});
+  const resp=await fetch(url,{headers:{'authorization':'Bearer '+token,'accept':'application/json','x-github-api-version':'2022-11-28','user-agent':'launch-and-own'},redirect:'manual'});
   if(!resp.ok)throw Error('Provider identity verification failed');
   return await resp.json();
 }
@@ -160,7 +160,7 @@ async function cloudflareCallback(request,env,current){
 async function accountOptions(env,current){
   const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   const url='https://api.cloudflare.com/client/v4/accounts?page=1&per_page=50';
-  const response=await fetch(url,{headers:{authorization:'Bearer '+token,accept:'application/json'},redirect:'error'});
+  const response=await fetch(url,{headers:{authorization:'Bearer '+token,accept:'application/json'},redirect:'manual'});
   if(!response.ok)throw Error('Unable to list accounts: check the Cloudflare OAuth permissions');
   const data=await response.json();
   if(!data.success||!Array.isArray(data.result))throw Error('Cloudflare did not return a list of accounts');

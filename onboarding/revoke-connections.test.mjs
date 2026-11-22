@@ -10,7 +10,7 @@ test("GitHub grant revocation uses Basic auth and deletes OAuth grant (not just 
   assert.equal(opts.method,"DELETE");
   assert.equal(opts.headers.authorization,"Basic "+Buffer.from("Iv1.id:gh-secret").toString("base64"));
   assert.equal(JSON.parse(opts.body).access_token,"ghu_secret");
-  assert.equal(opts.redirect,"error");
+  assert.equal(opts.redirect,"manual");
   return new Response(null,{status:204});
  }});
  assert.equal(ok,true);assert.equal(called,1);
@@ -23,7 +23,7 @@ test("Cloudflare OAuth revoke uses form body with confidential client credential
   assert.equal(opts.headers.authorization,"Basic "+Buffer.from("cf-id:cf-secret").toString("base64"));
   assert.equal(new URLSearchParams(opts.body).get("token"),"cf_secret");
   assert.equal(new URLSearchParams(opts.body).get("token_type_hint"),"access_token");
-  assert.equal(opts.redirect,"error");
+  assert.equal(opts.redirect,"manual");
   return new Response(null,{status:200});
  }});
  assert.equal(ok,true);

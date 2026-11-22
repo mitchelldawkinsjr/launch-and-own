@@ -55,7 +55,7 @@ export async function completeGitHubAppOAuth({
   });
   const r=await fetchFn(GITHUB_TOKEN_URL,{method:"POST",headers:{
     accept:"application/json","content-type":"application/x-www-form-urlencoded"
-  },body:body.toString(),redirect:"error"});
+  },body:body.toString(),redirect:"manual"});
   if(!r.ok)throw Error("GitHub App OAuth token exchange failed (HTTP "+r.status+")");
   const data=await r.json();
   if(data.error||typeof data.access_token!=="string"||!data.access_token||data.token_type?.toLowerCase()!=="bearer")

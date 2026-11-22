@@ -35,7 +35,7 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,exp
   const projectName="esp-"+plan.customer+"-site";
   const website="https://"+projectName+".pages.dev";
   const apiUrl="https://api.cloudflare.com/client/v4/accounts/"+encodeURIComponent(plan.accountId)+"/pages/projects/"+encodeURIComponent(projectName);
-  const response=await fetchFn(apiUrl,{headers:{authorization:"Bearer "+cloudflareToken,accept:"application/json"},redirect:"error",signal:AbortSignal.timeout(15000)});
+  const response=await fetchFn(apiUrl,{headers:{authorization:"Bearer "+cloudflareToken,accept:"application/json"},redirect:"manual",signal:AbortSignal.timeout(15000)});
   if(!response.ok){
     if(approved)throw new ProviderRequestError(response);
     throw Error("Could not read Pages project (HTTP "+response.status+")");

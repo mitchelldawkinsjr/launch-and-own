@@ -14,7 +14,7 @@ export async function verifyProviderConnections(input,{githubAccessToken,cloudfl
     accept:"application/vnd.github+json",
     "x-github-api-version":"2022-11-28",
     "user-agent":"launch-and-own"
-  },redirect:"error"});
+  },redirect:"manual"});
   const strict=expectedGitHubUserId!==undefined;
   if(!resp.ok){
     if(strict)throw new ProviderRequestError(resp);
