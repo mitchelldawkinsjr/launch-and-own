@@ -1,0 +1,18 @@
+{
+  "name": "launch-and-own",
+  "version": "0.1.0",
+  "description": "Instructions-only Launch & Own skill: prepare a static site, then hand off to https://onboard.360web.cloud for OAuth, exact preview, separate approval, and verified publish. Does not provide connected publishing tools.",
+  "author": {
+    "name": "360Web",
+    "url": "https://github.com/mitchelldawkinsjr/launch-and-own"
+  },
+  "homepage": "https://github.com/mitchelldawkinsjr/launch-and-own/tree/main/clients/claude-plugin",
+  "repository": "https://github.com/mitchelldawkinsjr/launch-and-own",
+  "license": "UNLICENSED",
+  "keywords": [
+    "launch-and-own",
+    "360web",
+    "static-site",
+    "instructions-only"
+  ]
+}

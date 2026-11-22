@@ -21,9 +21,14 @@ test('checked-in matrix is valid and owner beta is not independent acceptance', 
   assert.equal(matrix.surfaces.site_updates.access, 'not_available');
   assert.equal(matrix.surfaces.chatgpt_connector.access, 'not_available');
   assert.equal(matrix.surfaces.claude_plugin.access, 'not_available');
+  assert.equal(matrix.surfaces.portable_skill.implementation, 'merged');
+  assert.equal(matrix.surfaces.portable_skill.access, 'instructions_only');
+  assert.equal(matrix.surfaces.claude_plugin.implementation, 'merged');
   const report = renderDistributionMatrix(matrix);
   assert.match(report, /Browser: manual one-page creation \| deployed \| hosted_beta \| owner_live/);
   assert.match(report, /Browser: static ZIP upload \| merged \| not_available \| ci_only/);
+  assert.match(report, /Portable agent skill \(instructions only\) \| merged \| instructions_only \| ci_only/);
+  assert.match(report, /Claude Code plugin \(instructions-only local packaging\) \| merged \| not_available \| ci_only/);
 });
 
 test('PRs, merged ZIPs, and local rehearsals cannot be advertised as hosted', () => {
