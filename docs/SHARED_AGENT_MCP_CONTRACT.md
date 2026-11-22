@@ -54,10 +54,11 @@ In-repo pieces (still **not** a production MCP server or ChatGPT connector):
 | --- | --- |
 | [`integration/protected-resource.mjs`](../integration/protected-resource.mjs) | Provisional protected-resource metadata (`RESOURCE_URI`, audience markers) |
 | [`integration/owner-link-store.mjs`](../integration/owner-link-store.mjs) | One-time link challenges + owner bind (memory adapter for tests) |
-| [`integration/bridge-transport.mjs`](../integration/bridge-transport.mjs) | Opaque bearer → server principal, `get_connection_status` / `start_connect_accounts`, browser `link/complete` |
+| [`integration/bridge-transport.mjs`](../integration/bridge-transport.mjs) | Opaque bearer → server principal, tool dispatch, browser `link/complete` |
+| [`integration/site-draft-store.mjs`](../integration/site-draft-store.mjs) | Tenant-fenced site inventory + immutable draft digests + approval handoff (memory adapter) |
 
-HTTP-shaped negative coverage lives in `integration/bridge-transport.test.mjs` (wrong/expired bearer, injected owner fields, challenge replay, cross-client consume, reconnect pin mismatch). Site inventory, drafts, approval, and job verification remain **not implemented** at the transport (501).
+HTTP-shaped negative coverage lives in `integration/bridge-transport.test.mjs` and `integration/site-draft-store.test.mjs`. `get_job_status` / `verify_publication` still return **501** until a D1 job-runner adapter exists. Draft digests here hash normalized `site_spec` JSON — production must use exact Worker-rendered HTML bytes.
 
 ## Next implementation slice for #43
 
-Wire this transport to a real Worker route **without** editing the contested onboarding UI surface until #31/#53 coordination allows it (prefer a sibling Worker or isolated module). Add tenant-filtered read-only site inventory (reconcile long-term #39 identities), real immutable draft/preview storage and server-side approval handoff. Then bind durable job status/verification to the existing D1 runner. Run provider-backed QA with one **independent consenting** user, and release review through #2/#55 before promoting `shared_mcp_api` in the distribution matrix.
+Wire this transport to a real Worker route **without** editing the contested onboarding UI surface until #31/#53 coordination allows it (prefer a sibling Worker or isolated module). Persist link/site/draft records in D1, bind job status/verification to the existing runner, and replace JSON digests with exact HTML artifact hashes. Run provider-backed QA with one **independent consenting** user, and release review through #2/#55 before promoting `shared_mcp_api` in the distribution matrix.
