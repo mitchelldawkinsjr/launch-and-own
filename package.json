@@ -13,6 +13,7 @@
     "demo:export": "node scripts/export-preview.mjs --input examples/willow-studio.json --out ./site-preview",
     "demo:serve": "node scripts/serve-preview.mjs --dir ./site-preview --port 4173",
     "qa:rehearse": "node scripts/beta-rehearsal.mjs",
-    "qa:rehearse:recovery": "node scripts/worker-recovery/rehearse.mjs"
+    "qa:rehearse:recovery": "node scripts/worker-recovery/rehearse.mjs",
+    "qa:distribution": "node distribution/release-gates.mjs"
   }
 }
