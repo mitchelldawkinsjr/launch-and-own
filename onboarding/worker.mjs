@@ -39,7 +39,7 @@ const view=(title,body,status=200,headers=textHeaders,opts={})=>
   new Response(pageShell({title,body,...opts}),{status,headers});
 const fail=(message,status=400)=>view('Setup could not continue',
   `<div class="card"><p role="alert" class="alert">${escape(message)}</p>
-  <div class="actions">${linkButton('/','Return to setup',{variant:'secondary'})}</div></div>`,status,{step:'connect',showStepper:false});
+  <div class="actions">${linkButton('/','Return to setup',{variant:'secondary'})}</div></div>`,status,textHeaders,{step:'connect',showStepper:false});
 function cookies(request){
   const output={};for(const part of (request.headers.get('cookie')||'').split(';')){
     const cut=part.indexOf('=');if(cut>0)output[part.slice(0,cut).trim()]=part.slice(cut+1).trim();
