@@ -105,5 +105,5 @@ test('agent-generated HTML is packaged into the real ZIP handoff rather than rec
   assert.match(skill, /never claim a ZIP was created unless it exists/i);
   assert.match(examples, /Package the generated site as a static ZIP/i);
   assert.match(examples, /Upload a built website[\s\S]*upload the ZIP/i);
-  assert.match(reference, /Do not.*redirect the customer to re-enter copy/i);
+  assert.match(reference, /Do \*\*not\*\* redirect the customer to re-enter copy/i);
 });
