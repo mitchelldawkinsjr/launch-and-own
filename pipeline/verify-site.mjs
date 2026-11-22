@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Read-only verification of a customer Pages production deployment and its public homepage.
 import {readFileSync} from "node:fs";
+import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
 import {planCustomer} from "./plan-customer.mjs";
 import {matchesApprovedPagesProject} from "./approved-pages-project.mjs";
 import {ProviderRequestError} from "./provider-errors.mjs";
 
-async function servesApprovedHtml(response, html) {
-  const expected = new TextEncoder().encode(html);
+async function servesApprovedHtml(response, expected) {
   const reader = response.body?.getReader();
   if (!reader) return false;
   let offset = 0;
@@ -24,12 +24,14 @@ async function servesApprovedHtml(response, html) {
   }
 }
 
-export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fetchFn=fetch,approved}={}) {
+export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,expectedHtmlSha256,fetchFn=fetch,approved}={}) {
   const plan=planCustomer(input);
   if(plan.forms||input.hostname)throw Error("This verifier currently supports only website-only pages.dev projects");
   if(!cloudflareToken)throw Error("CLOUDFLARE_API_TOKEN is required for deployment verification");
   if((approved||expectedCommitSha!==undefined)&&(typeof expectedCommitSha!=="string"||!/^[a-f0-9]{40}$/i.test(expectedCommitSha)))
     throw Error("Expected commit SHA must be a full 40-character GitHub commit hash");
+  if(expectedHtmlSha256!==undefined&&(typeof expectedHtmlSha256!=="string"||!/^[a-f0-9]{64}$/i.test(expectedHtmlSha256)))
+    throw Error("Expected HTML SHA-256 must be a full 64-character digest");
   const projectName="esp-"+plan.customer+"-site";
   const website="https://"+projectName+".pages.dev";
   const apiUrl="https://api.cloudflare.com/client/v4/accounts/"+encodeURIComponent(plan.accountId)+"/pages/projects/"+encodeURIComponent(projectName);
@@ -38,7 +40,10 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fet
     if(approved)throw new ProviderRequestError(response);
     throw Error("Could not read Pages project (HTTP "+response.status+")");
   }
-  const data=await response.json();
+  const data=await response.json().catch(error=>{
+    if(approved)throw new ProviderRequestError();
+    throw error;
+  });
   if(!data.success||!data.result)throw Error("Cloudflare did not return a Pages project");
   const project=data.result;
   const source=project.source;
@@ -52,8 +57,9 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fet
   const latest=project.latest_deployment;
   const stage=canonical?.latest_stage;
   const latestStage=latest?.latest_stage;
-  if(stage?.name!=="deploy"||stage?.status!=="success"||
-      (approved&&canonical?.environment!=="production"))
+  const production=canonical?.environment==="production"||
+    (!approved&&expectedHtmlSha256===undefined&&canonical?.environment==null);
+  if(stage?.name!=="deploy"||stage?.status!=="success"||!production)
     return {status:"pending-deployment",website,project:projectName,latestStage:latestStage?.name||null,latestStatus:latestStage?.status||null};
   // A previously live deployment does not prove the newly approved revision is live.
   // Cloudflare exposes the GitHub revision on the canonical production deployment.
@@ -66,12 +72,25 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fet
   const contentType=page.headers.get("content-type")||"";
   if(!/text\/html\b/i.test(contentType))
     return {status:"unexpected-public-content",website,project:projectName,contentType};
-  const contentMatches=approved
-    ?await servesApprovedHtml(page,approved.html)
-    :/<html\b/i.test(await page.text());
-  if(!contentMatches)
+  let homepageBytes;
+  try{
+    if(approved){
+      const expectedBytes=new TextEncoder().encode(approved.html);
+      if(await servesApprovedHtml(page,expectedBytes))homepageBytes=expectedBytes;
+    }else{
+      homepageBytes=new Uint8Array(await page.arrayBuffer());
+    }
+  }catch(error){
+    if(approved)throw new ProviderRequestError();
+    throw error;
+  }
+  if(!homepageBytes||!/<html\b/i.test(new TextDecoder().decode(homepageBytes)))
     return {status:"unexpected-public-content",website,project:projectName,contentType};
-  return {status:"live",website,project:projectName,deploymentId:canonical.id,
+  const publicHtmlSha256=createHash("sha256").update(homepageBytes).digest("hex");
+  if(expectedHtmlSha256&&publicHtmlSha256!==expectedHtmlSha256.toLowerCase())
+    return {status:"pending-expected-html",website,project:projectName,
+      expectedHtmlSha256:expectedHtmlSha256.toLowerCase(),publicHtmlSha256};
+  return {status:"live",website,project:projectName,deploymentId:canonical.id,publicHtmlSha256,
     latestPending:latest?.id!==canonical.id&&latestStage?.status!=="success"};
 }
 export async function waitForWebsite(input,options={},attempts=18,intervalMs=15000) {

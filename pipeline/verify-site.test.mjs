@@ -1,13 +1,18 @@
 import test from "node:test";
+import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import {verifyWebsite,waitForWebsite} from "./verify-site.mjs";
 const input={name:"Test Client",accountId:"0123456789abcdef0123456789abcdef",githubOwner:"tester"};
 const projectName="esp-test-client-site",site="https://"+projectName+".pages.dev";
 const EXPECTED_SHA="a".repeat(40),NEXT_SHA="b".repeat(40);
-function mock({canonical=true,latestQueued=false,htmlStatus=200,htmlType="text/html",html="<html><body>Test Client</body></html>",otherSource=false}={}) {
+const DEFAULT_HTML="<html><body>Test Client</body></html>";
+const htmlHash=html=>createHash("sha256").update(html,"utf8").digest("hex");
+function mock({canonical=true,environment="production",latestQueued=false,htmlStatus=200,
+  htmlType="text/html",html=DEFAULT_HTML,otherSource=false}={}) {
  const calls=[];
  const project={name:projectName,source:{type:"github",config:{owner:"tester",repo_name:otherSource?"another-repo":"esp-test-client"}},
-  canonical_deployment:canonical?{id:"deploy-success",latest_stage:{name:"deploy",status:"success"},deployment_trigger:{metadata:{commit_hash:EXPECTED_SHA}}}:null,
+  canonical_deployment:canonical?{id:"deploy-success",environment,latest_stage:{name:"deploy",status:"success"},
+    deployment_trigger:{metadata:{commit_hash:EXPECTED_SHA}}}:null,
   latest_deployment:latestQueued?{id:"newer",latest_stage:{name:"queued",status:"idle"}}:{id:"deploy-success",latest_stage:{name:"deploy",status:"success"}}};
  const fetchFn=async(url,opts={})=>{
   calls.push(url);
@@ -22,6 +27,7 @@ test("successful production deployment and accessible HTML are verified live",as
  assert.equal(result.status,"live");
  assert.equal(result.website,site);
  assert.equal(result.latestPending,false);
+ assert.equal(result.publicHtmlSha256,htmlHash(DEFAULT_HTML));
  assert.equal(h.calls.length,2);
 });
 test("queued deployment is not falsely reported live",async()=>{
@@ -96,4 +102,59 @@ test("strict polling rejects when older commit remains live",async()=>{
  const h=mock({latestQueued:true});
  await assert.rejects(waitForWebsite(input,{cloudflareToken:"token",expectedCommitSha:NEXT_SHA,fetchFn:h.fetchFn},1,1000),/not verified/);
  assert.equal(h.calls.length,1);
+});
+
+test("exact approved HTML digest must match public page bytes before live is claimed",async()=>{
+ const h=mock();
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML).toUpperCase(),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"live");
+ assert.equal(result.publicHtmlSha256,htmlHash(DEFAULT_HTML));
+ assert.equal(h.calls.length,2);
+});
+test("correct canonical commit with stale public HTML fails closed",async()=>{
+ const h=mock({html:"<html><body>Old approved copy</body></html>"});
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"pending-expected-html");
+ assert.equal(result.expectedHtmlSha256,htmlHash(DEFAULT_HTML));
+ assert.equal(result.publicHtmlSha256,htmlHash("<html><body>Old approved copy</body></html>"));
+ assert.equal(h.calls.length,2);
+});
+test("an extra UTF-8 byte order mark changes the exact public digest",async()=>{
+ const html="\uFEFF"+DEFAULT_HTML;
+ const h=mock({html});
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"pending-expected-html");
+ assert.equal(result.publicHtmlSha256,htmlHash(html));
+});
+test("the expected commit and HTML cannot make a preview deployment count as production",async()=>{
+ const h=mock({environment:"preview"});
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"pending-deployment");
+ assert.equal(h.calls.length,1);
+});
+test("invalid approved HTML digest cannot trigger provider requests",async()=>{
+ const h=mock();
+ await assert.rejects(verifyWebsite(input,{
+  cloudflareToken:"token",expectedHtmlSha256:"invalid",fetchFn:h.fetchFn
+ }),/64-character digest/);
+ assert.equal(h.calls.length,0);
+});
+test("old public content cannot satisfy bounded launch verification",async()=>{
+ const h=mock({html:"<html><body>Unexpected</body></html>"});
+ await assert.rejects(waitForWebsite(input,{
+  cloudflareToken:"token",expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ },1,1000),/pending-expected-html/);
+ assert.equal(h.calls.length,2);
 });

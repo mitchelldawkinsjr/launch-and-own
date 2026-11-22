@@ -248,6 +248,31 @@ test('a replacement Pages project is rejected even if the source and deployed SH
  }finally{globalThis.fetch=originalFetch}
 });
 
+test('an interrupted public response retries verification of the same checkpoint',async()=>{
+ const h=harness();
+ let interrupt=true;
+ globalThis.fetch=async(url,options)=>{
+  const response=await h.fetchFn(url,options);
+  if(!interrupt||!url.endsWith('.pages.dev/'))return response;
+  interrupt=false;
+  const stream=new ReadableStream({start(controller){controller.error(Error('Lost public response'))}});
+  return new Response(stream,{headers:{'content-type':'text/html'}});
+ };
+ try{
+  const {cookie,csrf}=await connectTenant(h);
+  const id=await newPreview(h,{cookie,csrf});
+  await approvePreview(h,cookie,csrf,id);
+  await worker.scheduled({},h.env);
+  assert.equal(jobRow(h).status,'pending_deployment');
+  assert.equal(jobRow(h).error_code,'provider_unavailable');
+  makeDue(h);
+  await worker.scheduled({},h.env);
+  assert.equal(jobRow(h).status,'live');
+  assert.equal(jobRow(h).expected_commit_sha,GENERATED_SHA);
+  assert.equal(writes(h).length,3);
+ }finally{globalThis.fetch=originalFetch}
+});
+
 test('the owner can delete completed history without mutating provider resources',async()=>{
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
