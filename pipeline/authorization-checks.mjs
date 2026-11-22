@@ -19,7 +19,8 @@ export async function verifyProviderConnections(input,{githubAccessToken,cloudfl
   if(!resp.ok){
     if(strict){
       const err=new ProviderRequestError(resp);
-      err.code="github_http_"+resp.status;
+      const need=resp.headers.get("x-accepted-github-permissions");
+      err.code="github_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,48)):"");
       throw err;
     }
     throw Error("GitHub authorization is unavailable (HTTP "+resp.status+")");
