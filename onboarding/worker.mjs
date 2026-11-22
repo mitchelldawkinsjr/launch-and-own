@@ -534,8 +534,10 @@ async function runDueStep(request,env,current,context,status){
   await limitAttempts(request,env);
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
   const item=await getLaunch(env,current,data.get('id'));
-  if(item?.status!=='approved'||item.job_status!==status||item.authorizing_session!==current.hash||
+  if(item?.status!=='approved'||item.authorizing_session!==current.hash||
       item.approved_epoch!==current.authorization_epoch)throw Error('This launch step is not authorized');
+  // The approval's own run often advances the job first; show its current state instead of an error.
+  if(item.job_status!==status)return redirect(reviewPath(item.id));
   queueAttempt(context,env,item.job_id,current.hash);
   return redirect(reviewPath(item.id));
 }
