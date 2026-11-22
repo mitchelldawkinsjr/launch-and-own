@@ -78,7 +78,7 @@ The exporter intentionally refuses to overwrite an existing folder. For details 
 ## Verification and product limits
 
 - **Confirmed by Domain/OAuth:** GitHub App public, Cloudflare OAuth client public/verified, hosted domain with TLS, provider sign-in/account selection and session-based form actions.
-- **Not yet independently accepted:** real one-page customer repository creation, Cloudflare Pages deployment and exact approved public HTML verification. Follow [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
+- **Owner QA verified** a live one-page website, its exact production commit and its public homepage bytes. The next acceptance run needs an independent customer. [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21#issuecomment-7086107082)
 - **In development:** customer-facing post-launch edits and owner-approved PR flow ([draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31)); hosted multi-page editor.
 - **ZIP upload** has merged code and awaits hosted rollout and live acceptance. [Issue #45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45)
 - **Not offered today:** a public ChatGPT plugin/store listing, automated contact forms, custom customer domains, or an assurance of permanently free usage. Each provider's own terms and quotas apply.
