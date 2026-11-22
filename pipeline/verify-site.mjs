@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Read-only verification of a customer Pages production deployment and its public homepage.
+// Verification of a customer Pages production deployment and its public homepage.
+// Its only write: start the first build of an approved project that has never deployed.
 import {readFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
@@ -53,6 +54,15 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,exp
       repositoryName:"esp-"+plan.customer,repositoryId:approved.repositoryId,branch:approved.branch,
       projectId:approved.projectId}))
     throw Error("Pages source or build settings differ from the approved project");
+  // Pages builds on pushes made after the project exists. The approved commit lands
+  // before the project is created, so nothing ever starts the first build on its own.
+  if(approved&&!project.canonical_deployment&&!project.latest_deployment){
+    const form=new FormData();form.set("branch",approved.branch);
+    const start=await fetchFn(apiUrl+"/deployments",{method:"POST",headers:{authorization:"Bearer "+cloudflareToken,accept:"application/json"},
+      body:form,redirect:"manual",signal:AbortSignal.timeout(15000)});
+    if(!start.ok)throw new ProviderRequestError(start);
+    return {status:"pending-deployment",website,project:projectName,latestStage:"queued",latestStatus:"started"};
+  }
   const canonical=project.canonical_deployment;
   const latest=project.latest_deployment;
   const stage=canonical?.latest_stage;
