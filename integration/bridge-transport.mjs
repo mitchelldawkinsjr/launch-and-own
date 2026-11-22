@@ -17,6 +17,7 @@ import {
 import {
   RESOURCE_METADATA_PATH, RESOURCE_URI, protectedResourceMetadata
 } from './protected-resource.mjs';
+import {MemorySiteDraftStore} from './site-draft-store.mjs';
 import {randomBytes} from 'node:crypto';
 
 const deny = code => { throw new BridgeContractError(code); };
@@ -53,10 +54,17 @@ export class MemoryAgentTokenStore {
 export function createBridgeHost({
   tokens = new MemoryAgentTokenStore(),
   links = new MemoryOwnerLinkStore(),
+  sites = new MemorySiteDraftStore(),
   nowSeconds = () => Math.floor(Date.now() / 1000),
-  resourceUri = RESOURCE_URI
+  resourceUri = RESOURCE_URI,
+  // Trusted provider facts for update fences — supplied by host, never by model.
+  currentCommitSha = null,
+  currentRepositoryId = null
 } = {}) {
-  return {tokens, links, nowSeconds, resourceUri};
+  return {
+    tokens, links, sites, nowSeconds, resourceUri,
+    currentCommitSha, currentRepositoryId
+  };
 }
 
 function bearerFromAuthorization(header) {
@@ -196,7 +204,44 @@ function dispatchToolCall(host, request) {
     });
   }
 
-  // Remaining tools need draft/site adapters — not in this transport slice.
+  if (call.name === 'list_sites')
+    return jsonOk({sites: host.sites.listSites(call.scope)});
+
+  if (call.name === 'get_site')
+    return jsonOk(host.sites.getSite(call.scope, call.arguments.site_id));
+
+  if (call.name === 'prepare_site')
+    return jsonOk(host.sites.prepareSite(call.scope, call.arguments.site_spec, {
+      nowSeconds: now
+    }));
+
+  if (call.name === 'prepare_site_update') {
+    if (!host.currentCommitSha || !host.currentRepositoryId)
+      return jsonError('not_implemented', 501);
+    return jsonOk(host.sites.prepareSiteUpdate(call.scope, {
+      siteId: call.arguments.site_id,
+      baseCommitSha: call.arguments.base_commit_sha,
+      changes: call.arguments.changes
+    }, {
+      nowSeconds: now,
+      currentCommitSha: host.currentCommitSha,
+      currentRepositoryId: host.currentRepositoryId
+    }));
+  }
+
+  if (call.name === 'get_exact_preview')
+    return jsonOk(host.sites.getExactPreview(call.scope, call.arguments.draft_id, {
+      nowSeconds: now
+    }));
+
+  if (call.name === 'request_explicit_approval')
+    return jsonOk(host.sites.requestApproval(call.scope, {
+      draftId: call.arguments.draft_id,
+      previewSha256: call.arguments.preview_sha256,
+      idempotencyKey: call.arguments.idempotency_key
+    }, {nowSeconds: now}));
+
+  // Job status / verify_publication need the durable D1 runner adapter.
   return jsonError('not_implemented', 501);
 }
 

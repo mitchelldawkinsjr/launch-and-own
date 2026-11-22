@@ -36,10 +36,6 @@ function toolCall(h, token, name, args = {}) {
   });
 }
 
-// Test-only stand-in for a FUTURE trusted browser OAuth callback.
-// It deliberately bypasses HTTP: callers cannot claim that model JSON
-// containing "verified" is evidence from GitHub or Cloudflare OAuth.
-// No production callback exists yet.
 function complete(h, token, challengeId, verified) {
   const session = h.tokens.lookup(token, {nowSeconds: now});
   if (!session) return {status: 401, body: {error: 'unauthenticated'}};
@@ -159,7 +155,7 @@ test('first-time browser link binds providers; reconnect requires pinned IDs', (
   }).body.error, 'invalid_link_challenge');
 });
 
-test('linked tools stay unavailable until site adapters exist; unlinked tools stay gated', () => {
+test('linked tools stay gated until linked; inventory is empty until sites exist', () => {
   const h = host();
   const token = issue(h);
   assert.equal(toolCall(h, token, 'list_sites').body.error, 'needs_reauthorization');
@@ -168,8 +164,10 @@ test('linked tools stay unavailable until site adapters exist; unlinked tools st
   complete(h, token, start.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
   });
-  assert.equal(toolCall(h, token, 'list_sites').status, 501);
-  assert.equal(toolCall(h, token, 'list_sites').body.error, 'not_implemented');
+  const listed = toolCall(h, token, 'list_sites');
+  assert.equal(listed.status, 200);
+  assert.deepEqual(listed.body.sites, []);
+  assert.equal(toolCall(h, token, 'get_job_status', {job_id: 'job_12345'}).status, 501);
 });
 
 test('wrong client cannot consume another client challenge', () => {
@@ -189,7 +187,6 @@ test('memory link store rejects unsafe challenge parameters', () => {
     nowSeconds: now, ttlSeconds: 5
   }), error => error instanceof BridgeContractError);
 });
-
 
 test('model bearer cannot complete linking by sending forged verified provider IDs', () => {
   const h = host();
