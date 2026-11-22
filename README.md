@@ -2,9 +2,17 @@
 
 **Describe it. Launch it. Own it.**
 
-Launch & Own is a customer-owned conversational website launch and maintenance platform in development. Its goal is to help people describe, preview, publish, and update websites using their own GitHub and Cloudflare accounts—without needing to write code.
+Launch & Own is a customer-owned website launch and maintenance platform with **two first-class entry points**: a planned ChatGPT conversational builder/manager and a standalone web onboarding experience for ZIP uploads or manual site creation. Both use the same GitHub/Cloudflare account ownership, preview, approval and publication backend.
 
-> **Beta source, not a live self-service website builder.** Automated provisioning, OAuth libraries, security tests, and an onboarding Worker exist. Provider OAuth applications, customer-facing domain, and live second-customer acceptance are not yet complete. AI-generated designs, per-customer contact forms, custom domains, and a public ChatGPT plugin are not available end-to-end.
+> **Hosted browser beta — first customer launch still under QA.** Visit **https://onboard.360web.cloud** to connect your own GitHub and Cloudflare accounts and inspect a one-page website preview. Both OAuth apps are public, and hosted sign-in/account selection is verified. **Real customer-backed repository creation and exact live deployment have not yet passed independent acceptance** ([Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)). Don't claim a preview, passing CI or a working hostname equals a successfully launched site. Custom forms/domains, bespoke AI designs and a public ChatGPT plugin are not available end-to-end.
+
+## Two ways to build and manage a website
+
+**ChatGPT flow (planned integration):** ask to create a site or make changes in conversational language; ChatGPT proposes copy/design changes and hands a structured plan to Launch & Own. The customer sees the **exact prepared site**, authorizes their own GitHub/Cloudflare accounts through official consent, separately approves publication, and receives verified deployment status. The current private `elite-site-pipeline` ChatGPT plugin is **skills-only** without hosted MCP/API tools; this production integration is tracked in [Issue #43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43).
+
+**Standalone web flow (hosted browser beta):** visit **https://onboard.360web.cloud** to create a simple site manually, or—after [ZIP-import PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40) is integrated and deployed—upload an existing static website ZIP, privately preview it, and approve publication. No ChatGPT account or paid model is required for this path. Web onboarding UI improvements are tracked in [Issue #41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41).
+
+**Shared product, not separate silos:** both entry points will use the same tenant/site ownership, provider connections, exact site preview, durable jobs and production-verification pipeline. Read the [two-flow product architecture](docs/TWO_FLOW_PRODUCT_ARCHITECTURE.md) for the complete product contract and coordination.
 
 ## Customer experience we're building
 
@@ -17,27 +25,45 @@ Launch & Own is a customer-owned conversational website launch and maintenance p
 
 Customers keep ownership of their GitHub repositories and Cloudflare resources. Low/no-cost hosting is a design goal, subject to provider tiers, quota limits, and usage.
 
+## Architecture
+
+Open [`docs/architecture.html`](docs/architecture.html) in a browser for an interactive diagram: step through a customer's journey from first visit to owning a live website, and see which part of the system (onboarding Worker, D1, GitHub, Cloudflare, customer-owned resources) handles each step. Update it when the flow changes.
+
+## Product and design handoff
+
+Launch & Own has a **ChatGPT-first conversational experience (planned)** and a **standalone web experience (hosted beta)** for manually building or importing websites. Both should lead from exact preview through separate publication approval to verifiable customer-controlled hosting.
+
+- [**Standalone web onboarding UI/UX brief**](docs/ONBOARDING_UIUX_HANDOFF.md) — mobile/desktop design direction for manual site creation, ZIP import and account screens ([Issue #41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41)).
+- [**Two-flow product architecture**](docs/TWO_FLOW_PRODUCT_ARCHITECTURE.md) — ChatGPT builder + standalone website sharing one owner, source, approval and publishing platform ([Issue #43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43)).
+- [**Suggested repository About profile**](.github/REPOSITORY_PROFILE.md) — public description, hosted beta URL, discoverability topics and social-preview guidance.
+- [**Nontechnical beta tester guide**](docs/BETA_TESTER_HANDOFF.md) — what customers actually see, what is approved and the current live-QA limits.
+
 ## Source layout
 
 | Path | Purpose |
 | --- | --- |
 | `pipeline/` | Customer planning, guarded GitHub and Cloudflare provisioning, OAuth primitives, deployment verification and tests |
-| `onboarding/` | Standalone, currently unhosted OAuth onboarding Worker, D1 migration, account selection, encrypted session, approval and retry |
+| `onboarding/` | Hosted beta OAuth onboarding Worker, D1 migrations, account selection, encrypted sessions, explicit approval and recoverable launch jobs |
 | `.github/workflows/test.yml` | Independent product CI |
 | `EXPORT-MANIFEST.json` | Provenance and customer-data exclusions |
 
 **This repository does not contain the reference customer's website or contact form.** It is a product-only extraction from the existing verified reference implementation; the original site's GitHub repository and Cloudflare Pages connection remain unchanged.
 
-## Try a website locally without cloud accounts
+## Use standalone hosted browser onboarding — no coding needed
 
-**Private-beta entry point today:** there is no public ChatGPT plugin yet. Invited testers use the zero-account [beta tester handoff](docs/BETA_TESTER_HANDOFF.md). The [offline preview exporter](docs/OFFLINE_BETA_PREVIEW.md) builds the same HTML used by the production provisioner without GitHub/Cloudflare credentials, AI inference or publishing anything. Requires **Node.js 22.5+** (Node 22.0.0 is too old for this repo’s tests).
+Open **https://onboard.360web.cloud** with your own GitHub and Cloudflare accounts. Follow the [plain-language tester guide](docs/BETA_TESTER_HANDOFF.md) to review OAuth permissions, choose a provider account, preview one-page content and decide whether to approve resource creation. **Hosted consent and preview are available, but a successful first real launch is still being verified in #21.** The customer owns the resulting private GitHub and Cloudflare resources if provisioned.
+
+## Optional offline developer preview
+
+The [offline preview exporter](docs/OFFLINE_BETA_PREVIEW.md) produces production-renderer HTML without GitHub/Cloudflare accounts, AI inference or publication. Requires **Node.js 22.5+** (`node:sqlite` is unavailable in Node 22.0.0).
 
 ```sh
 npm run demo:export
 npm run demo:serve
 ```
 
-Open `http://127.0.0.1:4173/` on the same computer. The server exposes only known static HTML routes on localhost; the output is ignored by Git. For a custom brief, call `node scripts/export-preview.mjs --input <input-file> --out <new-directory>` directly—do not append those flags to `npm run demo:export`. The exporter refuses to overwrite an existing directory. The generated manifest includes SHA-256 hashes for individual pages and the full approved bundle digest, but generating a preview is **not** a customer launch approval.
+Open `http://127.0.0.1:4173/` on the same computer. This four-page fictional sample is **not** the hosted one-page customer launch. For a custom brief, run `node scripts/export-preview.mjs --input <input-file> --out <new-directory>` directly and choose a new folder; the exporter won't overwrite existing output. Generated hashes prove preview consistency, **not publication**.
+
 
 ## Develop and test
 
@@ -53,9 +79,10 @@ Tests use simulated provider APIs and an in-memory D1-compatible SQLite adapter.
 
 ## Domain and OAuth agent handoff
 
-If another agent manages the Cloudflare zone for `360web.cloud`, give them [**the domain + OAuth handoff checklist**](docs/HANDOFF_DOMAIN_OAUTH.md). It specifies only the selected `onboard.360web.cloud` hostname, exact GitHub/Cloudflare callback URLs, Cloudflare domain-publisher TXT verification, required permissions, owner approvals, and the nonsecret acceptance report. **Do not create a wildcard DNS record or publish OAuth visibility without owner approval.**
+The [Domain/OAuth handoff](docs/HANDOFF_DOMAIN_OAUTH.md) records the authorized single `onboard.360web.cloud` host, provider callback settings, DNS/publisher checks and responsibilities. **Domain/OAuth has confirmed:** verified TLS on the custom domain; public GitHub App and Cloudflare OAuth client; successful owner sign-ins and Cloudflare account selection; GitHub App **Pull requests: write** permission separately approved and verified.
 
-**Current domain rollout status:** The domain agent has verified the `360web.cloud` zone active and registered beta app client IDs. OAuth client configuration/secrets, Worker routing/TLS and an independent live acceptance test remain outstanding. The onboarding service should not yet be represented as publicly available.
+**Remaining acceptance gate:** a real customer website must provision and match its approved production GitHub commit and public HTML SHA-256; see [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21). Do not modify provider app permissions, OAuth clients, DNS or the live Worker during an active owner rehearsal without coordinating on [Issue #2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2).
+
 
 ## Optional AI-assisted website copy
 
@@ -63,29 +90,32 @@ Customers can enter a plain-language business brief and ask for an **editable fi
 
 This option is **disabled unless the backend operator configures** an approved Cloudflare Workers AI binding named `AI` and a model identifier in `SITE_AI_MODEL`. Inference can incur usage charges; no AI binding is automatically enabled or deployed by this repository. See [onboarding setup](onboarding/README.md). The domain/OAuth agent owns the Wrangler file and must coordinate configuration with the product owner.
 
-## Reviewable website updates (backend foundation)
+## Reviewable website updates (release candidate)
 
-Once a site is live, a proposed content update should **not** overwrite its live GitHub branch directly. The reusable [safe website updates](docs/SAFE_WEBSITE_UPDATES.md) module accepts the exact customer-reviewed site HTML digest and GitHub base commit, verifies immutable owner identity and the private managed repository, and opens/reuses a separate feature-branch pull request. The customer reviews and merges the PR; Cloudflare production must then be verified against the merged SHA. This module is CI-tested but **not yet wired into the onboarding UI**. The domain agent must coordinate the additional GitHub App **Pull requests: write** permission before live use.
+The reusable [safe website update module](docs/SAFE_WEBSITE_UPDATES.md) binds customer-reviewed HTML SHA-256 and an observed base commit to a managed GitHub repository and creates/reuses **only** a feature-branch pull request. The customer reviews and manually merges it; Cloudflare must then show the exact merged commit **and** approved public HTML.
+
+Authenticated one-page editing, exact previews, separately approved PR creation and post-merge verification have been implemented and CI-tested in [**draft PR #31**](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31). They are **not yet merged or deployed**. GitHub App `Pull requests: write` is now granted, but live acceptance must follow the first successful launch and a coordinated release window.
+
 
 ## Operator onboarding prerequisites
 
-Before enabling hosted onboarding, register a GitHub App and Cloudflare OAuth client with minimally sufficient permissions, configure an owned HTTPS callback domain, use the independently created beta onboarding D1 database, apply `onboarding/migrations/0001_initial.sql`, and install Worker secrets using a secure provider secret store. Cloudflare's own Workers & Pages GitHub App must also be authorized for the customer's repository. Read [onboarding/README.md](onboarding/README.md).
+The beta Worker is hosted at `onboard.360web.cloud`, with a dedicated beta D1 migrated through **0004**, and configured public GitHub/Cloudflare OAuth apps. The D1 binding is recorded in `onboarding/wrangler.jsonc`; it must **never** be replaced by a customer's contact-form database. Cloudflare's separate **Workers & Pages GitHub App** still needs access to each newly created customer-owned private repository for Pages builds. See [onboarding/README.md](onboarding/README.md).
 
-The beta onboarding D1 is now provisioned and migrated under a dedicated Launch & Own database binding. This nonsecret identifier is recorded in `onboarding/wrangler.jsonc`. Real hosting remains blocked on approved OAuth app registrations, secret configuration, and a verified HTTPS onboarding hostname. Never replace this with another customer's database.
+All live Worker releases are coordinated by Domain and QA on [Issue #2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2). No owner/tester should paste an OAuth code or access token into GitHub issues, screenshots or chat.
+
 
 ## Project status
 
-- Reusable planner and website-only provisioner: **CI-tested**.
-- **Editable business-site content and live HTML preview:** CI-tested. Customers can enter a headline, about text, services, contact email and color theme, view the exact generated HTML before approval, then publish it. This is a deterministic template, **not AI-generated multi-page design**.
-- GitHub/Cloudflare authorization-code and PKCE primitives: **CI-tested**.
-- Dedicated Launch & Own beta onboarding D1: **created and schema-verified**.
-- Hosted onboarding Worker source, including logout and provider revocation attempts: **CI-tested, not deployed**.
-- Independent live customer login/provisioning/deployment: **not yet verified**.
-- **Optional AI-assisted business copy drafts:** structured, validated and editable before private preview/approval; available only after an authorized Workers AI binding/model is configured. This does **not** generate bespoke multi-page designs.
-- **Reviewable update proposal module:** CI-tested, approval-digest-pinned GitHub feature branches and PRs for existing managed sites; not yet connected to the hosted UI.
-- **Opt-in four-page site bundles:** CI-tested Home/About/Services/Contact renderer, full-bundle SHA-256 approval and safe idempotent provisioning; **not yet connected to the onboarding UI**. See [multi-page bundle design](docs/MULTIPAGE_SITE_BUNDLES.md).
-- Customer-specific forms, custom domains, image generation and fully bespoke AI website design: **future milestones**.
-- No license has been selected yet: this is publicly visible source, **not automatically an open-source grant**.
-- **Private-beta tester kit:** ready offline via `npm run demo:export` / `demo:serve`; see [beta tester handoff](docs/BETA_TESTER_HANDOFF.md). Hosted login and public plugin distribution are not available yet.
+- **Manual one-page design, preview, explicit approval:** implemented on the hosted beta.
+- **GitHub and Cloudflare OAuth sign-in/account selection:** public and live-verified by the Domain/OAuth operator.
+- **Customer-owned private repository and Pages provisioning:** implemented with durable D1 jobs and local provider simulations; **first real live customer deployment remains under acceptance in [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)**.
+- **Exact GitHub commit and public HTML verification:** implemented and simulated; successful customer acceptance pending.
+- **Optional AI-assisted website copy:** structured and editable, but unavailable unless an operator explicitly configures an approved Workers AI binding/model.
+- **Reviewable website maintenance UI:** implemented and tested in [draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31); **not yet released**.
+- **Four-page Home/About/Services/Contact bundles:** deterministically rendered and locally previewable, but not exposed in the hosted editor.
+- **ZIP import, forms, customer domains, bespoke AI design, ChatGPT plugin:** separate future or in-progress milestones; not currently available end to end.
+- **Offline preview/demo:** available with Node 22.5+ (developer option); see [tester handoff](docs/BETA_TESTER_HANDOFF.md).
+- **Source reuse license:** not yet selected. Public GitHub visibility is not a license.
+
 
 **Product:** Launch & Own · **Tagline:** Describe it. Launch it. Own it.

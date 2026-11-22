@@ -9,6 +9,7 @@ import {renderSiteBundle,siteBundleApprovalSha256} from "../site/render-site-bun
 import {matchesApprovedPagesProject} from "./approved-pages-project.mjs";
 import {isLegacyRepositoryDescription,isManagedRepositoryDescription,managedRepositoryDescription} from "./managed-site-repository.mjs";
 import {ProviderRequestError} from "./provider-errors.mjs";
+import {pinImportedCommit} from "./provision-imported-site.mjs";
 
 function checkedName(name) {
   if(!/^[a-z0-9][a-z0-9-]*$/.test(name))throw Error("Unsafe generated resource name");
@@ -32,7 +33,12 @@ function requestFactory({githubToken,cloudflareToken,fetchFn=fetch,strict=false}
     });
     if(allow404&&resp.status===404)return null;
     if(!resp.ok){
-      if(strict)throw new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
+      if(strict){
+        const err=new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
+        const need=github?resp.headers.get("x-accepted-github-permissions"):null;
+        err.code=service+"_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/;/g,"_or_").replace(/[^a-z0-9_]+/g,"_").replace(/^_|_$/g,"").slice(0,64)):"");
+        throw err;
+      }
       throw Error(service+" "+method+" "+path+" failed (HTTP "+resp.status+")");
     }
     let data;
@@ -118,9 +124,9 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn,ap
     if(digest!==input.approvedBundleSha256.toLowerCase())
       throw Error("Website bundle differs from the exact approved preview");
   }
-  const assets=multiPage?
+  const assets=approved?.files??(multiPage?
     renderSiteBundle({...input.site,name:input.name}).pages:
-    [{path:"public/index.html",html:approved?.html??renderSite({...input.site,name:input.name})}];
+    [{path:"public/index.html",html:approved?.html??renderSite({...input.site,name:input.name})}]);
   const api=requestFactory({githubToken,cloudflareToken,fetchFn,strict:!!approved});
   const name=checkedName("esp-"+plan.customer);
   const pages=checkedName(name+"-site");
@@ -157,7 +163,8 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn,ap
   if(typeof branch!=="string"||!/^[a-zA-Z0-9._/-]+$/.test(branch))throw Error("GitHub repository has no valid default branch; repository may require initialization");
   if(approved?.checkpoint&&branch!==approved.checkpoint.branch)throw Error("The approved repository changed its default branch");
   const headCommitSha=approved
-    ?await pinApprovedCommit(api,{repoPath,repository,branch,html:assets[0].html,approved,adoptingLegacy,journal})
+    ?await (approved.files?pinImportedCommit:pinApprovedCommit)(api,
+      {repoPath,repository,branch,html:assets[0].html,approved,adoptingLegacy,journal})
     :await initializePages(api,{repoPath,branch,assets,checkContent:input.site!==undefined,journal});
   const cloudPath="/accounts/"+encodeURIComponent(plan.accountId)+"/pages/projects";
   const expectedProject={name:pages,owner,repositoryName:name,repositoryId:repository.id,branch};

@@ -5,6 +5,8 @@ import { ProviderRequestError } from '../pipeline/provider-errors.mjs';
 import { verifyWebsite } from '../pipeline/verify-site.mjs';
 import { activeJobSession, approvalSnapshot, HAS_APPROVAL, RUNNABLE, UNCLAIMED } from './launch-jobs.mjs';
 import { AuthorizationRefreshBusy, getFreshAccessToken } from './token-lifecycle.mjs';
+import { WebsiteZipError } from './website-zip.mjs';
+import { loadApprovedZip } from './zip-artifacts.mjs';
 
 const clock = () => Math.floor(Date.now() / 1000);
 const LEASE_SECONDS = 120;
@@ -80,7 +82,8 @@ function guardedFetch(env, job, credentialsValid) {
     const timeout = AbortSignal.timeout(REQUEST_SECONDS * 1000);
     const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
     try {
-      return await fetch(url, { ...options, signal, redirect: options.redirect ?? 'error' });
+      // Workers only allow follow/manual redirects; default manual and fail closed on non-2xx.
+      return await fetch(url, { ...options, signal, redirect: options.redirect ?? 'manual' });
     } catch {
       throw new ProviderRequestError();
     }
@@ -101,7 +104,15 @@ async function requireProviderAccess(check) {
   } catch (error) {
     if (error instanceof JobStorageUnavailable || error instanceof AuthorizationEnded ||
         (error instanceof ProviderRequestError && error.retryable)) throw error;
-    throw new AuthorizationEnded('provider_authorization_required');
+    let detail = 'provider_authorization_required';
+    if (error instanceof ProviderRequestError) {
+      detail = error.code || `provider_http_${error.status || 'unknown'}`;
+    } else if (typeof error?.message === 'string' && error.message.trim()) {
+      // Safe, stable operator code: no spaces/PII, still more specific than a generic pause.
+      detail = ('provider_' + error.message.toLowerCase().replace(/[^a-z0-9]+/g, '_')).replace(/_+/g, '_').slice(0, 64).replace(/^_|_$/g, '');
+      if (detail.length < 12) detail = 'provider_authorization_required';
+    }
+    throw new AuthorizationEnded(detail);
   }
 }
 
@@ -115,7 +126,10 @@ async function verifiedConnections(env, job, input) {
     cloudflareToken = await getFreshAccessToken({ env, session, provider: 'cloudflare', fetchFn: refreshFetch });
   } catch (error) {
     if (error instanceof AuthorizationRefreshBusy || error instanceof JobStorageUnavailable) throw error;
-    throw new AuthorizationEnded('provider_authorization_required');
+    const detail = typeof error?.message === 'string' && /reconnect|expired|renewed|Connect /i.test(error.message)
+      ? 'provider_token_refresh_failed'
+      : 'provider_authorization_required';
+    throw new AuthorizationEnded(detail);
   }
   const fetchFn = guardedFetch(env, job, true);
   await requireProviderAccess(() => verifyProviderConnections(input, {
@@ -138,12 +152,21 @@ async function performClaim(env, job) {
   if (snapshot.digest !== job.approval_digest || snapshot.slug !== job.site_slug)
     return await finishAttempt(env, job, 'approval_snapshot_mismatch');
   const { input } = snapshot;
+  let files;
+  if (snapshot.zip) {
+    try {
+      files = await loadApprovedZip(env.ZIP_ARTIFACTS, snapshot.zip);
+    } catch (error) {
+      if (error instanceof WebsiteZipError) return await finishAttempt(env, job, 'approved_zip_unavailable');
+      return await finishAttempt(env, job, 'artifact_storage_unavailable', { retryable: true });
+    }
+  }
   const connection = await verifiedConnections(env, job, input);
   const checkpoint = job.expected_commit_sha ? { repositoryId: job.repository_id,
     branch: job.production_branch, headCommitSha: job.expected_commit_sha, projectId: job.pages_project_id } : null;
   if (job.status === 'queued') {
     const provisioned = await applyWebsite(input, { ...connection, approved: {
-      id: job.id, githubUserId: job.github_user_id, html: snapshot.html,
+      id: job.id, githubUserId: job.github_user_id, html: snapshot.html, files,
       allowLegacy: job.legacy_receipt_id !== null, checkpoint,
       assertCloudflareAccess: connection.assertCloudflareAccess,
       saveCheckpoint: async ({ repositoryId, branch, headCommitSha }) => {
@@ -159,7 +182,8 @@ async function performClaim(env, job) {
     return;
   }
   const result = await verifyWebsite(input, {
-    ...connection, expectedCommitSha: checkpoint.headCommitSha, approved: { ...checkpoint, html: snapshot.html }
+    ...connection, expectedCommitSha: checkpoint.headCommitSha, approved: { ...checkpoint, html: snapshot.html,
+      htmlBytes: files?.find(file => file.path === 'index.html').bytes }
   });
   if (result.status === 'live') {
     await writeActiveClaim(env, job, `status = 'live', updated_at = ?, error_code = NULL,
@@ -179,7 +203,10 @@ export async function runLaunchJob(env, id, sessionHash = null) {
     if (error instanceof ClaimLost) return;
     if (error instanceof JobStorageUnavailable) throw error;
     if (error instanceof AuthorizationEnded || (error instanceof ProviderRequestError && error.authorizationLost)) {
-      await pauseJob(env, job, error.code ?? 'provider_authorization_required');
+      const code = error instanceof AuthorizationEnded
+        ? (error.code || 'session_ended')
+        : (error.code || `provider_http_${error.status || 'unknown'}`);
+      await pauseJob(env, job, code);
       return;
     }
     try {

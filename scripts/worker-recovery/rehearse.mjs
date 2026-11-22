@@ -55,6 +55,7 @@ async function withRuntime(scriptPath, scenario, { loseRepositoryReply = false }
       TOKEN_ENCRYPTION_KEY: 'ab'.repeat(32),
       GH_CLIENT_ID: 'Iv1.example',
       GH_CLIENT_SECRET: 'local-fixture',
+      GH_APP_SLUG: 'launch-and-own',
       CF_CLIENT_ID: 'local-cf-id',
       CF_CLIENT_SECRET: 'local-fixture',
       CF_SCOPES: config.vars.CF_SCOPES,

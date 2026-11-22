@@ -2,6 +2,7 @@ import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { renderSite } from '../site/render-site.mjs';
 import { sha256 } from './crypto.mjs';
 import { RECEIPT_TTL_SECONDS } from './launch-receipts.mjs';
+import { isZipArtifact } from './zip-artifacts.mjs';
 
 export const UNCLAIMED = '(j.lease_until IS NULL OR j.lease_until <= ?)';
 export const RUNNABLE = "j.status IN ('queued', 'pending_deployment')";
@@ -32,13 +33,23 @@ function jobInput(job) {
 export async function approvalSnapshot(item, githubUserId) {
   const { input, plan } = jobInput(item);
   const id = item.job_id ?? item.id;
-  const html = item.approved_html ?? renderSite({ ...plan.site, name: item.customer_name });
-  if (!isLaunchId(id) || !Number.isSafeInteger(githubUserId) || githubUserId < 1 ||
-      typeof html !== 'string' || !html.length || Buffer.byteLength(html) > 32768) {
+  if (!isLaunchId(id) || !Number.isSafeInteger(githubUserId) || githubUserId < 1) {
     throw Error('Invalid launch approval snapshot');
   }
-  const digest = await sha256(JSON.stringify([1, id, item.legacy_receipt_id ?? null, githubUserId,
-    item.github_login, item.cloudflare_account_id, item.customer_name, item.plan_json, html]));
+  const target = [id, item.legacy_receipt_id ?? null, githubUserId,
+    item.github_login, item.cloudflare_account_id, item.customer_name, item.plan_json];
+  if (Object.hasOwn(plan, 'zip')) {
+    if (!isZipArtifact(plan.zip) || plan.zip.id !== id || item.legacy_receipt_id != null || item.approved_html) {
+      throw Error('Invalid ZIP approval snapshot');
+    }
+    const digest = await sha256(JSON.stringify([2, ...target]));
+    return { id, slug: plan.customer, html: '', zip: plan.zip, digest, input };
+  }
+  const html = item.approved_html ?? renderSite({ ...plan.site, name: item.customer_name });
+  if (typeof html !== 'string' || !html.length || Buffer.byteLength(html) > 32768) {
+    throw Error('Invalid launch approval snapshot');
+  }
+  const digest = await sha256(JSON.stringify([1, ...target, html]));
   return { id, slug: plan.customer, html, digest, input };
 }
 

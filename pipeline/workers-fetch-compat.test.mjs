@@ -26,6 +26,8 @@ test("Worker-executed code never uses fetch redirect \"error\"",()=>{
       if(!name.endsWith(".mjs")||name.includes("test")||name==="validate-config.mjs")continue;
       const source=readFileSync(new URL(`../${dir}/${name}`,import.meta.url),"utf8");
       assert.doesNotMatch(source,/redirect:\s*["']error["']/,`${dir}/${name} uses redirect:"error", which Workers reject`);
+      // Also catch defaults like `redirect: options.redirect ?? 'error'` that the line-start pattern misses.
+      assert.doesNotMatch(source,/\?\?\s*["']error["']/,`${dir}/${name} defaults a fetch redirect to "error"`);
     }
   }
 });
