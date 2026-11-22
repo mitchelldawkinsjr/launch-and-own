@@ -158,3 +158,32 @@ test("old public content cannot satisfy bounded launch verification",async()=>{
  },1,1000),/pending-expected-html/);
  assert.equal(h.calls.length,2);
 });
+
+// An approved project created after its commit has nothing to build until something starts it.
+function approvedProjectMock({latest=null,startStatus=200}={}){
+ const posts=[];
+ const project={id:"proj-1",name:projectName,subdomain:projectName+".pages.dev",production_branch:"main",
+  source:{type:"github",config:{owner:"tester",repo_name:"esp-test-client",repo_id:42,production_deployments_enabled:true}},
+  build_config:{build_command:"",destination_dir:"public",root_dir:"/"},canonical_deployment:null,latest_deployment:latest};
+ const fetchFn=async(url,opts={})=>{
+  if(url.endsWith("/deployments")&&opts.method==="POST"){posts.push(opts.body.get("branch"));return Response.json({success:true},{status:startStatus});}
+  if(url.includes("api.cloudflare.com"))return Response.json({success:true,result:project});
+  throw Error("Unexpected URL: "+url);
+ };
+ return {posts,fetchFn};
+}
+const approvedTarget={repositoryId:42,branch:"main",projectId:"proj-1",html:DEFAULT_HTML};
+test("approved project that never deployed gets exactly one production build started",async()=>{
+ const h=approvedProjectMock();
+ const r=await verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget,fetchFn:h.fetchFn});
+ assert.equal(r.status,"pending-deployment");assert.deepEqual(h.posts,["main"]);
+});
+test("a queued or running build is never started twice",async()=>{
+ const h=approvedProjectMock({latest:{id:"d1",latest_stage:{name:"build",status:"active"}}});
+ const r=await verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget,fetchFn:h.fetchFn});
+ assert.equal(r.status,"pending-deployment");assert.deepEqual(h.posts,[]);
+});
+test("a refused first build surfaces the provider status instead of waiting forever",async()=>{
+ const h=approvedProjectMock({startStatus:403});
+ await assert.rejects(verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget,fetchFn:h.fetchFn}),err=>err.status===403||/403/.test(String(err.message)));
+});
