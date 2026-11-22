@@ -1,10 +1,13 @@
 import test from "node:test";
+import {createHash} from "node:crypto";
 import assert from "node:assert/strict";
 import {verifyWebsite,waitForWebsite} from "./verify-site.mjs";
 const input={name:"Test Client",accountId:"0123456789abcdef0123456789abcdef",githubOwner:"tester"};
 const projectName="esp-test-client-site",site="https://"+projectName+".pages.dev";
 const EXPECTED_SHA="a".repeat(40),NEXT_SHA="b".repeat(40);
-function mock({canonical=true,latestQueued=false,htmlStatus=200,htmlType="text/html",html="<html><body>Test Client</body></html>",otherSource=false}={}) {
+const DEFAULT_HTML="<html><body>Test Client</body></html>";
+const htmlHash=html=>createHash("sha256").update(html,"utf8").digest("hex");
+function mock({canonical=true,latestQueued=false,htmlStatus=200,htmlType="text/html",html=DEFAULT_HTML,otherSource=false}={}) {
  const calls=[];
  const project={name:projectName,source:{type:"github",config:{owner:"tester",repo_name:otherSource?"another-repo":"esp-test-client"}},
   canonical_deployment:canonical?{id:"deploy-success",latest_stage:{name:"deploy",status:"success"},deployment_trigger:{metadata:{commit_hash:EXPECTED_SHA}}}:null,
@@ -22,6 +25,7 @@ test("successful production deployment and accessible HTML are verified live",as
  assert.equal(result.status,"live");
  assert.equal(result.website,site);
  assert.equal(result.latestPending,false);
+ assert.equal(result.publicHtmlSha256,htmlHash(DEFAULT_HTML));
  assert.equal(h.calls.length,2);
 });
 test("queued deployment is not falsely reported live",async()=>{
