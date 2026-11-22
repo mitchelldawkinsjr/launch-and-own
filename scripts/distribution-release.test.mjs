@@ -70,3 +70,15 @@ test('evidence URLs cannot carry credentials or point to unrelated domains', () 
 test('no agent surface can silently disappear', () => {
   rejects(m => { delete m.surfaces.portable_skill; }, /required distribution surface is missing/);
 });
+
+test('a reviewed portable skill may be shared as instructions without pretending to publish', () => {
+  const matrix = fresh();
+  matrix.surfaces.portable_skill.implementation = 'merged';
+  matrix.surfaces.portable_skill.access = 'instructions_only';
+  matrix.surfaces.portable_skill.verification = 'ci_only';
+  assert.doesNotThrow(() => assertDistributionMatrix(matrix));
+  assert.equal(matrix.surfaces.shared_mcp_api.access, 'not_available');
+  rejects(m => {
+    m.surfaces.browser_zip.access = 'instructions_only';
+  }, /instructions-only distribution requires a reviewed, tested portable skill/);
+});
