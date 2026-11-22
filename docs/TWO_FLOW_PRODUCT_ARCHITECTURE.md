@@ -32,7 +32,7 @@
 **Entry:** https://onboard.360web.cloud
 
 **Web options:**
-- **Upload an existing website (.zip):** stage privately, validate types/sizes/paths/scripts, show a private exact original-bundle preview, identify proposed private GitHub repo and Pages target, separately approve, publish and verify. This is under implementation in [PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40) and requires private object storage, a safe isolated preview origin and release authorization; not yet a live public feature.
+- **Upload an existing website (.zip):** stage privately, validate types/sizes/paths/scripts, show a private exact original-bundle preview, identify proposed private GitHub repo and Pages target, separately approve, publish and verify. Its code is merged in [PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40), but [#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45) still requires private storage, an isolated preview origin and explicit release authorization; it is **not yet hosted for customers**.
 - **Create a simple website:** manual business name/headline/about/services/contact/theme form, exact HTML preview, approval and launch. This is the current browser beta; it must **not** require ChatGPT or a paid inference API.
 - **Manage an existing site:** show owned sites, status, private repo and public URL; support restoring approvals and, after separately shipping the maintenance editor, approved changes. Long-term site discovery and latest-content editing are future milestones ([#39](https://github.com/mitchelldawkinsjr/launch-and-own/issues/39)).
 
@@ -102,7 +102,7 @@ These are product-level proposed operations. Implement them only after specifyin
 | Live customer provider-backed first launch and exact SHA acceptance | [#21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21) |
 | Shared backend safety, OAuth, D1, domain and release coordination | [#2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2) |
 | Standalone web responsive UX / two user options | [#41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41) |
-| Standalone private ZIP import/isolated preview | [PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40), Codex Max |
+| Standalone private ZIP import/isolated preview | Code merged in [PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40); hosted rollout [#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45), Domain/QA |
 | ChatGPT plugin/API bridge | [#43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43), unassigned |
 | Approved post-launch edit PR | [Draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31) |
 | Long-term site ownership/current source after receipts expire | [#39](https://github.com/mitchelldawkinsjr/launch-and-own/issues/39) |
@@ -110,7 +110,7 @@ These are product-level proposed operations. Implement them only after specifyin
 ## Release sequence
 
 1. Independent live owner/provider acceptance (#21); no blanket release of code based only on mocked CI.
-2. Finish reviewing ZIP #40, isolated storage and web preview host, with Domain deployment authorization.
+2. Configure private ZIP storage, isolated web preview host and real-provider acceptance in #45 with Domain approval. ZIP implementation #40 is already merged but remains gated in production.
 3. Ship standalone web UX #41 after coordinating overlapping Worker changes (#31 and #40).
 4. Build and security-review a shared authenticated site/artifact API for ChatGPT #43; connect the plugin to **the same backend**, with end-to-end owner consent.
 5. Test both independent entry points with real consenting beta users; verify source bytes, ownership, published commit, public HTML and account isolation. Gradually enable features without making them mutually dependent.
