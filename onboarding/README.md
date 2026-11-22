@@ -2,7 +2,7 @@
 
 The Worker in this directory is deployed as a **hosted browser beta** at **https://onboard.360web.cloud**. Domain/OAuth has verified GitHub and Cloudflare user consent, account selection, TLS, and both public OAuth apps. A real customer-backed GitHub repository and exact approved Cloudflare Pages production deployment have **not yet passed independent acceptance**; see [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
 
-Its customer journey: connect GitHub, connect Cloudflare, choose an account, review a website, approve resource creation, and verify the exact approved GitHub commit in Cloudflare production.
+Its customer journey: connect GitHub, connect Cloudflare, choose an account, **create a one-page website or upload a static ZIP**, inspect the exact preview, separately approve resource creation, and verify the approved GitHub commit plus public file bytes. The hosted ZIP beta has passed a real owner-consented 5/5-file launch ([#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896)); an independent customer launch is still pending.
 
 ## Operator setup
 
