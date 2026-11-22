@@ -1,3 +1,5 @@
+import { crc32, inflateRawSync } from 'node:zlib';
+
 export const MAX_ZIP_BYTES = 6 * 1024 * 1024;
 export const MAX_SITE_BYTES = 8 * 1024 * 1024;
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -62,17 +64,6 @@ export async function readBounded(stream, maxBytes) {
     offset += chunk.byteLength;
   }
   return bytes;
-}
-
-const crcTable = Uint32Array.from({ length: 256 }, (_, byte) => {
-  for (let bit = 0; bit < 8; bit++) byte = (byte >>> 1) ^ (byte & 1 ? 0xedb88320 : 0);
-  return byte;
-});
-
-function crc32(bytes) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xff];
-  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function zipDirectory(view) {
@@ -181,22 +172,18 @@ function checkPaths(entries) {
   }
 }
 
-async function extract(entry) {
+function extract(entry) {
   let bytes = entry.compressed;
   if (entry.method === 8) {
+    let inflated;
     try {
-      let offset = 0;
-      const source = new ReadableStream({ pull(controller) {
-        // Limit the input per transform so a false size cannot drive a large allocation in one write.
-        const chunk = entry.compressed.subarray(offset, offset + 4096);
-        if (!chunk.length) return controller.close();
-        offset += chunk.length;
-        controller.enqueue(chunk);
-      } });
-      bytes = await readBounded(source.pipeThrough(new DecompressionStream('deflate-raw')), entry.size);
+      inflated = inflateRawSync(bytes, { maxOutputLength: Math.max(entry.size, 1), info: true });
     } catch { throw malformed(); }
+    // Require exactly one complete compressed stream and consume its full payload.
+    if (inflated.engine.bytesWritten !== bytes.byteLength) throw malformed();
+    bytes = inflated.buffer;
   }
-  if (!bytes || bytes.byteLength !== entry.size || crc32(bytes) !== entry.crc) throw malformed();
+  if (bytes.byteLength !== entry.size || crc32(bytes) !== entry.crc) throw malformed();
   return bytes;
 }
 
@@ -224,10 +211,12 @@ export async function extractWebsiteZip(bytes) {
   for (const entry of included) {
     const path = entry.path.slice(prefix.length);
     if (!isSitePath(path)) throw new WebsiteZipError('Upload the built website with static files such as HTML, CSS, JavaScript, images, and fonts.');
-    const contents = await extract(entry);
-    const text = utf8Contents(contents);
-    if ((path === 'index.html' && !text?.trim()) || (contentType(path).startsWith('text/html') && text === null)) {
-      throw new WebsiteZipError('Website HTML must be UTF-8 and the homepage must have content.');
+    const contents = extract(entry);
+    if (contentType(path).startsWith('text/html')) {
+      const text = utf8Contents(contents);
+      if (text === null || (path === 'index.html' && !text.trim())) {
+        throw new WebsiteZipError('Website HTML must be UTF-8 and the homepage must have content.');
+      }
     }
     files.push({ path, bytes: contents });
   }
