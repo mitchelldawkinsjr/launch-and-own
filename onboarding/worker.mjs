@@ -18,6 +18,7 @@ import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './web
 import {readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
 import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
+import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -360,8 +361,10 @@ async function launchHistory(env,current){
     const live=item.display_status==='live'?`<p>Verified site: <a href="${escape(website)}">${escape(website)}</a></p>`:'';
     const action=item.can_restore?button('/restore','Review and reapprove this website',current.csrf,launchIdField(item.id)):'';
     const deletion=item.can_delete?button('/delete-launch-history','Delete history entry',current.csrf,launchIdField(item.id)):'';
+    const update=item.display_status==='live'&&jobs.some(job=>job.id===item.id)?
+      '<p><a href="/site-update?id='+encodeURIComponent(item.id)+'">Edit this website (reviewable GitHub PR)</a></p>':'';
     const diagnostic=item.error_code?`<p>Last result: <code>${escape(item.error_code)}</code></p>`:'';
-    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${live}${action}${deletion}</section>`;
+    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${live}${update}${action}${deletion}</section>`;
   }).join('');
   return view('Approved website history','<p>History is retained for 30 days from the first approval. Reconnect and reapprove a paused launch to resume it. Deleting an entry leaves any customer-owned website and repository in place.</p>'+
     (cards||'<p>No approved launches found for this GitHub identity and Cloudflare account.</p>')+
@@ -566,6 +569,7 @@ async function logout(request,env,current){
   result.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
   return result;
 }
+const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 export default {
   async fetch(request,env,context){
     try{
@@ -595,6 +599,10 @@ export default {
         if(url.pathname==='/history')return await launchHistory(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
+        if(url.pathname==='/site-update')return await siteUpdates.editor(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/site-update-review')return await siteUpdates.review(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/site-update-html')return await siteUpdates.html(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/site-update-status')return await siteUpdates.status(env,current,url.searchParams.get('ticket'));
       }
       if(request.method==='POST'){
         if(url.pathname==='/agent-link')return await confirmAgentLink(request,env,current,{view,fail,escape},{assertCsrf,formData,now});
@@ -608,6 +616,8 @@ export default {
         if(url.pathname==='/logout')return await logout(request,env,current);
         if(url.pathname==='/restore')return await restoreLaunch(request,env,current);
         if(url.pathname==='/delete-launch-history')return await removeLaunchHistory(request,env,current);
+        if(url.pathname==='/site-update-preview')return await siteUpdates.prepare(request,env,current);
+        if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
       }
       return fail('Page not found',404);
     }catch(error){
