@@ -35,7 +35,7 @@ function githubClient({token,fetchFn=fetch}){
   return async (path,{method="GET",body,allow404=false}={})=>{
     const response=await fetchFn("https://api.github.com"+path,{
       method,redirect:"error",
-      headers:{authorization:"Bearer "+token,accept:"application/vnd.github+json","x-github-api-version":"2022-11-28",
+      headers:{authorization:"Bearer "+token,accept:"application/vnd.github+json","x-github-api-version":"2022-11-28","user-agent":"launch-and-own",
         ...(body!==undefined?{"content-type":"application/json"}:{})},
       ...(body!==undefined?{body:JSON.stringify(body)}:{})
     });

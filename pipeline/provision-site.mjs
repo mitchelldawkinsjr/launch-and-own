@@ -25,7 +25,7 @@ function requestFactory({githubToken,cloudflareToken,fetchFn=fetch,strict=false}
       headers:{
         authorization:"Bearer "+(github?githubToken:cloudflareToken),
         accept:github?"application/vnd.github+json":"application/json",
-        ...(github?{"x-github-api-version":"2022-11-28"}:{}),
+        ...(github?{"x-github-api-version":"2022-11-28","user-agent":"launch-and-own"}:{}),
         ...(body!==undefined?{"content-type":"application/json"}:{})
       },
       ...(body!==undefined?{body:JSON.stringify(body)}:{})
