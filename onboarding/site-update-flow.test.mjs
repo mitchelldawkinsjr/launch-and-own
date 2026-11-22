@@ -169,6 +169,20 @@ test('an unrelated or mismatched private GitHub repo cannot be staged as an upda
  }finally{globalThis.fetch=originalFetch}
 });
 
+test('revocation during a provider response fences subsequent PR writes',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
+  h.resourceState.invalidateSessionOnRepoRead=true;
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  assert.equal(r.status,409);
+  assert.equal(h.resourceState.updateBranch,null);
+  assert.equal(h.resourceState.updatePr,null);
+  assert.equal(h.calls.filter(x=>x.url.endsWith('/git/refs')).length,0);
+  assert.equal(h.calls.filter(x=>x.url.endsWith('/pulls')&&x.method==='POST').length,0);
+ }finally{globalThis.fetch=originalFetch}
+});
+
 test('status receipts require the same verified owner but survive a reconnect',async()=>{
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
