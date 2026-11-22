@@ -4,7 +4,7 @@
 
 Launch & Own is a customer-owned website launch and maintenance platform with **two first-class entry points**: a planned ChatGPT conversational builder/manager and a standalone web onboarding experience for ZIP uploads or manual site creation. Both use the same GitHub/Cloudflare account ownership, preview, approval and publication backend.
 
-> **Hosted browser beta — independent customer acceptance still under QA.** Visit **https://onboard.360web.cloud** to connect your own GitHub and Cloudflare accounts and inspect a one-page website preview. The owner-account B13 rehearsal has created a private GitHub repository and a successful Cloudflare Pages production deployment at the approved commit. Approved HTML matches the repository bytes. **Publicly served HTML verification, the job's final `live` state, and a separately consenting customer's acceptance remain pending** ([Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)). A green CI run or successful Pages build alone is not end-to-end acceptance. Custom forms/domains, bespoke AI designs and a public ChatGPT plugin are not available end-to-end.
+> **Hosted browser beta — independent customer acceptance still under QA.** Visit **https://onboard.360web.cloud** to connect your own GitHub and Cloudflare accounts and inspect a one-page website preview. The owner-account B13 rehearsal has created a private GitHub repository and a successful Cloudflare Pages production deployment at the approved commit. Approved HTML matches the repository bytes. **The owner B13 job has since reached `live`, and public HTML SHA-256 matches the approved bytes; a separately consenting customer's launch and approved website edit remain pending** ([Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)). A green CI run or successful Pages build alone is not end-to-end acceptance. Custom forms/domains, bespoke AI designs and a public ChatGPT plugin are not available end-to-end.
 
 ## Two ways to build and manage a website
 
@@ -51,7 +51,7 @@ Launch & Own has a **ChatGPT-first conversational experience (planned)** and a *
 
 ## Use standalone hosted browser onboarding — no coding needed
 
-Open **https://onboard.360web.cloud** with your own GitHub and Cloudflare accounts. Follow the [plain-language tester guide](docs/BETA_TESTER_HANDOFF.md) to review OAuth permissions, choose a provider account, preview one-page content and decide whether to approve resource creation. **Hosted consent and preview are available, but a successful first real launch is still being verified in #21.** The customer owns the resulting private GitHub and Cloudflare resources if provisioned.
+Open **https://onboard.360web.cloud** with your own GitHub and Cloudflare accounts. Follow the [plain-language tester guide](docs/BETA_TESTER_HANDOFF.md) to review OAuth permissions, choose a provider account, preview one-page content and decide whether to approve resource creation. **An owner-account live launch has passed exact SHA/HTML verification; independently consenting customer acceptance and post-launch editing remain open in #21.** The customer owns the resulting private GitHub and Cloudflare resources if provisioned.
 
 ## Optional offline developer preview
 
@@ -81,7 +81,7 @@ Tests use simulated provider APIs and an in-memory D1-compatible SQLite adapter.
 
 The [Domain/OAuth handoff](docs/HANDOFF_DOMAIN_OAUTH.md) records the authorized single `onboard.360web.cloud` host, provider callback settings, DNS/publisher checks and responsibilities. **Domain/OAuth has confirmed:** verified TLS on the custom domain; public GitHub App and Cloudflare OAuth client; successful owner sign-ins and Cloudflare account selection; GitHub App **Pull requests: write** permission separately approved and verified.
 
-**Remaining acceptance gate:** a real customer website must provision and match its approved production GitHub commit and public HTML SHA-256; see [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21). Do not modify provider app permissions, OAuth clients, DNS or the live Worker during an active owner rehearsal without coordinating on [Issue #2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2).
+**Remaining acceptance gate:** owner-account B13 production commit and public HTML match, but an **independent consenting customer** and an **approved edit/PR/merge/verification** must still be tested; see [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21). Do not modify provider app permissions, OAuth clients, DNS or the live Worker during an active owner rehearsal without coordinating on [Issue #2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2).
 
 
 ## Optional AI-assisted website copy
@@ -108,8 +108,8 @@ All live Worker releases are coordinated by Domain and QA on [Issue #2](https://
 
 - **Manual one-page design, preview, explicit approval:** implemented on the hosted beta.
 - **GitHub and Cloudflare OAuth sign-in/account selection:** public and live-verified by the Domain/OAuth operator.
-- **Customer-owned private repository and Pages provisioning:** implemented with durable D1 jobs and local simulations. The **B13 owner rehearsal created a real private GitHub repository and successfully deployed Pages at the approved commit**; final public HTML and independent-customer verification are still [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
-- **Exact GitHub commit and public HTML verification:** implemented and simulated; successful customer acceptance pending.
+- **Customer-owned private repository and Pages provisioning:** implemented with durable D1 jobs and local simulations. The **B13 owner rehearsal created a real private GitHub repository and deployed Pages at the approved commit, with matching public HTML SHA-256 and `live` job status**; independent-customer acceptance and the update flow remain [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
+- **Exact GitHub commit and public HTML verification:** implemented and **verified against the live owner-account B13 site** (matching full commit and SHA-256), while independent-customer acceptance is pending.
 - **Optional AI-assisted website copy:** structured and editable, but unavailable unless an operator explicitly configures an approved Workers AI binding/model.
 - **Reviewable website maintenance UI:** implemented and tested in [draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31); **not yet released**.
 - **Four-page Home/About/Services/Contact bundles:** deterministically rendered and locally previewable, but not exposed in the hosted editor.
