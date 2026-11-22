@@ -80,7 +80,8 @@ function guardedFetch(env, job, credentialsValid) {
     const timeout = AbortSignal.timeout(REQUEST_SECONDS * 1000);
     const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
     try {
-      return await fetch(url, { ...options, signal, redirect: options.redirect ?? 'error' });
+      // Workers only allow follow/manual redirects; default manual and fail closed on non-2xx.
+      return await fetch(url, { ...options, signal, redirect: options.redirect ?? 'manual' });
     } catch {
       throw new ProviderRequestError();
     }
