@@ -9,6 +9,7 @@ import {revokeConnectedAccounts} from './revoke-connections.mjs';
 import {encryptGrant,getFreshAccessToken} from './token-lifecycle.mjs';
 import {listOwnedReceipts,getOwnedReceipt,purgeExpiredReceipts} from './launch-receipts.mjs';
 import {privacyHtml,termsHtml} from './legal-pages.mjs';
+import {LOGO_PNG_BASE64} from './logo.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
@@ -501,6 +502,7 @@ export default {
       // Public legal pages: linked from the provider consent screens, so they need no session or configuration.
       if(request.method==='GET'&&url.pathname==='/privacy')return view('Privacy Policy',privacyHtml);
       if(request.method==='GET'&&url.pathname==='/terms')return view('Terms of Service',termsHtml);
+      if(request.method==='GET'&&url.pathname==='/logo.png')return new Response(Uint8Array.from(atob(LOGO_PNG_BASE64),c=>c.charCodeAt(0)),{headers:{'content-type':'image/png','cache-control':'public, max-age=86400','x-content-type-options':'nosniff'}});
       configured(env);
       if(url.origin!==baseUrl(env))return fail('This service requires its registered HTTPS origin.',400);
       const current=await session(request,env);

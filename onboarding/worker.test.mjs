@@ -645,3 +645,10 @@ test('privacy and terms pages are public and linked from every page footer',asyn
  const home=await (await h.request('/')).text();
  assert.match(home,/href="\/privacy"/);assert.match(home,/href="\/terms"/);
 });
+
+test('logo is served publicly as a PNG for the provider consent screens',async()=>{
+ const h=harness();const res=await h.request('/logo.png');
+ assert.equal(res.status,200);assert.equal(res.headers.get('content-type'),'image/png');
+ const bytes=new Uint8Array(await res.arrayBuffer());
+ assert.deepEqual([...bytes.slice(0,4)],[0x89,0x50,0x4e,0x47]);
+});
