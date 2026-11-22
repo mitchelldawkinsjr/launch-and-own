@@ -115,6 +115,12 @@ const deletable = `(${UNCLAIMED} AND (NOT (${RUNNABLE}) OR NOT ${HAS_APPROVAL}))
 export async function listOwnedJobs(env, session, time) {
   const result = await env.DB.prepare(`SELECT j.id, j.customer_name, j.site_slug, j.updated_at,
       j.error_code, ${statusColumn},
+      CASE WHEN j.status='live' AND j.production_branch='main'
+          AND j.repository_id IS NOT NULL AND j.repository_id > 0
+          AND json_type(j.plan_json,'$.site')='object'
+          AND COALESCE(json_extract(j.plan_json,'$.site.layout'),'')!='multi-page'
+          AND json_extract(j.plan_json,'$.forms')=0
+          AND json_type(j.plan_json,'$.zip') IS NULL THEN 1 ELSE 0 END AS can_edit,
       (${resumable}) AS can_restore, ${deletable} AS can_delete
     FROM onboarding_launch_jobs j WHERE ${OWNED} ORDER BY j.updated_at DESC LIMIT 20`)
     .bind(time, time, time, time, time, ...ownerBindings(session, time)).all();
