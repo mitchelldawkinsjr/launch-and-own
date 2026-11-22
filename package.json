@@ -8,7 +8,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "test": "node --test pipeline/*.test.mjs onboarding/*.test.mjs site/*.test.mjs scripts/*.test.mjs",
+    "test": "node --test pipeline/*.test.mjs onboarding/*.test.mjs site/*.test.mjs scripts/*.test.mjs skills/**/*.test.mjs",
     "preflight:onboarding": "node onboarding/validate-config.mjs",
     "demo:export": "node scripts/export-preview.mjs --input examples/willow-studio.json --out ./site-preview",
     "demo:serve": "node scripts/serve-preview.mjs --dir ./site-preview --port 4173",

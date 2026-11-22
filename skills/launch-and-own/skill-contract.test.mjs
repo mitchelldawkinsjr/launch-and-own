@@ -1,0 +1,88 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {dirname, join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {
+  MAX_FILE_BYTES,
+  MAX_SITE_BYTES,
+  MAX_SITE_FILES,
+  MAX_ZIP_BYTES
+} from '../../onboarding/website-zip.mjs';
+
+const root = dirname(fileURLToPath(import.meta.url));
+const read = name => readFileSync(join(root, name), 'utf8');
+const skill = read('SKILL.md');
+const reference = read('reference.md');
+const examples = read('examples.md');
+const packaging = read('PACKAGING.md');
+const all = [skill, reference, examples, packaging].join('\n');
+
+test('skill frontmatter names the portable launch-and-own skill', () => {
+  assert.match(skill, /^---\nname: launch-and-own\n/m);
+  assert.match(skill, /^description: >-/m);
+});
+
+test('required phase vocabulary is present and ordered as a contract', () => {
+  for (const phase of ['Prepare', 'Exact preview', 'Separate approval', 'Publish', 'Verify live']) {
+    assert.match(skill, new RegExp(phase));
+  }
+  assert.match(skill, /Chat instructions alone authorize \*\*prepare\*\* only/i);
+});
+
+test('never coaches token-in-chat or secret pasting', () => {
+  assert.match(all, /Never\*\* ask for, accept, store, or echo GitHub\/Cloudflare API tokens/i);
+  assert.doesNotMatch(all, /paste (your )?(api )?token/i);
+  assert.doesNotMatch(all, /send (me )?your (github|cloudflare).*(token|password|secret)/i);
+});
+
+test('never authorizes publishing without separate customer approval', () => {
+  assert.match(skill, /separate (browser )?approval/i);
+  assert.match(skill, /Approve and create website/);
+  assert.doesNotMatch(skill, /publish (now|immediately) from chat/i);
+  assert.doesNotMatch(all, /one-click publish through ChatGPT or Claude/i);
+});
+
+test('forbids inventing live outcomes, OAuth state, or fake URLs', () => {
+  assert.match(skill, /Never\*\* invent OAuth state, approval digests, commit SHAs/i);
+  assert.match(examples, /\*\*Do not:\*\* invent `esp-…pages\.dev` URLs/i);
+  assert.match(skill, /do not invent tool calls or action URLs/i);
+});
+
+test('defaults to not sharing customer content', () => {
+  assert.match(skill, /Never\*\* share the customer.s private business copy/i);
+  assert.match(examples, /Do not paste real customer content/i);
+});
+
+test('browser handoff uses the approved onboard origin', () => {
+  assert.match(skill, /https:\/\/onboard\.360web\.cloud/);
+  assert.match(reference, /https:\/\/onboard\.360web\.cloud/);
+  assert.doesNotMatch(all, /onboard\.mitchelldawkins\.com/);
+});
+
+test('ZIP limits in reference stay aligned with website-zip.mjs', () => {
+  assert.match(reference, new RegExp(String(MAX_ZIP_BYTES / (1024 * 1024)) + ' MiB'));
+  assert.match(reference, new RegExp(String(MAX_SITE_BYTES / (1024 * 1024)) + ' MiB'));
+  assert.match(reference, new RegExp(String(MAX_FILE_BYTES / (1024 * 1024)) + ' MiB'));
+  assert.match(reference, new RegExp(String(MAX_SITE_FILES)));
+  assert.match(reference, /index\.html/);
+});
+
+test('today vs future matrix marks MCP publish and ZIP production carefully', () => {
+  assert.match(skill, /Hosted ZIP upload on production Worker[\s\S]*\*\*Future \/ gated\*\*/);
+  assert.match(skill, /Agent MCP tools:[\s\S]*\*\*Future\*\*/);
+  assert.match(skill, /Browser onboarding[\s\S]*\*\*Available\*\*/);
+  assert.match(packaging, /elite-site-pipeline[\s\S]*\*\*not\*\* a production tool-backed publisher/i);
+});
+
+test('examples cover the four required scenarios', () => {
+  assert.match(examples, /Build a new one-page site/);
+  assert.match(examples, /existing static ZIP/);
+  assert.match(examples, /Update my verified site/);
+  assert.match(examples, /needs_reauthorization/);
+});
+
+test('packaging points at this canonical path without inventing store listings', () => {
+  assert.match(packaging, /skills\/launch-and-own/);
+  assert.match(packaging, /stub manifest is intentionally \*\*not\*\* published/i);
+});
