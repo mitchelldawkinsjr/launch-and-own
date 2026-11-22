@@ -117,6 +117,20 @@ test('a changed GitHub main after preview refuses update and creates no feature 
  }finally{globalThis.fetch=originalFetch}
 });
 
+test('repository replacement between reviewed base and approved PR is rejected',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
+  h.resourceState.repo.id=999;
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  assert.equal(r.status,409);
+  assert.equal(h.resourceState.updateBranch,null);
+  assert.equal(h.resourceState.updatePr,null);
+  assert.equal(h.calls.filter(x=>x.method==='PUT'&&x.url.includes('/contents/')).length,1,
+    'only the original launch wrote site contents; update must not write any');
+ }finally{globalThis.fetch=originalFetch}
+});
+
 test('safe approval replay reuses existing GitHub PR without extra website writes',async()=>{
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
