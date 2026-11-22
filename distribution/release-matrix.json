@@ -36,12 +36,13 @@
     },
     "portable_skill": {
       "label": "Portable agent skill (instructions only)",
-      "implementation": "planned",
-      "access": "not_available",
-      "verification": "not_tested",
-      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/55"],
-      "blockers": ["Skills packaging, compatibility check, contract tests and usage review (#55)"]
+      "implementation": "merged",
+      "access": "instructions_only",
+      "verification": "ci_only",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/pull/56"],
+      "blockers": ["Optional broader client usage review; connected publishing still blocked on shared MCP (#43)"]
     },
+
     "shared_mcp_api": {
       "label": "Shared authenticated MCP/API",
       "implementation": "planned",
@@ -52,11 +53,11 @@
     },
     "claude_plugin": {
       "label": "Claude plugin with connected publishing tools",
-      "implementation": "planned",
+      "implementation": "in_pr",
       "access": "not_available",
-      "verification": "not_tested",
+      "verification": "ci_only",
       "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/55"],
-      "blockers": ["Portable skill and shared API, packaging and independent Claude beta QA (#55)"]
+      "blockers": ["Thin instructions-only wrapper in review; connected tools + independent Claude beta QA await shared MCP (#43) and owner distribution approval"]
     },
     "chatgpt_connector": {
       "label": "ChatGPT integration with publishing tools",
