@@ -12,7 +12,7 @@ export const privacyHtml=`<p class="muted">Beta policy · Last updated ${LEGAL_U
 <li><strong>Website content you enter:</strong> business name, headline, description, services, optional contact email and theme, plus the plan you approve.</li>
 <li><strong>Operational logs:</strong> request errors without tokens, cookies, authorization codes or form contents.</li>
 </ul></section>
-<section><h2>How we use it</h2><p>Only to show your preview, create the private repository and Cloudflare Pages project you approve, verify the deployment, and resume an approved launch that was interrupted. We do not sell your data, use it for advertising, or access your accounts for anything you did not approve.</p>
+<section><h2>How we use it</h2><p>Only to show your preview, create the private repository and Cloudflare Pages project you approve, open a pull request in that repository for website updates you approve (never merged for you), verify the deployment, and resume an approved launch that was interrupted. We do not sell your data, use it for advertising, or access your accounts for anything you did not approve.</p>
 <p><strong>Optional AI drafting:</strong> if you choose it, your business name and description are sent to the configured AI provider to draft website copy. Your contact email is not sent. You can always write the content yourself instead.</p></section>
 <section><h2>Cookies</h2><p>Two strictly necessary, secure, HTTP-only cookies: a sign-in cookie (up to 10 minutes) and a session cookie (up to 1 hour). No tracking or advertising cookies.</p></section>
 <section><h2>How long we keep it</h2><ul>
