@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "project": "Launch & Own by 360Web",
+  "ownerConsent": {
+    "mode": "hosted-human-explicit",
+    "approvalBoundToExactArtifact": true,
+    "providerCredentialsExposedToAgent": false,
+    "agentMayPublishUnilaterally": false,
+    "ownerIdentityValidatedServerSide": true,
+    "publicationVerification": ["approved-artifact-digest","canonical-production-github-commit","public-html-digest"]
+  },
+  "surfaces": {
+    "browser_manual": {
+      "label": "Browser: manual one-page creation",
+      "implementation": "deployed",
+      "access": "hosted_beta",
+      "verification": "owner_live",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/21#issuecomment-7086107082"],
+      "blockers": ["Independent consenting customer acceptance and post-launch update walkthrough (#21)"]
+    },
+    "browser_zip": {
+      "label": "Browser: static ZIP upload",
+      "implementation": "merged",
+      "access": "not_available",
+      "verification": "ci_only",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/pull/40","https://github.com/mitchelldawkinsjr/launch-and-own/issues/45"],
+      "blockers": ["Explicit R2 account activation, private bucket, preview Worker, TLS and owner-consented ZIP QA (#45)"]
+    },
+    "site_updates": {
+      "label": "Owner: approved post-launch edits",
+      "implementation": "in_pr",
+      "access": "not_available",
+      "verification": "ci_only",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/pull/31"],
+      "blockers": ["Draft PR #31, Domain-approved deployment window, owner-approved edit live verification (#21)"]
+    },
+    "portable_skill": {
+      "label": "Portable agent skill (instructions only)",
+      "implementation": "planned",
+      "access": "not_available",
+      "verification": "not_tested",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/55"],
+      "blockers": ["Skills packaging, compatibility check, contract tests and usage review (#55)"]
+    },
+    "shared_mcp_api": {
+      "label": "Shared authenticated MCP/API",
+      "implementation": "planned",
+      "access": "not_available",
+      "verification": "not_tested",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/43"],
+      "blockers": ["Tenant-bound linking, secure tools, approval gate and client QA (#43)"]
+    },
+    "claude_plugin": {
+      "label": "Claude plugin with connected publishing tools",
+      "implementation": "planned",
+      "access": "not_available",
+      "verification": "not_tested",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/55"],
+      "blockers": ["Portable skill and shared API, packaging and independent Claude beta QA (#55)"]
+    },
+    "chatgpt_connector": {
+      "label": "ChatGPT integration with publishing tools",
+      "implementation": "planned",
+      "access": "not_available",
+      "verification": "not_tested",
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/43"],
+      "blockers": ["Shared MCP/API, linked owner identity, supported app distribution and ChatGPT beta QA (#43/#55)"]
+    }
+  }
+}
