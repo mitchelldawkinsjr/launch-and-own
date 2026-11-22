@@ -32,7 +32,11 @@ function requestFactory({githubToken,cloudflareToken,fetchFn=fetch,strict=false}
     });
     if(allow404&&resp.status===404)return null;
     if(!resp.ok){
-      if(strict)throw new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
+      if(strict){
+        const err=new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
+        err.code=service+"_http_"+resp.status;
+        throw err;
+      }
       throw Error(service+" "+method+" "+path+" failed (HTTP "+resp.status+")");
     }
     let data;
