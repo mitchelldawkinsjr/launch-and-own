@@ -1,4 +1,6 @@
 import test from "node:test";
+import {createHash} from "node:crypto";
+import {renderSite} from "../site/render-site.mjs";
 import assert from "node:assert/strict";
 import {launchWebsite} from "./launch-site.mjs";
 
@@ -17,11 +19,13 @@ test("operator launch checks the exact newly created revision, not any old Pages
    calls++;
    assert.equal(opts.cloudflareToken,tokens.cloudflareToken);
    assert.equal(opts.expectedCommitSha,HEAD_SHA);
+   assert.equal(opts.expectedHtmlSha256,createHash("sha256").update(renderSite({name:input.name}),"utf8").digest("hex"));
    assert.equal(attempts,18);assert.equal(interval,15000);
    return {status:"live",website:"https://esp-test-customer-site.pages.dev",deploymentId:"deploy-id"};
   }
  });
  assert.equal(result.status,"live");assert.equal(result.githubCommitSha,HEAD_SHA);
+ assert.match(result.approvedHomepageSha256,/^[a-f0-9]{64}$/);
  assert.equal(calls,2);
 });
 test("no commit SHA fails closed without making a Pages verification call",async()=>{
