@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 // Read-only verification of a customer Pages production deployment and its public homepage.
 import {readFileSync} from "node:fs";
+import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
 import {planCustomer} from "./plan-customer.mjs";
 
-export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fetchFn=fetch}={}) {
+export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,expectedHtmlSha256,fetchFn=fetch}={}) {
   const plan=planCustomer(input);
   if(plan.forms||input.hostname)throw Error("This verifier currently supports only website-only pages.dev projects");
   if(!cloudflareToken)throw Error("CLOUDFLARE_API_TOKEN is required for deployment verification");
   if(expectedCommitSha!==undefined&&(typeof expectedCommitSha!=="string"||!/^[a-f0-9]{40}$/i.test(expectedCommitSha)))
     throw Error("Expected commit SHA must be a full 40-character GitHub commit hash");
+  if(expectedHtmlSha256!==undefined&&(typeof expectedHtmlSha256!=="string"||!/^[a-f0-9]{64}$/i.test(expectedHtmlSha256)))
+    throw Error("Expected HTML SHA-256 must be a full 64-character digest");
   const projectName="esp-"+plan.customer+"-site";
   const website="https://"+projectName+".pages.dev";
   const apiUrl="https://api.cloudflare.com/client/v4/accounts/"+encodeURIComponent(plan.accountId)+"/pages/projects/"+encodeURIComponent(projectName);
@@ -41,7 +44,11 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,fet
   const body=await page.text();
   if(!/<html\b/i.test(body))
     return {status:"unexpected-public-content",website,project:projectName,contentType};
-  return {status:"live",website,project:projectName,deploymentId:canonical.id,
+  const publicHtmlSha256=createHash("sha256").update(body,"utf8").digest("hex");
+  if(expectedHtmlSha256&&publicHtmlSha256!==expectedHtmlSha256.toLowerCase())
+    return {status:"pending-expected-html",website,project:projectName,
+      expectedHtmlSha256:expectedHtmlSha256.toLowerCase(),publicHtmlSha256};
+  return {status:"live",website,project:projectName,deploymentId:canonical.id,publicHtmlSha256,
     latestPending:latest?.id!==canonical.id&&latestStage?.status!=="success"};
 }
 export async function waitForWebsite(input,options={},attempts=18,intervalMs=15000) {
