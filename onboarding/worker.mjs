@@ -8,6 +8,7 @@ import {randomToken,sha256,seal,unseal} from './crypto.mjs';
 import {revokeConnectedAccounts} from './revoke-connections.mjs';
 import {encryptGrant,getFreshAccessToken} from './token-lifecycle.mjs';
 import {listOwnedReceipts,getOwnedReceipt,purgeExpiredReceipts} from './launch-receipts.mjs';
+import {privacyHtml,termsHtml} from './legal-pages.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
@@ -30,7 +31,7 @@ const redirect=(path,setCookie)=>{
   return new Response(null,{status:303,headers});
 };
 const view=(title,body,status=200)=>new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Launch & Own</title><style>
-body{font:16px/1.6 system-ui,sans-serif;background:#f6f8fc;color:#15243a;margin:0}main{max-width:680px;margin:5vh auto;padding:32px;background:white;border:1px solid #dfe6ef;border-radius:18px}h1{font-size:30px;margin:0 0 18px}a,button{color:#174ca5}button{padding:10px 16px;background:#174ca5;color:white;border:0;border-radius:8px;cursor:pointer}input,select,textarea{padding:10px;width:100%;box-sizing:border-box;margin-bottom:16px;border:1px solid #a1acba;border-radius:6px}textarea{resize:vertical}label{display:block;font-weight:600}small{color:#455771}.muted{color:#65738a}.pill{display:inline-block;padding:2px 8px;background:#e8f1e9;border-radius:12px}p{overflow-wrap:anywhere}section{border-top:1px solid #e5eaf0;padding-top:14px;margin-top:18px}footer{margin-top:28px;font-size:13px;color:#53657a}</style></head><body><main><h1>${escape(title)}</h1>${body}<footer>Customer-controlled hosting · No paid email service · Beta onboarding</footer></main></body></html>`,{status,headers:textHeaders});
+body{font:16px/1.6 system-ui,sans-serif;background:#f6f8fc;color:#15243a;margin:0}main{max-width:680px;margin:5vh auto;padding:32px;background:white;border:1px solid #dfe6ef;border-radius:18px}h1{font-size:30px;margin:0 0 18px}a,button{color:#174ca5}button{padding:10px 16px;background:#174ca5;color:white;border:0;border-radius:8px;cursor:pointer}input,select,textarea{padding:10px;width:100%;box-sizing:border-box;margin-bottom:16px;border:1px solid #a1acba;border-radius:6px}textarea{resize:vertical}label{display:block;font-weight:600}small{color:#455771}.muted{color:#65738a}.pill{display:inline-block;padding:2px 8px;background:#e8f1e9;border-radius:12px}p{overflow-wrap:anywhere}section{border-top:1px solid #e5eaf0;padding-top:14px;margin-top:18px}footer{margin-top:28px;font-size:13px;color:#53657a}</style></head><body><main><h1>${escape(title)}</h1>${body}<footer>Customer-controlled hosting · No paid email service · Beta onboarding · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer></main></body></html>`,{status,headers:textHeaders});
 const fail=(message,status=400)=>view('Setup could not continue',`<p>${escape(message)}</p><p><a href="/">Return to setup</a></p>`,status);
 const button=(action,label,csrf,extra='')=>`<form action="${action}" method="POST"><input type="hidden" name="csrf" value="${escape(csrf)}">${extra}<button type="submit">${escape(label)}</button></form>`;
 function cookies(request){
@@ -497,6 +498,9 @@ export default {
           status:launchJobsReady?200:503,headers:{'cache-control':'no-store'}
         });
       }
+      // Public legal pages: linked from the provider consent screens, so they need no session or configuration.
+      if(request.method==='GET'&&url.pathname==='/privacy')return view('Privacy Policy',privacyHtml);
+      if(request.method==='GET'&&url.pathname==='/terms')return view('Terms of Service',termsHtml);
       configured(env);
       if(url.origin!==baseUrl(env))return fail('This service requires its registered HTTPS origin.',400);
       const current=await session(request,env);
