@@ -50,7 +50,22 @@ See the [architecture and rollout guide](../docs/DURABLE-LAUNCH-ARCHITECTURE.md)
 
 The website-only beta now accepts a business/site name, homepage headline, about text, up to six services, an optional contact email and a supported color theme. The user can open a session-protected `GET /site-preview?id=...` after submitting their details. This preview renders the exact static HTML that `applyWebsite()` will put in `public/index.html` **after** an explicit approval; unapproved previews never create repositories or Pages projects. The template is responsive, accessible, script-free and performs strict length/email/theme validation and HTML escaping. It uses no remote fonts, images or trackers.
 
-A safe retry against an existing customer repository compares the stored HTML with the approved preview and refuses to reuse a different page. Existing customer files are never overwritten. This feature does not yet generate bespoke AI design, multi-page navigation, upload images, collect contact-form submissions or manage custom domains. Future AI-assisted content drafts must still be previewed and approved by the customer before publishing.
+A safe retry compares the source HTML with the approved preview. The generated site is a single homepage. Use a website ZIP to publish a built site with multiple pages and assets.
+
+## Upload a built website
+
+After connecting GitHub and selecting Cloudflare, choose **Upload a built website**. Upload a ZIP with a UTF-8 `index.html` at its root or in one enclosing build folder. Include the HTML, styles, scripts and assets from your static build output. The upload accepts ZIPs up to 6 MiB with at most 128 files, 8 MiB total expanded size and 2 MiB per file. Supported files use portable ASCII names. The importer checks archive metadata and file contents and rejects paths outside the website, conflicting names, links, encrypted archives and Pages configuration files.
+
+The review shows the complete file list, private GitHub repository and public Pages address. Open the private preview to navigate the uploaded pages with their original local assets. The preview restricts forms, external resources and service workers. Approval covers the file paths and bytes in the reviewed bundle. The GitHub App commits `public/` in one atomic branch update and records the verified tree's commit SHA before requesting Pages. Pages builds from `public/` with an empty build command. The launch reaches **live** when Cloudflare reports that production SHA and serves the exact approved homepage.
+
+### Operator rollout
+
+1. Coordinate the rollout with the Domain/OAuth agent. Designate a dedicated preview zone with proxied wildcard DNS and a matching TLS certificate for `*.<preview-domain>`. Route only those preview hosts to a separate Worker with `zip-preview-worker.mjs` as its entrypoint, `nodejs_compat` enabled and `workers.dev` and preview URLs disabled. Each upload uses its own hostname, so root-relative assets retain their paths and customer scripts run outside the onboarding origin.
+2. Create a dedicated private R2 bucket in the Workers account. Keep public access disabled. Set lifecycle expiration for `website-zip/draft/` after one day and `website-zip/approved/` after 32 days. The approved lifecycle covers the existing 30-day recovery window, including a promotion that precedes the final D1 write.
+3. Bind the bucket as `ZIP_ARTIFACTS` to both Workers. Set `ZIP_PREVIEW_DOMAIN` to the bare preview domain and provide the same independent 32-byte hex `ZIP_PREVIEW_KEY` secret on both. Set the preview Worker's `ONBOARDING_ORIGIN` to the exact registered onboarding origin. Give the preview Worker only its preview bindings. Keep OAuth grants, the onboarding encryption key and D1 on the onboarding Worker.
+4. Confirm the GitHub App can write repository contents through `createCommitOnBranch`. Confirm the customer's separate Cloudflare Pages GitHub App can read the created repository. Test with a consenting beta account and a small synthetic ZIP before enabling general access. Verify a script and root-relative asset on the private preview, check that a bare preview URL returns 404, and confirm the exact production commit after approval.
+
+The upload option appears once its preview bindings are configured. The approved bundle manifest is recorded in the existing job plan, so this feature uses the current D1 schema. `npm test` covers the ZIP flow with simulated providers, including loss of a commit response, authorization expiry and reapproval. Hosted acceptance requires the preview zone, storage lifecycle and provider checks above.
 
 
 ## Approved launch history

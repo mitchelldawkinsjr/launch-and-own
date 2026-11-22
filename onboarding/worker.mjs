@@ -13,6 +13,9 @@ import {LOGO_PNG_BASE64} from './logo.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
+import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
+import {readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
+import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -31,8 +34,8 @@ const redirect=(path,setCookie)=>{
   if(setCookie)headers.append('set-cookie',setCookie);
   return new Response(null,{status:303,headers});
 };
-const view=(title,body,status=200)=>new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Launch & Own</title><style>
-body{font:16px/1.6 system-ui,sans-serif;background:#f6f8fc;color:#15243a;margin:0}main{max-width:680px;margin:5vh auto;padding:32px;background:white;border:1px solid #dfe6ef;border-radius:18px}h1{font-size:30px;margin:0 0 18px}a,button{color:#174ca5}button{padding:10px 16px;background:#174ca5;color:white;border:0;border-radius:8px;cursor:pointer}input,select,textarea{padding:10px;width:100%;box-sizing:border-box;margin-bottom:16px;border:1px solid #a1acba;border-radius:6px}textarea{resize:vertical}label{display:block;font-weight:600}small{color:#455771}.muted{color:#65738a}.pill{display:inline-block;padding:2px 8px;background:#e8f1e9;border-radius:12px}p{overflow-wrap:anywhere}section{border-top:1px solid #e5eaf0;padding-top:14px;margin-top:18px}footer{margin-top:28px;font-size:13px;color:#53657a}</style></head><body><main><h1>${escape(title)}</h1>${body}<footer>Customer-controlled hosting · No paid email service · Beta onboarding · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer></main></body></html>`,{status,headers:textHeaders});
+const view=(title,body,status=200,headers=textHeaders)=>new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Launch & Own</title><style>
+body{font:16px/1.6 system-ui,sans-serif;background:#f6f8fc;color:#15243a;margin:0}main{max-width:680px;margin:5vh auto;padding:32px;background:white;border:1px solid #dfe6ef;border-radius:18px}h1{font-size:30px;margin:0 0 18px}a,button{color:#174ca5}button{padding:10px 16px;background:#174ca5;color:white;border:0;border-radius:8px;cursor:pointer}input,select,textarea{padding:10px;width:100%;box-sizing:border-box;margin-bottom:16px;border:1px solid #a1acba;border-radius:6px}textarea{resize:vertical}label{display:block;font-weight:600}small{color:#455771}.muted{color:#65738a}.pill{display:inline-block;padding:2px 8px;background:#e8f1e9;border-radius:12px}p{overflow-wrap:anywhere}section{border-top:1px solid #e5eaf0;padding-top:14px;margin-top:18px}footer{margin-top:28px;font-size:13px;color:#53657a}</style></head><body><main><h1>${escape(title)}</h1>${body}<footer>Customer-controlled hosting · No paid email service · Beta onboarding · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer></main></body></html>`,{status,headers});
 const fail=(message,status=400)=>view('Setup could not continue',`<p>${escape(message)}</p><p><a href="/">Return to setup</a></p>`,status);
 const button=(action,label,csrf,extra='')=>`<form action="${action}" method="POST"><input type="hidden" name="csrf" value="${escape(csrf)}">${extra}<button type="submit">${escape(label)}</button></form>`;
 function cookies(request){
@@ -171,7 +174,8 @@ async function accountOptions(env,current){
 }
 async function home(env,current,notice){
   const disconnectNotice=notice==='unconfirmed'?'<p role="alert">Your local session was removed, but one or more provider authorizations could not be revoked automatically. Review connected applications in your GitHub and Cloudflare account settings.</p>':notice==='complete'?'<p role="status">You are signed out and provider revocation was confirmed for the connected accounts.</p>':'';
-  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>Build and maintain your own website using your GitHub and Cloudflare accounts.</p><p>Connect GitHub to get started. You approve each launch before any resources are created.</p><p><a href="/connect/github">Connect GitHub</a></p><small>We do not ask for API tokens or passwords.</small>`);
+  const zipEnabled=zipPreviewConfigured(env);
+  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Upload a built website or create one here. Host it using your own GitHub and Cloudflare accounts.':'Build and maintain your own website using your GitHub and Cloudflare accounts.'}</p><p>Connect GitHub to get started. You approve each launch before any resources are created.</p><p><a href="/connect/github">Connect GitHub</a></p><small>We do not ask for API tokens or passwords.</small>`);
   const connected=!!current.cloudflare_token_ct;
   let accountHtml='';
   if(connected&&!current.cloudflare_account_id){
@@ -197,11 +201,17 @@ async function home(env,current,notice){
   const aiEntry=connected&&current.cloudflare_account_id&&aiDraftConfigured(env)?
     '<section><h2>Describe it. Get a draft.</h2><p>Optional AI-assisted copy: your business name and description will be sent to the configured AI provider. AI may make mistakes; you must review and edit every claim before publishing. Contact email is not sent to the model.</p>'+
     button('/draft','Draft my website copy',current.csrf,aiFields)+'</section>':'';
+  const zipEntry=connected&&current.cloudflare_account_id&&zipEnabled?`<section><h2>Upload a built website</h2>
+    <p>Upload a ZIP of your built site to preview it privately. Include <code>index.html</code> and its assets at the top of the ZIP or inside one build folder.</p>
+    <form method="POST" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${escape(current.csrf)}">
+    <label for="zip-name">Business or website name</label><input id="zip-name" name="name" maxlength="80" required>
+    <label for="website-zip">Website ZIP (up to 6 MiB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
+    <button type="submit">Upload and preview</button></form></section>`:'';
   const next=connected&&current.cloudflare_account_id?
-    '<section><h2>Design your website</h2><p>Review your generated homepage before approving publication. Forms and custom domains remain a future beta milestone.</p>'+
+    '<section><h2>Create a site</h2><p>Review your generated homepage before approving publication. Forms and custom domains remain a future beta milestone.</p>'+
     button('/preview','Generate website preview',current.csrf,siteFields)+'</section>':'';
   const historyLink=connected&&current.cloudflare_account_id?'<p><a href="/history">View previous approved launches</a></p>':'';
-  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p><p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
+  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p><p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
@@ -264,6 +274,40 @@ async function preview(request,env,current){
     .bind(id,current.hash,site.name,current.cloudflare_account_id,current.github_login,
       JSON.stringify({...plan,site}),ts,ts,renderSite(site)).run();
   return redirect('/review?id='+encodeURIComponent(id));
+}
+async function uploadZip(request,env,current){
+  if(!zipPreviewConfigured(env))return fail('Website ZIP uploads are unavailable.',503);
+  if(!current?.cloudflare_account_id||!current.cloudflare_token_ct||request.headers.get('origin')!==baseUrl(env))
+    return fail('Connect GitHub and select your Cloudflare account before uploading.',403);
+  await limitAttempts(request,env);
+  const type=request.headers.get('content-type')||'';
+  if(!/^multipart\/form-data;/i.test(type))return fail('Choose a website ZIP to upload.');
+  const bodyLimit=MAX_ZIP_BYTES+64*1024;
+  if(Number(request.headers.get('content-length'))>bodyLimit)return fail('Choose a ZIP file that is 6 MiB or less.',413);
+  const bytes=await readBounded(request.body,bodyLimit);
+  if(!bytes)return fail('Choose a ZIP file that is 6 MiB or less.',413);
+  const data=await new Response(bytes,{headers:{'content-type':type}}).formData();
+  assertCsrf(request,data,current,baseUrl(env));
+  const archive=data.get('zip');
+  if(data.getAll('zip').length!==1||!(archive instanceof File)||!archive.size)return fail('Choose a website ZIP to upload.');
+  if(archive.size>MAX_ZIP_BYTES)return fail('Choose a ZIP file that is 6 MiB or less.',413);
+  const nameValue=data.get('name');
+  if(data.getAll('name').length!==1||typeof nameValue!=='string'||nameValue.length>80||!/[a-z0-9]/i.test(nameValue.normalize('NFKD')))
+    return fail('Enter a business or website name.');
+  const {name}=normalizeSite({name:nameValue});
+  const plan=planCustomer({name,accountId:current.cloudflare_account_id,githubOwner:current.github_login,forms:false});
+  const files=await extractWebsiteZip(new Uint8Array(await archive.arrayBuffer()));
+  const id=crypto.randomUUID();
+  const zip=await stageZip(env.ZIP_ARTIFACTS,id,files);
+  const time=now();
+  const staged=await env.DB.prepare(`INSERT INTO onboarding_launches
+    (id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,created_at,updated_at)
+    SELECT ?,id_hash,?,cloudflare_account_id,github_login,?,'preview',?,? FROM onboarding_sessions
+    WHERE id_hash=? AND authorization_epoch=? AND cloudflare_account_id=? AND cloudflare_token_ct IS NOT NULL
+      AND expires_at>? RETURNING id`)
+    .bind(id,name,JSON.stringify({...plan,zip}),time,time,current.hash,current.authorization_epoch,current.cloudflare_account_id,time).first();
+  if(!staged)return fail('Your connection changed. Review your account selection and upload again.',409);
+  return redirect(reviewPath(id));
 }
 async function assertHistoryAccess(env,current){
   if(!current?.cloudflare_account_id)throw Error('Reconnect GitHub and select your Cloudflare account');
@@ -385,7 +429,19 @@ async function itemSnapshot(item,current){
 async function sitePreview(env,current,id){
   const item=await getLaunch(env,current,id);
   if(!item)return fail('This website preview is not accessible.',404);
-  const {html}=await itemSnapshot(item,current);
+  const {html,zip}=await itemSnapshot(item,current);
+  if(zip){
+    if(!zipPreviewConfigured(env))return fail('Website ZIP previews are unavailable.',503);
+    const stage=item.job_id?'approved':'draft';
+    await readZipManifest(env.ZIP_ARTIFACTS,zip,stage);
+    const {origin,ticket}=await createZipPreview(env,zip,stage,current.expires_at);
+    return view('Open private website preview',`<p>Review your website and its pages before approving. Forms and external resources are restricted in the preview.</p>
+      <form action="${escape(origin)}/_open" method="POST"><input name="ticket" type="hidden" value="${escape(ticket)}">
+      <button type="submit">Open uploaded website</button></form>`,200,{
+      ...textHeaders,'referrer-policy':'origin',
+      'content-security-policy':textHeaders['content-security-policy'].replace("form-action 'self'",`form-action ${origin}`)
+    });
+  }
   return new Response(html,{status:200,headers:{
     'content-type':'text/html; charset=utf-8','cache-control':'private, no-store',
     'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'no-referrer',
@@ -396,14 +452,19 @@ async function sitePreview(env,current,id){
 async function review(env,current,id){
   const item=await getLaunch(env,current,id);
   if(!item)return fail('This launch request is not accessible.',404);
-  const {slug,digest}=await itemSnapshot(item,current);
+  const {slug,digest,zip}=await itemSnapshot(item,current);
   const website='https://esp-'+slug+'-site.pages.dev';
   const details=`<p><strong>Name:</strong> ${escape(item.customer_name)}</p><p><strong>GitHub:</strong> ${escape(item.github_login)}</p><p><strong>Cloudflare:</strong> ${escape(item.cloudflare_account_id)}</p><p><strong>Private repository:</strong> ${escape('esp-'+slug)}</p><p><strong>Public Pages URL:</strong> ${escape(website)}</p><p>Approval allows Launch &amp; Own to create the private repository, publish the reviewed website, and retry while this session and both provider grants stay valid. Changes to the repository's production branch can trigger future Pages deployments.</p><p>Cloudflare's Workers &amp; Pages GitHub App needs access to the repository. <a href="https://github.com/settings/installations">Review GitHub App access</a>.</p>`;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open your website preview</a></p>';
   let status=item.status;
   let controls='';
   let output='';
+  let fileList='';
   if(status==='preview'){
+    if(zip){
+      const manifest=await readZipManifest(env.ZIP_ARTIFACTS,zip,item.job_id?'approved':'draft');
+      fileList=`<details><summary>Files included in this launch</summary><ul>${manifest.map(file=>`<li><code>${escape(file.path)}</code></li>`).join('')}</ul></details>`;
+    }
     controls=button('/approve','Approve and create website',current.csrf,launchIdField(id)+
       '<input type="hidden" name="digest" value="'+escape(digest)+'">');
   }else{
@@ -428,7 +489,8 @@ async function review(env,current,id){
     }
     if(status==='live')output=`<p class="pill">Public website deployment verified</p><p><a href="${escape(website)}">${escape(website)}</a></p><p>Verified revision <code>${escape(item.expected_commit_sha)}</code></p>`;
   }
-  return view('Review website launch',`${details}<p class="pill">Status: ${escape(status)}</p>${previewLink}${output}${controls}<p><a href="/">Back to setup</a></p>`);
+  const source=zip?`<p>Uploaded website · ${zip.fileCount} ${zip.fileCount===1?'file':'files'} · ${Math.ceil(zip.totalBytes/1024)} KiB</p>`:'';
+  return view('Review website launch',`${source}${details}<p class="pill">Status: ${escape(status)}</p>${previewLink}${fileList}${output}${controls}<p><a href="/">Back to setup</a></p>`);
 }
 
 function queueAttempt(context,env,id,sessionHash){
@@ -444,6 +506,10 @@ async function approve(request,env,current,context){
   if(!item||item.status!=='preview')throw Error('This launch is not awaiting approval');
   const snapshot=await itemSnapshot(item,current);
   if(data.getAll('digest').length!==1||data.get('digest')!==snapshot.digest)throw Error('Review the current website preview again');
+  if(snapshot.zip){
+    if(!zipPreviewConfigured(env))return fail('Website ZIP launches are unavailable.',503);
+    await retainZip(env.ZIP_ARTIFACTS,snapshot.zip);
+  }
   const time=now();
   const receipt=item.legacy_receipt_id&&!item.job_id
     ?await getOwnedReceipt(env,{id:item.legacy_receipt_id,...receiptOwner(current,time)}):null;
@@ -518,6 +584,7 @@ export default {
       }
       if(request.method==='POST'){
         if(url.pathname==='/account')return await selectAccount(request,env,current);
+        if(url.pathname==='/upload')return await uploadZip(request,env,current);
         if(url.pathname==='/preview')return await preview(request,env,current);
         if(url.pathname==='/draft')return await draft(request,env,current);
         if(url.pathname==='/approve')return await approve(request,env,current,context);
@@ -529,6 +596,7 @@ export default {
       }
       return fail('Page not found',404);
     }catch(error){
+      if(error instanceof WebsiteZipError)return fail(error.message);
       // Never log bearer tokens, OAuth codes, cookie values or request bodies.
       const code=error?.message==='Onboarding account connections are not configured'?'not_configured':'request_rejected';
       console.error(JSON.stringify({event:'onboarding_request_error',code}));

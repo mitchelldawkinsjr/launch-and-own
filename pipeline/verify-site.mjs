@@ -75,7 +75,7 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,exp
   let homepageBytes;
   try{
     if(approved){
-      const expectedBytes=new TextEncoder().encode(approved.html);
+      const expectedBytes=approved.htmlBytes??new TextEncoder().encode(approved.html);
       if(await servesApprovedHtml(page,expectedBytes))homepageBytes=expectedBytes;
     }else{
       homepageBytes=new Uint8Array(await page.arrayBuffer());
@@ -84,7 +84,7 @@ export async function verifyWebsite(input,{cloudflareToken,expectedCommitSha,exp
     if(approved)throw new ProviderRequestError();
     throw error;
   }
-  if(!homepageBytes||!/<html\b/i.test(new TextDecoder().decode(homepageBytes)))
+  if(!homepageBytes||(!approved?.htmlBytes&&!/<html\b/i.test(new TextDecoder().decode(homepageBytes))))
     return {status:"unexpected-public-content",website,project:projectName,contentType};
   const publicHtmlSha256=createHash("sha256").update(homepageBytes).digest("hex");
   if(expectedHtmlSha256&&publicHtmlSha256!==expectedHtmlSha256.toLowerCase())
