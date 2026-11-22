@@ -21,6 +21,14 @@ Customers keep ownership of their GitHub repositories and Cloudflare resources. 
 
 Open [`docs/architecture.html`](docs/architecture.html) in a browser for an interactive diagram: step through a customer's journey from first visit to owning a live website, and see which part of the system (onboarding Worker, D1, GitHub, Cloudflare, customer-owned resources) handles each step. Update it when the flow changes.
 
+## Product and design handoff
+
+Launch & Own is a **browser-first, customer-owned website builder beta**, designed to let everyday people work from their own GitHub and Cloudflare accounts rather than learning a deployment pipeline. The planned experience runs from a simple business description to an exact preview, a separate publication approval, and verifiable owner-controlled hosting.
+
+- [**Onboarding UI/UX design and implementation brief**](docs/ONBOARDING_UIUX_HANDOFF.md) — complete screen map, mobile/desktop design direction, security constraints and screenshots/CI acceptance for the design agent ([Issue #41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41)).
+- [**Suggested repository About profile**](.github/REPOSITORY_PROFILE.md) — public description, hosted beta URL, discoverability topics and social-preview guidance.
+- [**Nontechnical beta tester guide**](docs/BETA_TESTER_HANDOFF.md) — what customers actually see, what is approved and the current live-QA limits.
+
 ## Source layout
 
 | Path | Purpose |
