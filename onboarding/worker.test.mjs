@@ -640,7 +640,7 @@ test('privacy and terms pages are public and linked from every page footer',asyn
  const h=harness();
  for(const [path,title] of [['/privacy','Privacy Policy'],['/terms','Terms of Service']]){
   const res=await h.request(path);assert.equal(res.status,200);
-  const html=await res.text();assert.match(html,new RegExp('<h1>'+title+'</h1>'));assert.match(html,/Last updated/);
+  const html=await res.text();assert.match(html,new RegExp('<h1(?:\\s[^>]*)?>'+title+'</h1>'));assert.match(html,/Last updated/);
  }
  const home=await (await h.request('/')).text();
  assert.match(home,/href="\/privacy"/);assert.match(home,/href="\/terms"/);
