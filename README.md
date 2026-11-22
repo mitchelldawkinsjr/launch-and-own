@@ -17,6 +17,10 @@ Launch & Own is a customer-owned conversational website launch and maintenance p
 
 Customers keep ownership of their GitHub repositories and Cloudflare resources. Low/no-cost hosting is a design goal, subject to provider tiers, quota limits, and usage.
 
+## Architecture
+
+Open [`docs/architecture.html`](docs/architecture.html) in a browser for an interactive diagram: step through a customer's journey from first visit to owning a live website, and see which part of the system (onboarding Worker, D1, GitHub, Cloudflare, customer-owned resources) handles each step. Update it when the flow changes.
+
 ## Source layout
 
 | Path | Purpose |
