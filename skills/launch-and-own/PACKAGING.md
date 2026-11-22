@@ -7,20 +7,23 @@ Canonical source of truth: this directory (`skills/launch-and-own/`), versioned 
 | Client | Suggested install |
 | --- | --- |
 | Cursor project skill | Copy or symlink `skills/launch-and-own` → `.cursor/skills/launch-and-own` in a checkout (do not edit Cursor’s reserved `~/.cursor/skills-cursor/`). |
-| Claude Code / Agent Skills | Point the client at this folder’s `SKILL.md` using that client’s documented skill import path. |
+| Claude Code / Agent Skills | Prefer the thin plugin at [`clients/claude-plugin/`](../../clients/claude-plugin/) (`claude --plugin-dir ./clients/claude-plugin`), or point the client at this folder’s `SKILL.md`. |
 | Codex | Load `SKILL.md` (+ `reference.md` / `examples.md` as needed) as project instructions; do not invent undocumented tool schemas. |
 
-Keep wrappers **thin**: same markdown, no duplicated provisioning logic.
+Keep wrappers **thin**: same markdown, no duplicated provisioning logic. After editing this skill, run `npm run sync:claude-plugin` so the Claude plugin copy stays identical.
 
 ## Claude plugin wrapper (thin)
 
+Repo path: [`clients/claude-plugin/`](../../clients/claude-plugin/).
+
 Until a supported Claude connector + shared MCP (#43) ships:
 
-1. Ship this skill as the plugin’s instruction/skill payload.
+1. Ship this skill as the plugin’s instruction/skill payload (synced copies of `SKILL.md`, `reference.md`, `examples.md`).
 2. Do **not** invent Claude tool names that call GitHub/Cloudflare or invent publish endpoints.
-3. Optional future: map #43 MCP tools 1:1 once the backend contract exists — same approval rules.
+3. Do **not** add `mcpServers`, hooks that publish, or marketplace/directory submission without explicit owner approval.
+4. Optional future: map #43 MCP tools 1:1 once the backend contract exists — same approval rules.
 
-A stub manifest is intentionally **not** published here to avoid implying a store listing. Create vendor manifests only with explicit owner approval.
+Local load via `--plugin-dir` is supported for developers and beta testers. A public marketplace or Anthropic directory listing is **not** authorized by shipping this wrapper.
 
 ## ChatGPT packaging
 
