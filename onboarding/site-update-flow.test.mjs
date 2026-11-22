@@ -95,7 +95,8 @@ test('approval requires same-origin CSRF and a session-bound untampered review r
   r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket},
     {headers:{origin:'https://attacker.example'}});
   assert.equal(r.status,400);
-  const tampered=ticket.slice(0,-1)+(ticket.at(-1)==='A'?'B':'A');
+  // Mutate an encoded byte, not the final base64url character (which may contain only unused pad bits).
+  const tampered=ticket.slice(0,12)+(ticket[12]==='A'?'B':'A')+ticket.slice(13);
   r=await h.request('/site-update-review?ticket='+tampered,{cookie:tenant.cookie});
   assert.equal(r.status,400);
   const second=await connectTenant(h);
