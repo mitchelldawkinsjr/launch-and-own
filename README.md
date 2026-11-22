@@ -48,6 +48,8 @@ Launch & Own has a **ChatGPT-first conversational experience (planned)** and a *
 | --- | --- |
 | `pipeline/` | Customer planning, guarded GitHub and Cloudflare provisioning, OAuth primitives, deployment verification and tests |
 | `onboarding/` | Hosted beta OAuth onboarding Worker, D1 migrations, account selection, encrypted sessions, explicit approval and recoverable launch jobs |
+| `skills/launch-and-own/` | Portable instructions-only agent skill (browser handoff; not connected publishing) |
+| `clients/claude-plugin/` | Thin Claude Code plugin wrapper around that skill (`claude --plugin-dir`; not marketplace-published) |
 | `.github/workflows/test.yml` | Independent product CI |
 | `EXPORT-MANIFEST.json` | Provenance and customer-data exclusions |
 

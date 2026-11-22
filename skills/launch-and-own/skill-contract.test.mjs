@@ -84,7 +84,9 @@ test('examples cover the four required scenarios', () => {
 
 test('packaging points at this canonical path without inventing store listings', () => {
   assert.match(packaging, /skills\/launch-and-own/);
-  assert.match(packaging, /stub manifest is intentionally \*\*not\*\* published/i);
+  assert.match(packaging, /clients\/claude-plugin/);
+  assert.match(packaging, /marketplace or Anthropic directory listing is \*\*not\*\* authorized/i);
+  assert.match(packaging, /Do \*\*not\*\* invent Claude tool names/i);
 });
 
 test('ZIP examples and reference reflect owner-tested beta without chat-side publish', () => {

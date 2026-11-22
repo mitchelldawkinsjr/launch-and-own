@@ -23,9 +23,14 @@ test('checked-in matrix is valid and owner beta is not independent acceptance', 
   assert.equal(matrix.surfaces.site_updates.access, 'not_available');
   assert.equal(matrix.surfaces.chatgpt_connector.access, 'not_available');
   assert.equal(matrix.surfaces.claude_plugin.access, 'not_available');
+  assert.equal(matrix.surfaces.portable_skill.implementation, 'merged');
+  assert.equal(matrix.surfaces.portable_skill.access, 'instructions_only');
+  assert.equal(matrix.surfaces.claude_plugin.implementation, 'merged');
   const report = renderDistributionMatrix(matrix);
   assert.match(report, /Browser: manual one-page creation \| deployed \| hosted_beta \| owner_live/);
   assert.match(report, /Browser: static ZIP upload \| deployed \| hosted_beta \| owner_live/);
+  assert.match(report, /Portable agent skill \(instructions only\) \| merged \| instructions_only \| ci_only/);
+  assert.match(report, /Claude Code plugin \(instructions-only local packaging\) \| merged \| not_available \| ci_only/);
 });
 
 test('PRs, merged ZIPs, and local rehearsals cannot be advertised as hosted', () => {
@@ -97,4 +102,16 @@ test('ZIP owner-live beta status must match customer-facing guides, not old pre-
     assert.match(doc, /ZIP[\s\S]{0,400}(enabled|available|browser beta|owner-tested|owner-verified)/i, files[i]);
     assert.doesNotMatch(doc, /ZIP[^\n]{0,160}(not enabled|not yet hosted|Future \/ gated|not yet available)/i, files[i]);
   }
+});
+
+test('merged skills-only Claude plugin may ship without connected MCP tools', () => {
+  const matrix = fresh();
+  assert.equal(matrix.surfaces.claude_plugin.implementation, 'merged');
+  assert.equal(matrix.surfaces.claude_plugin.access, 'not_available');
+  matrix.surfaces.claude_plugin.access = 'instructions_only';
+  assert.doesNotThrow(() => assertDistributionMatrix(matrix));
+  assert.equal(matrix.surfaces.shared_mcp_api.access, 'not_available');
+  rejects(m => {
+    m.surfaces.chatgpt_connector = {...m.surfaces.chatgpt_connector, implementation: 'merged', verification: 'ci_only', access: 'instructions_only'};
+  }, /instructions-only distribution requires a reviewed, tested portable skill/);
 });

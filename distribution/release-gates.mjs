@@ -54,12 +54,12 @@ export function validateDistributionMatrix(matrix) {
         (s.access !== 'not_available' || s.verification !== 'not_tested'))
       errors.push(id + ': a planned feature cannot have beta access or verified results');
     if (['in_pr', 'merged'].includes(s.implementation) && s.access !== 'not_available' &&
-        !(id === 'portable_skill' && s.implementation === 'merged' && s.access === 'instructions_only'))
+        !(['portable_skill', 'claude_plugin'].includes(id) && s.implementation === 'merged' && s.access === 'instructions_only'))
       errors.push(id + ': PR or merged code does not constitute a hosted release');
     if (!['not_available', 'instructions_only'].includes(s.access) && s.implementation !== 'deployed')
       errors.push(id + ': access cannot be advertised before deployment');
-    if (s.access === 'instructions_only' && (id !== 'portable_skill' ||
-        !['merged', 'deployed'].includes(s.implementation) || s.verification === 'not_tested'))
+    if (s.access === 'instructions_only' && (!['portable_skill', 'claude_plugin'].includes(id) ||
+        !['merged', 'deployed'].includes(s.implementation) || s.verification !== 'ci_only'))
       errors.push(id + ': instructions-only distribution requires a reviewed, tested portable skill, not connected publishing');
     if (['owner_live', 'independent_live'].includes(s.verification) && s.implementation !== 'deployed')
       errors.push(id + ': live QA requires a deployed implementation');
@@ -74,7 +74,7 @@ export function validateDistributionMatrix(matrix) {
   }
   for (const id of CONNECTED_AGENTS) {
     const agent = surfaces[id];
-    if (!agent || agent.access === 'not_available') continue;
+    if (!agent || ['not_available', 'instructions_only'].includes(agent.access)) continue;
     const api = surfaces.shared_mcp_api;
     if (!api || api.implementation !== 'deployed' || api.access === 'not_available')
       errors.push(id + ': connected client cannot ship without a deployed, accessible shared MCP/API');
