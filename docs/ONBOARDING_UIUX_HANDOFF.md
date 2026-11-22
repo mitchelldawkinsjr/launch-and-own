@@ -8,6 +8,8 @@
 
 **Repository:** https://github.com/mitchelldawkinsjr/launch-and-own
 
+> **Product scope clarification (two-entry strategy):** This document covers **only the standalone web interface** for Launch & Own. The product also has a separate **ChatGPT-first conversational builder/manager** planned in [Issue #43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43). Both use the **same site ownership, exact preview, approval, durable job and verification backend**. Read [the product architecture](TWO_FLOW_PRODUCT_ARCHITECTURE.md). Do not recreate a full ChatGPT-style LLM conversation inside the web onboarding UI and do not force a user to have ChatGPT to upload a site. **The standalone web home should eventually offer two clear choices:** "Upload an existing website (.zip)" and "Create a simple website." ZIP import is under development in [PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40), so do not display an enabled upload CTA on production until the secure upload, preview origin and release are approved.
+
 ## Product story and north star
 
 Launch & Own aims to let a nontechnical person turn basic business copy into a website using **their own GitHub and Cloudflare accounts**. They never need to paste API tokens or write code. Their website lives in their private GitHub repository and Cloudflare Pages project when provisioned, not inside a proprietary site-builder subscription.
@@ -30,10 +32,11 @@ The current UI is **small, server-rendered HTML** in `onboarding/worker.mjs` (sh
 
 | State | Actual route or implementation hook | Customer need |
 | --- | --- | --- |
-| Welcome, not connected | `GET /`, no session | Clear value proposition, ownership explanation, "Connect GitHub" CTA, privacy reassurance and a visible beta label |
+| Welcome, not connected | `GET /`, no session | Clear value proposition, ownership explanation, privacy and beta label; eventually show **Create a simple website** vs **Upload existing ZIP**, while current host continues with Connect GitHub |
 | GitHub connected only | `GET /`, GitHub session / `/connect/cloudflare` | Confirm connection; explain Cloudflare's role; "Connect Cloudflare" CTA; show the next step |
 | Cloudflare connected, account needed | `GET /` + `POST /account` | Select a specific account; show who is connected, what that means, and why it matters |
-| Design website | `GET /` + `POST /preview` | Friendly editor with business name, headline, about, services (up to six), optional email and theme selection (ocean, forest, sunset, graphite) |
+| Design website | `GET /` + `POST /preview` | **Create a simple website** path: friendly editor with business name, headline, about, services (up to six), optional email and theme selection (ocean, forest, sunset, graphite) |
+| ZIP upload path (pending integration) | [PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40) | **Upload an existing website**: upload/static ZIP validation, isolated exact bundle preview and separate approval. Design graceful pending feature state but never implement its storage/security path inside the UX PR. Coordinate with Codex/Domain before wiring a CTA. |
 | Optional AI copy | `POST /draft`, rendered editable draft | Review/edit suggestions, and a precise "AI copy, not published" label. This screen appears **only when AI is configured** |
 | Exact website preview + resource review | `GET /review?id=...`, `GET /site-preview?id=...` | Inspect exact HTML, private GitHub repository target, planned public Pages URL and permission consequences; **separate** "Approve and create website" CTA |
 | Launch in progress | `GET /review?id=...` with `queued`, `pending_deployment`, retry metadata | Understand progress without fictitious countdowns or invented completion percentages; offer only backend-authorized actions |
