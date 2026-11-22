@@ -137,19 +137,6 @@ export async function deleteOwnedLaunch(env, session, id, time) {
   return results.some(result => result.meta.changes > 0);
 }
 
-export async function launchSchemaReady(env) {
-  try {
-    await env.DB.prepare(`SELECT j.approval_digest, j.pages_project_id, p.job_id, p.legacy_receipt_id, p.preview_html,
-      a.authorization_epoch, s.authorization_epoch AS session_epoch
-      FROM onboarding_launch_jobs j JOIN onboarding_launch_job_sessions a ON a.job_id = j.id
-      JOIN onboarding_sessions s ON s.id_hash = a.session_hash
-      JOIN onboarding_launches p ON p.id = j.id LIMIT 0`).all();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function activeJobSession(env, job, deadline, { credentialsValid = false, loadGrants = false } = {}) {
   const grantExpiry = credentialsValid ? `, COALESCE(s.github_token_expires_at, s.expires_at),
     COALESCE(s.cloudflare_token_expires_at, s.expires_at)` : '';

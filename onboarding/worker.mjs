@@ -8,7 +8,8 @@ import {randomToken,sha256,seal,unseal} from './crypto.mjs';
 import {revokeConnectedAccounts} from './revoke-connections.mjs';
 import {encryptGrant,getFreshAccessToken} from './token-lifecycle.mjs';
 import {listOwnedReceipts,getOwnedReceipt,purgeExpiredReceipts} from './launch-receipts.mjs';
-import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,isLaunchId,launchSchemaReady,listOwnedJobs} from './launch-jobs.mjs';
+import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
+import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
@@ -490,7 +491,7 @@ export default {
       if(url.pathname==='/health'&&request.method==='GET'){
         let hasConfiguration=true;
         try{configured(env)}catch{hasConfiguration=false}
-        const launchJobsReady=await launchSchemaReady(env);
+        const launchJobsReady=await launchSchemaReady(env.DB);
         return Response.json({ok:launchJobsReady,configured:hasConfiguration,launchJobsReady},{
           status:launchJobsReady?200:503,headers:{'cache-control':'no-store'}
         });

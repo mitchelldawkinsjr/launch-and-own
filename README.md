@@ -28,6 +28,17 @@ Customers keep ownership of their GitHub repositories and Cloudflare resources. 
 
 **This repository does not contain the reference customer's website or contact form.** It is a product-only extraction from the existing verified reference implementation; the original site's GitHub repository and Cloudflare Pages connection remain unchanged.
 
+## Try a website locally without cloud accounts
+
+You can inspect a genuine four-page website **before OAuth onboarding is live**. The zero-dependency [offline preview exporter](docs/OFFLINE_BETA_PREVIEW.md) builds the same HTML used by the production provisioner without GitHub/Cloudflare credentials, AI inference or publishing anything.
+
+```sh
+npm run demo:export
+npm run demo:serve
+```
+
+Open `http://127.0.0.1:4173/` on the same computer. The server exposes only known static HTML routes on localhost; the output is ignored by Git. You can also supply your own JSON brief with `node scripts/export-preview.mjs --input <input-file> --out <new-directory>`. The exporter refuses to overwrite an existing directory. The generated manifest includes SHA-256 hashes for individual pages and the full approved bundle digest, but generating a preview is **not** a customer launch approval.
+
 ## Develop and test
 
 Node.js 22+ required:
@@ -44,7 +55,7 @@ Tests use simulated provider APIs and an in-memory D1-compatible SQLite adapter.
 
 If another agent manages the Cloudflare zone for `360web.cloud`, give them [**the domain + OAuth handoff checklist**](docs/HANDOFF_DOMAIN_OAUTH.md). It specifies only the selected `onboard.360web.cloud` hostname, exact GitHub/Cloudflare callback URLs, Cloudflare domain-publisher TXT verification, required permissions, owner approvals, and the nonsecret acceptance report. **Do not create a wildcard DNS record or publish OAuth visibility without owner approval.**
 
-**Current domain setup blockers:** Cloudflare reports the `360web.cloud` zone as pending and a proxied `onboard.360web.cloud` CNAME already points at the zone apex. The domain agent owns activation and safe resolution of that record before attaching the Worker. No public OAuth service should be represented as live yet.
+**Current domain rollout status:** The domain agent has verified the `360web.cloud` zone active and registered beta app client IDs. OAuth client configuration/secrets, Worker routing/TLS and an independent live acceptance test remain outstanding. The onboarding service should not yet be represented as publicly available.
 
 ## Optional AI-assisted website copy
 
