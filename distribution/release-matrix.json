@@ -61,19 +61,21 @@
         "https://github.com/mitchelldawkinsjr/launch-and-own/pull/56"
       ],
       "blockers": [
-        "Client-specific installation/usage QA optional; no authenticated MCP publisher until #43 and independent acceptance (#55)"
+        "Claude Code + Cursor install smoke recorded (#65/#72); connected MCP publisher still blocked on deployed #43 API and independent customer acceptance (#21/#55)"
       ]
     },
     "shared_mcp_api": {
       "label": "Shared authenticated MCP/API",
-      "implementation": "planned",
+      "implementation": "merged",
       "access": "not_available",
-      "verification": "not_tested",
+      "verification": "ci_only",
       "evidence": [
-        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/43"
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/74",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/71"
       ],
       "blockers": [
-        "Tenant-bound linking, secure tools, approval gate and client QA (#43)"
+        "Undeployed prototype only (Worker returns 503 unless Domain sets BRIDGE_DEPLOYMENT=approved)",
+        "Need D1 persistence, browser-authenticated OAuth link callback (not agent-bearer verified maps), exact HTML digests, Domain deploy, and independent consenting-user QA (#43)"
       ]
     },
     "claude_plugin": {
@@ -82,22 +84,24 @@
       "access": "not_available",
       "verification": "ci_only",
       "evidence": [
-        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/60"
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/60",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/65"
       ],
       "blockers": [
-        "Merged for local --plugin-dir use only; no store listing; connected publishing tools await shared MCP (#43), independent Claude beta QA, and owner distribution approval"
+        "Local --plugin-dir packaging only; no store listing; connected publishing tools await deployed shared MCP (#43), independent connected-client QA, and owner distribution approval"
       ]
     },
     "chatgpt_connector": {
       "label": "ChatGPT integration with publishing tools",
-      "implementation": "planned",
+      "implementation": "merged",
       "access": "not_available",
-      "verification": "not_tested",
+      "verification": "ci_only",
       "evidence": [
-        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/43"
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/74"
       ],
       "blockers": [
-        "Shared MCP/API, linked owner identity, supported app distribution and ChatGPT beta QA (#43/#55)"
+        "Packaging notes only (clients/chatgpt); elite-site-pipeline remains skills-only",
+        "Connected tools need deployed shared MCP, owner linking, store/distribution approval, and ChatGPT beta QA (#43/#55)"
       ]
     }
   }
