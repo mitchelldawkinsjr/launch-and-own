@@ -77,14 +77,14 @@
     },
     "claude_plugin": {
       "label": "Claude Code plugin (instructions-only local packaging)",
-      "implementation": "in_pr",
+      "implementation": "merged",
       "access": "not_available",
       "verification": "ci_only",
       "evidence": [
         "https://github.com/mitchelldawkinsjr/launch-and-own/pull/60"
       ],
       "blockers": [
-        "Local --plugin-dir packaging only; no store listing; connected publishing tools await shared MCP (#43), independent Claude beta QA, and owner distribution approval"
+        "Merged for local --plugin-dir use only; no store listing; connected publishing tools await shared MCP (#43), independent Claude beta QA, and owner distribution approval"
       ]
     },
     "chatgpt_connector": {
