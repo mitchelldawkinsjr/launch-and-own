@@ -167,7 +167,8 @@ test('linked tools stay gated until linked; inventory is empty until sites exist
   const listed = toolCall(h, token, 'list_sites');
   assert.equal(listed.status, 200);
   assert.deepEqual(listed.body.sites, []);
-  assert.equal(toolCall(h, token, 'get_job_status', {job_id: 'job_12345'}).status, 501);
+  assert.equal(toolCall(h, token, 'get_job_status', {job_id: 'job_12345'}).body.error,
+    'not_found');
 });
 
 test('wrong client cannot consume another client challenge', () => {
