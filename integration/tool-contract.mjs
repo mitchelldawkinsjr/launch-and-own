@@ -188,6 +188,67 @@ export function assertOwnedRecord(record, scope) {
   return record;
 }
 
+/**
+ * Validate an account-link challenge after real browser OAuth independently
+ * verifies BOTH providers. This is not a challenge generator or OAuth callback.
+ * Challenge consumption must still be atomic in persistent backend storage.
+ */
+export function assertLinkChallenge(challenge, verifiedIdentity, principal, {nowSeconds}) {
+  const scope = assertTrustedPrincipal(principal, {nowSeconds});
+  if (!object(challenge) || !object(verifiedIdentity) ||
+      !simpleId(challenge.id) ||
+      challenge.subject !== scope.subject ||
+      !Number.isSafeInteger(challenge.expiresAt) ||
+      challenge.expiresAt <= nowSeconds ||
+      !nullable(challenge.consumedAt) ||
+      !Number.isSafeInteger(verifiedIdentity.githubUserId) ||
+      verifiedIdentity.githubUserId < 1 ||
+      !ACCOUNT_ID.test(String(verifiedIdentity.cloudflareAccountId)) ||
+      verifiedIdentity.githubUserId !== challenge.expectedGithubUserId ||
+      String(verifiedIdentity.cloudflareAccountId).toLowerCase() !==
+        String(challenge.expectedCloudflareAccountId).toLowerCase())
+    deny('invalid_link_challenge');
+  return Object.freeze({
+    subject: scope.subject,
+    githubUserId: verifiedIdentity.githubUserId,
+    cloudflareAccountId: String(verifiedIdentity.cloudflareAccountId).toLowerCase()
+  });
+}
+
+/**
+ * A draft must still be the same frozen revision after reauth, repo changes,
+ * or an intervening GitHub commit. Caller supplies fresh trusted provider data.
+ * This never marks the draft approved or performs provider mutations.
+ */
+export function assertPreparedDraft(draft, scope, {
+  previewSha256, nowSeconds, currentCommitSha, currentRepositoryId
+}) {
+  assertOwnedRecord(draft, scope);
+  if (!simpleId(draft.id) ||
+      draft.state !== 'prepared' ||
+      !hexDigest(draft.previewSha256) ||
+      !hexDigest(previewSha256) ||
+      draft.previewSha256.toLowerCase() !== previewSha256.toLowerCase() ||
+      !Number.isSafeInteger(draft.expiresAt) ||
+      draft.expiresAt <= nowSeconds)
+    deny('stale_preview');
+  if (draft.kind === 'update') {
+    if (!hexSha(draft.baseCommitSha) || !hexSha(currentCommitSha) ||
+        draft.baseCommitSha.toLowerCase() !== currentCommitSha.toLowerCase() ||
+        !Number.isSafeInteger(draft.repositoryId) ||
+        draft.repositoryId <= 0 ||
+        draft.repositoryId !== currentRepositoryId)
+      deny('stale_source');
+  } else if (draft.kind !== 'create') {
+    deny('invalid_draft');
+  }
+  return Object.freeze({
+    draft_id: draft.id,
+    preview_sha256: draft.previewSha256.toLowerCase(),
+    operation: draft.kind
+  });
+}
+
 /** Only a known, cookie-authenticated browser page may be handed to the client. */
 export function assertSafeBrowserHandoff(url) {
   if (typeof url !== 'string') deny('unsafe_handoff');
@@ -237,7 +298,8 @@ export function publicationStatus(record, scope) {
       !hexDigest(record.publicHtmlSha256) ||
       !hexDigest(record.approvedHtmlSha256) ||
       record.publicHtmlSha256.toLowerCase() !== record.approvedHtmlSha256.toLowerCase() ||
-      record.verifiedCommitSha?.toLowerCase() !== record.productionCommitSha.toLowerCase())
+      !hexSha(record.verifiedCommitSha) ||
+      record.verifiedCommitSha.toLowerCase() !== record.productionCommitSha.toLowerCase())
     return Object.freeze({job_id: record.id, state: 'pending_deployment'});
   return Object.freeze({
     ...basics,
