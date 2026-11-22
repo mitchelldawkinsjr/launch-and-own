@@ -43,7 +43,17 @@ export async function writeLocalPreview({site,outputDir}){
   const root=resolve(outputDir);
   // Never overwrite an existing output directory or any existing website file.
   // Root's parent must already exist; avoid implicit recursive directories.
-  await mkdir(root);
+  try{
+    await mkdir(root);
+  }catch(error){
+    if(error&&error.code==="EEXIST"){
+      throw Error(
+        "Output directory already exists: "+root+
+        ". Choose a new --out path, or remove that folder if it is only a local preview."
+      );
+    }
+    throw error;
+  }
   for(const page of pages){
     const destination=join(root,page.path);
     if(page.path.includes("/"))await mkdir(dirname(destination),{recursive:true});
