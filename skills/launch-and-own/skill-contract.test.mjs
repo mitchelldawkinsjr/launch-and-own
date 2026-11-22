@@ -97,3 +97,13 @@ test('ZIP examples and reference reflect owner-tested beta without chat-side pub
   assert.doesNotMatch(all, /ZIP release is gated|Future \/ gated|hosted production ZIP.*remains gated/i);
   assert.match(skill, /Chat instructions alone authorize \*\*prepare\*\* only/);
 });
+
+test('agent-generated HTML is packaged into the real ZIP handoff rather than recreated manually', () => {
+  assert.match(skill, /Default handoff for agent-generated files: package the validated deployable directory as a static ZIP/i);
+  assert.match(skill, /Do not send an agent-generated HTML site to the manual one-page editor/i);
+  assert.match(skill, /If the agent.s authorized tools can create an attachment/i);
+  assert.match(skill, /never claim a ZIP was created unless it exists/i);
+  assert.match(examples, /Package the generated site as a static ZIP/i);
+  assert.match(examples, /Upload a built website[\s\S]*upload the ZIP/i);
+  assert.match(reference, /Do \*\*not\*\* redirect the customer to re-enter copy/i);
+});

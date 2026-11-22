@@ -38,6 +38,12 @@ Mirrored from `onboarding/website-zip.mjs` (keep in sync when that module change
 
 **Hosted browser beta:** ZIP upload passed real owner-consented acceptance: private ticket-protected preview, separate approval, and five public file digests matching the uploaded ZIP ([#45 evidence](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896)). It is enabled for beta users, but independent customer acceptance is pending. A near-limit upload used 95 ms Worker CPU ([#45 measurement](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087096052)); do **not** assume a 10 ms Workers Free CPU allowance or unlimited free usage supports that size.
 
+## Agent-produced website handoff
+
+When an agent **actually writes a deployable `index.html` and supporting assets**, the default customer handoff is a ZIP of that generated static output. Do **not** redirect the customer to re-enter copy in the manual one-page editor, because that discards the original design, HTML and assets. The ZIP may have `index.html` at archive root or inside one build folder. The agent should verify the final files, ZIP constraints and absence of secrets before sharing. If it cannot create a ZIP, it must truthfully provide the files and local compression instructions instead of inventing an attachment.
+
+The customer opens `https://onboard.360web.cloud`, selects **Upload a built website**, checks the exact private preview and file manifest, then **separately approves** the resource creation. Do not transfer provider tokens into chat or pretend a local ZIP is a deployed website. The manual editor is an alternative for a customer who has no generated static files.
+
 ## Launch job statuses (truthful language only)
 
 | Status | Say |
