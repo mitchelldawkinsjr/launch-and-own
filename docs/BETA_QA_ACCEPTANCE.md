@@ -17,6 +17,19 @@ Expected fields in the machine-readable evidence: `mode=offline-localhost-only`,
 
 For a visual walkthrough, run `npm run demo:export`, `npm run demo:serve` and open `http://127.0.0.1:4173/`. The default sample is a **four-page** demo; for the one-page customer acceptance, remove `layout: "multi-page"` in a copy of the JSON and export to a new, unused directory. Do not publish the fictional example.
 
+### Durable launch recovery in the Worker runtime
+
+Run this check from the repository root on Node.js 22.12 or newer:
+
+```sh
+npm ci --prefix scripts/worker-recovery
+npm run qa:rehearse:recovery
+```
+
+The check bundles the current onboarding Worker with its configured compatibility settings, applies the onboarding migrations to a fresh local D1 instance, and simulates GitHub and Cloudflare with the existing provider fixtures. It drives OAuth callbacks, approval, and the Cron handler through the local Worker runtime. It advances local D1 deadlines to exercise retry and session expiry without waiting for the production schedule.
+
+The result should show `liveProviderRequests: 0` and seven passing checks. In the rehearsal, one job survives a lost repository-creation reply and overlapping Cron invocations. Session expiry pauses the job at the pinned checkpoint. Reconnect and restore produce a private preview. The explicit reapproval then verifies the original commit and exact public HTML without recreating resources. A separate scenario checks that provider revocation pauses further work.
+
 ## Stage B — real first launch (blocked pending Domain/OAuth confirmation)
 
 **Prerequisites:** Domain/OAuth agent confirms both actual sign-ins for `https://onboard.360web.cloud`, Worker Custom Domain/TLS, provider secrets, Cloudflare OAuth authorization-code response and the installed Workers & Pages GitHub App's access to a new customer-owned **private** repo. Do not loosen permissions or publish the private OAuth client without owner authorization.
