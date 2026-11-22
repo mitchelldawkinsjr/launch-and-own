@@ -125,6 +125,7 @@ export function assertTrustedPrincipal(principal, {nowSeconds} = {}) {
       principal.authenticated !== true ||
       principal.audience !== BRIDGE_AUDIENCE ||
       !simpleId(principal.subject) ||
+      !simpleId(principal.clientId) ||
       !Number.isSafeInteger(principal.expiresAt) ||
       !Number.isSafeInteger(nowSeconds) ||
       principal.expiresAt <= nowSeconds)
@@ -198,15 +199,18 @@ export function assertLinkChallenge(challenge, verifiedIdentity, principal, {now
   if (!object(challenge) || !object(verifiedIdentity) ||
       !simpleId(challenge.id) ||
       challenge.subject !== scope.subject ||
+      challenge.clientId !== principal.clientId ||
       !Number.isSafeInteger(challenge.expiresAt) ||
       challenge.expiresAt <= nowSeconds ||
       !nullable(challenge.consumedAt) ||
       !Number.isSafeInteger(verifiedIdentity.githubUserId) ||
       verifiedIdentity.githubUserId < 1 ||
       !ACCOUNT_ID.test(String(verifiedIdentity.cloudflareAccountId)) ||
-      verifiedIdentity.githubUserId !== challenge.expectedGithubUserId ||
-      String(verifiedIdentity.cloudflareAccountId).toLowerCase() !==
-        String(challenge.expectedCloudflareAccountId).toLowerCase())
+      (!nullable(challenge.expectedGithubUserId) &&
+       verifiedIdentity.githubUserId !== challenge.expectedGithubUserId) ||
+      (!nullable(challenge.expectedCloudflareAccountId) &&
+       String(verifiedIdentity.cloudflareAccountId).toLowerCase() !==
+         String(challenge.expectedCloudflareAccountId).toLowerCase()))
     deny('invalid_link_challenge');
   return Object.freeze({
     subject: scope.subject,
@@ -224,7 +228,8 @@ export function assertPreparedDraft(draft, scope, {
   previewSha256, nowSeconds, currentCommitSha, currentRepositoryId
 }) {
   assertOwnedRecord(draft, scope);
-  if (!simpleId(draft.id) ||
+  if (!Number.isSafeInteger(nowSeconds) ||
+      !simpleId(draft.id) ||
       draft.state !== 'prepared' ||
       !hexDigest(draft.previewSha256) ||
       !hexDigest(previewSha256) ||
@@ -268,6 +273,7 @@ export function assertSafeBrowserHandoff(url) {
  */
 export function humanApprovalHandoff({url, draftId, previewSha256, expiresAt}, scope, {nowSeconds}) {
   if (!scope?.owner || !simpleId(draftId) || !hexDigest(previewSha256) ||
+      !Number.isSafeInteger(nowSeconds) ||
       !Number.isSafeInteger(expiresAt) || expiresAt <= nowSeconds ||
       expiresAt > nowSeconds + 15 * 60)
     deny('invalid_approval_handoff');
