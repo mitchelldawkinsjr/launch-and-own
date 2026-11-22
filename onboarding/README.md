@@ -11,10 +11,10 @@ Its customer journey: connect GitHub, connect Cloudflare, choose an account, rev
 3. Register a GitHub App and Cloudflare OAuth client with minimal privileges and exact HTTPS callback URLs on a domain you control.
 4. Configure Worker bindings `ONBOARDING_ORIGIN`, `GH_CLIENT_ID`, `CF_CLIENT_ID`, `CF_SCOPES`, and secrets `TOKEN_ENCRYPTION_KEY`, `GH_CLIENT_SECRET`, and `CF_CLIENT_SECRET`. The encryption key needs 32 random bytes encoded as 64 hex characters.
 5. Install/authorize Cloudflare's **separate** Workers & Pages GitHub App for the customer's repository; product GitHub consent alone cannot grant access.
-6. **Disconnect:** the hosted Worker deletes the local session and attempts to revoke its GitHub OAuth grant and Cloudflare access token. If either provider cannot confirm revocation, it displays a warning to review connected apps in both providers. This does not uninstall the GitHub App or remove the customer's websites. Refresh-token rotation, durable job retries, retention, abuse prevention and a security review remain necessary before public beta.
+6. **Disconnect:** the hosted Worker deletes the local session and attempts to revoke its GitHub OAuth grant and Cloudflare access token. If either provider cannot confirm revocation, it displays a warning to review connected apps in both providers. This does not uninstall the GitHub App or remove the customer's websites. Before public beta, verify provider revocation, launch recovery, retention and abuse controls with an authorized beta account.
 7. Verify an independent customer's OAuth consent, launch approval, private repository, Pages deployment, and exact GitHub revision.
 
-The beta database identity and schema have been verified against Cloudflare. This does **not** mean the Worker or OAuth login is deployed; OAuth app registrations, verified callback domain, and Worker secrets remain outstanding.
+The product team previously verified the beta database identity and schema through migration 0003. Migration 0004 requires a fresh verification during rollout. This does **not** mean the Worker or OAuth login is deployed; OAuth app registrations, verified callback domain, and Worker secrets remain outstanding.
 
 Customer login and launch approval are separate actions. Never paste provider tokens into chat or commit them to GitHub.
 
@@ -40,18 +40,11 @@ The Worker now preserves `refresh_token` / `expires_in` returned from GitHub and
 **Before deployment:** verify `0002` migration on the product-owned D1, `npm test`, the exact provider scopes/grants, and the real callback/refresh/revocation flows with a consenting beta account. This is CI-tested against simulated endpoints, **not** live OAuth acceptance.
 
 
-## Bounded recovery of approved website launches
+## Durable launch recovery
 
-The onboarding Worker now has a **five-minute Cron Trigger** (`onboarding/wrangler.jsonc`) to recover work if an approved provisioning request is interrupted. It looks for:
+`onboarding/migrations/0004_launch_jobs.sql` adds a durable job table and a short-lived link to the approving session. Approval stores the plan, exact HTML, digest and verified account identities in one transaction. The existing five-minute Cron claims due jobs, resumes from provider checkpoints and verifies the production GitHub SHA and public HTML. Disconnection, session expiry, and provider authorization failures pause further work. After reconnecting the same accounts, the customer can review and explicitly reapprove the original website to resume the same job.
 
-- **Stale `provisioning` records** older than five minutes, only while the approving customer's encrypted session is valid. It reuses the existing idempotent provisioning path and refuses unrelated customer-owned resources.
-- **`pending_deployment` records** older than 90 seconds, checking the **exact expected production GitHub SHA** before changing status to `live`.
-
-Each Cron pass handles at most five records. A preview-only, failed, unapproved, or expired-session launch is **never** automatically provisioned; failed launches still require the customer's explicit retry. Provider failures remain generic and leave a safe status for a later check.
-
-**Important limit:** this is *bounded recovery*, not a durable job queue across session expiry. Sessions currently expire after one hour, and the cleanup process may remove their associated launch records. A persistent user/account authorization model, independent job runner, explicit retention policy and long-lived job history are required before promising hands-off multi-day retries or perpetual maintenance. Cron is not active until the isolated Worker is deployed by the domain/onboarding operator.
-
-Acceptance tests simulate a crashed provisioning call, a stale deployment SHA, a subsequent matching deployment, expired sessions and failed-job no-retry behavior.
+See the [architecture and rollout guide](../docs/DURABLE-LAUNCH-ARCHITECTURE.md) for the authorization model, retry behavior, dedicated D1 migration, operator checks and rollback. Coordinate the migration and deployment with the backend owner. The Worker health check reports `launchJobsReady` when it can query the new schema.
 
 ## Business website preview and approval
 
@@ -60,15 +53,11 @@ The website-only beta now accepts a business/site name, homepage headline, about
 A safe retry against an existing customer repository compares the stored HTML with the approved preview and refuses to reuse a different page. Existing customer files are never overwritten. This feature does not yet generate bespoke AI design, multi-page navigation, upload images, collect contact-form submissions or manage custom domains. Future AI-assisted content drafts must still be previewed and approved by the customer before publishing.
 
 
-## Durable history of approved launches (30 days)
+## Approved launch history
 
-`onboarding/migrations/0003_launch_receipts.sql` adds an **independent approval-receipt table**. It is mandatory before deploying this code; `npm run preflight:onboarding` and the remote schema check require its table and indexes. The receipt stores the verified GitHub user ID, selected Cloudflare account ID, customer-authored website content, approval/status timestamps and a fixed **30-day retention deadline**. It **never** stores OAuth access/refresh credentials, secrets, cookies or session hashes. This data still includes the customer's website text and optional contact email, so it is private business/personal data and must have appropriate access controls and deletion.
+`GET /history` requires the same verified GitHub identity and Cloudflare account. It lists durable jobs and remaining legacy receipts for up to 30 days from first approval. History contains private website copy and may contain a contact email. A customer can delete completed or inactive history while keeping their GitHub repository and Pages site.
 
-When a one-hour OAuth session expires or the customer disconnects, the original session-owned launch record may cascade-delete. The approved receipt remains for at most 30 days. The same authenticated GitHub user ID **and** freshly verified Cloudflare account can access `GET /history`; receipts are not visible to anyone else. For unfinished launches, `POST /restore` requires CSRF, rate limiting and the same verified owner/account, refuses an actively running original session, then creates a **new private preview** with the identical stored content. The customer must **review and approve again** before any GitHub/Cloudflare provisioning. Existing resources are reused only if they still match the approved site; unrelated owner resources are never overwritten. Unapproved previews are never durable.
-
-Completed launches are displayed with their verified URL but cannot be re-provisioned from history. Expired receipts are purged by the existing five-minute Cron, which is not live until the Worker is deployed. This is *session-independent history with explicit reauthorization*, **not** permission to keep making provider API calls after OAuth logout. It does not yet provide indefinite unattended background jobs. The domain/OAuth agent owns DNS, callback registration and the Custom Domain; this migration and backend code are separate.
-
-**Privacy/rollout gate:** choose and publish a customer-data retention/privacy notice before public beta. Review whether 30 days is appropriate for customer-provided content. Test reconnect/resume against a real authorized beta account after the hostname/OAuth work is complete.
+Legacy approvals can be reviewed and reapproved from history before they enter the durable runner. See the [retention and rollout guide](../docs/DURABLE-LAUNCH-ARCHITECTURE.md#retention-and-rollout) for cleanup, backup retention and privacy policy requirements.
 
 ## Optional AI-generated editable copy (no automatic publication)
 
@@ -89,7 +78,7 @@ On **November 21, 2026**, the dedicated product D1 had the complete physical sch
 2. Confirm the target database is specifically `launch-and-own-onboarding-beta` in the correct Cloudflare account.
 3. Apply the migration through Wrangler's D1 migration command in the `onboarding/` directory, under an authorized operator connection; verify the result.
 4. Run `npm run preflight:onboarding` and the read-only remote preflight with dedicated Cloudflare credentials, supplied through environment variables rather than files or GitHub comments.
-5. Remote preflight checks the **exact identity**, all required tables/indexes/refresh columns, and the **complete ordered Wrangler migration ledger** against the SQL filenames in this repository. Missing, reordered, unexpected or unrecorded migrations fail closed.
+5. Remote preflight checks the **exact identity**, the required schema and cleanup trigger, and the **complete ordered Wrangler migration ledger** against the SQL filenames in this repository. It probes the durable job columns without reading customer rows. Missing, reordered, unexpected or unrecorded migrations fail closed.
 
 Never re-run existing `ALTER TABLE` migrations or manually add tracking names unless an authorized operator has independently confirmed the matching physical schema and a reviewed, incident-specific recovery plan. The preflight **never modifies** database schema or migration history.
 

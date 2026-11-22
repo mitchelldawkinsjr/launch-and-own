@@ -3,6 +3,7 @@
 // The caller MUST use an authenticated session, encrypted server-side state storage,
 // one-time state consumption, and an exact registered redirect URI.
 import {randomBytes, createHash, timingSafeEqual} from "node:crypto";
+import {ProviderRequestError} from "./provider-errors.mjs";
 
 export const CLOUDFLARE_AUTH_URL="https://dash.cloudflare.com/oauth2/auth";
 export const CLOUDFLARE_TOKEN_URL="https://dash.cloudflare.com/oauth2/token";
@@ -73,12 +74,15 @@ export async function completeCloudflareOAuth({
   // SECRET: Only the backend receives this. Encrypt at rest if persisted.
   return data;
 }
-export async function verifyCloudflareAccount({accessToken,accountId,fetchFn=fetch}) {
+export async function verifyCloudflareAccount({accessToken,accountId,fetchFn=fetch,strict=false}) {
   nonempty(accessToken,"accessToken");
   if(typeof accountId!=="string"||!/^[0-9a-f]{32}$/i.test(accountId))throw Error("Valid Cloudflare account ID is required");
   const url=API+"/accounts/"+encodeURIComponent(accountId);
   const r=await fetchFn(url,{method:"GET",headers:{authorization:"Bearer "+accessToken,accept:"application/json"},redirect:"error"});
-  if(!r.ok)throw Error("Cannot access selected Cloudflare account (HTTP "+r.status+")");
+  if(!r.ok){
+    if(strict)throw new ProviderRequestError(r);
+    throw Error("Cannot access selected Cloudflare account (HTTP "+r.status+")");
+  }
   const data=await r.json();
   if(data.success!==true||data.result?.id!==accountId)throw Error("Cloudflare account identity mismatch");
   return {id:data.result.id,name:data.result.name||""};

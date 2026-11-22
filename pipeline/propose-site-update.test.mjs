@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {previewWebsiteUpdate,proposeWebsiteUpdate} from "./propose-site-update.mjs";
+import {managedRepositoryDescription} from "./managed-site-repository.mjs";
 import {renderSite} from "../site/render-site.mjs";
 
 const BASE_SHA="a".repeat(40),UPDATE_SHA="b".repeat(40),BLOB_SHA="c".repeat(40);
@@ -117,6 +118,17 @@ test("safe retry reuses the same update branch and PR without duplicate writes",
  assert.equal(second.reused,true);
  assert.equal(h.state.updates,updates);
  assert.equal(h.state.createdRefs,1);assert.equal(h.state.prsCreated,1);
+});
+test("approved updates accept a valid durable launch marker for the same slug",async()=>{
+ const h=harness(),approved=await approvedInput();
+ const jobId="911f8789-0a1b-4e8b-8b4b-3757536425c3";
+ h.state.repo.description=managedRepositoryDescription("other-site",jobId);
+ await assert.rejects(proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn}),/managed resource/);
+ assert(h.history.every(call=>call.method==="GET"));
+ h.state.repo.description=managedRepositoryDescription("willow-studio",jobId);
+ const result=await proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn});
+ assert.equal(result.status,"awaiting-customer-merge");
+ assert.equal(h.state.currentHtml,oldHtml);
 });
 test("unmanaged repositories and mismatched immutable GitHub owners fail closed",async()=>{
  for(const options of [{unmanaged:true},{otherOwner:true}]){

@@ -3,6 +3,7 @@
 // Default is offline. --remote only runs a read-only query against the configured D1.
 import {readFileSync,readdirSync} from "node:fs";
 import {fileURLToPath} from "node:url";
+import {LAUNCH_SCHEMA_PROBE} from "./launch-schema.mjs";
 const DEFAULT_PATH=new URL("./wrangler.jsonc",import.meta.url);
 // Discover actual migration filenames so newly added SQL files block stale deployments.
 const MIGRATIONS=Object.freeze(readdirSync(new URL("./migrations/",import.meta.url))
@@ -10,8 +11,12 @@ const MIGRATIONS=Object.freeze(readdirSync(new URL("./migrations/",import.meta.u
 if(MIGRATIONS.length===0)throw Error("No onboarding SQL migrations found");
 const UUID=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const REFERENCE_D1="00000000-0000-0000-0000-000000000000";
-const TABLES=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts"];
-const INDEXES=["idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session","idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry"];
+const TABLES=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts",
+  "onboarding_launch_jobs","onboarding_launch_job_sessions"];
+const INDEXES=["idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
+  "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry","idx_onboarding_jobs_due","idx_onboarding_jobs_owner",
+  "idx_onboarding_jobs_expiry","idx_onboarding_job_sessions_session","idx_onboarding_launches_job"];
+const TRIGGERS=["onboarding_jobs_delete_previews"];
 export function validateConfig(config){
   if(!config||typeof config!=="object"||Array.isArray(config))throw Error("Expected Wrangler config object");
   if(config.name!=="launch-and-own-onboarding-beta")throw Error("Unexpected onboarding Worker name");
@@ -47,20 +52,22 @@ export async function checkRemoteSchema({accountId,token,databaseId,expectedData
   if(expectedDatabaseName!=="launch-and-own-onboarding-beta")throw Error("Unexpected onboarding database name");
   const url="https://api.cloudflare.com/client/v4/accounts/"+accountId+"/d1/database/"+databaseId;
   const headers={authorization:"Bearer "+token,accept:"application/json"};
+  const query=sql=>fetchFn(url+"/query",{method:"POST",headers:{...headers,"content-type":"application/json"},
+    body:JSON.stringify({sql}),redirect:"error"});
   // Fail closed if an unrelated D1 database exists at the configured ID.
   const info=await fetchFn(url,{method:"GET",headers,redirect:"error"});
   if(!info.ok)throw Error("Cannot verify onboarding D1 identity (HTTP "+info.status+")");
   const metadata=await info.json();
   if(metadata.success!==true||metadata.result?.uuid!==databaseId||metadata.result?.name!==expectedDatabaseName)
     throw Error("Onboarding D1 identity mismatch; refusing to inspect an unrelated database");
-  const r=await fetchFn(url+"/query",{method:"POST",headers:{...headers,"content-type":"application/json"},body:JSON.stringify({sql:"SELECT name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name"}),redirect:"error"});
+  const r=await query("SELECT name FROM sqlite_master WHERE type IN ('table','index','trigger') ORDER BY name");
   if(!r.ok)throw Error("D1 read-only schema check denied (HTTP "+r.status+")");
   const body=await r.json();
   if(body.success!==true||!Array.isArray(body.result?.[0]?.results))throw Error("Cloudflare did not return schema information");
   const found=new Set(body.result[0].results.map(x=>x.name));
-  const missing=[...TABLES,...INDEXES].filter(x=>!found.has(x));
+  const missing=[...TABLES,...INDEXES,...TRIGGERS].filter(x=>!found.has(x));
   if(missing.length)throw Error("D1 schema incomplete: "+missing.join(", "));
-  const columnsQuery=await fetchFn(url+"/query",{method:"POST",headers:{...headers,"content-type":"application/json"},body:JSON.stringify({sql:"PRAGMA table_info(onboarding_sessions)"}),redirect:"error"});
+  const columnsQuery=await query("PRAGMA table_info(onboarding_sessions)");
   if(!columnsQuery.ok)throw Error("D1 token-rotation schema check denied (HTTP "+columnsQuery.status+")");
   const columnBody=await columnsQuery.json();
   if(columnBody.success!==true||!Array.isArray(columnBody.result?.[0]?.results))
@@ -73,9 +80,7 @@ export async function checkRemoteSchema({accountId,token,databaseId,expectedData
   // A correct physical D1 schema is insufficient when Wrangler's migration
   // ledger is empty. Future migrations would retry old ALTER TABLE commands.
   // This is deliberately read-only: never repair tracking from preflight.
-  const ledger=await fetchFn(url+"/query",{method:"POST",
-    headers:{...headers,"content-type":"application/json"},
-    body:JSON.stringify({sql:"SELECT name FROM d1_migrations ORDER BY id"}),redirect:"error"});
+  const ledger=await query("SELECT name FROM d1_migrations ORDER BY id");
   if(!ledger.ok)throw Error("D1 migration ledger check denied (HTTP "+ledger.status+")");
   const ledgerBody=await ledger.json();
   if(ledgerBody.success!==true||ledgerBody.result?.[0]?.success===false||
@@ -84,8 +89,15 @@ export async function checkRemoteSchema({accountId,token,databaseId,expectedData
   const tracked=ledgerBody.result[0].results.map(x=>x.name);
   if(tracked.length!==MIGRATIONS.length||MIGRATIONS.some((name,i)=>tracked[i]!==name))
     throw Error("D1 migration ledger differs from repository migration files; do not reapply or auto-backfill");
+  const probe=await query(LAUNCH_SCHEMA_PROBE);
+  if(!probe.ok)throw Error("D1 durable launch schema check failed (HTTP "+probe.status+")");
+  const probeBody=await probe.json();
+  if(probeBody.success!==true||probeBody.result?.[0]?.success!==true||
+     !Array.isArray(probeBody.result[0].results)||probeBody.result[0].results.length!==0)
+    throw Error("D1 durable launch schema is incomplete; deploy preflight refused");
   return {status:"schema-ready",databaseId,databaseName:expectedDatabaseName,
-    tables:TABLES.length,indexes:INDEXES.length,tokenColumns:required.length,migrations:MIGRATIONS.length};
+    tables:TABLES.length,indexes:INDEXES.length,triggers:TRIGGERS.length,
+    tokenColumns:required.length,migrations:MIGRATIONS.length};
 }
 async function main(){
   const cfg=JSON.parse(readFileSync(DEFAULT_PATH,"utf8"));

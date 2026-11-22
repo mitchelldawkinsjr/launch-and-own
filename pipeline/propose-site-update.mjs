@@ -3,12 +3,11 @@
 // Requires a separate caller-controlled human approval and exact preview hash.
 import {planCustomer} from "./plan-customer.mjs";
 import {renderSite} from "../site/render-site.mjs";
+import {isManagedRepositoryDescription} from "./managed-site-repository.mjs";
 
 const SHA=/^[a-f0-9]{40}$/i;
 const DIGEST=/^[a-f0-9]{64}$/i;
 const encode=x=>encodeURIComponent(x);
-const managed=slug=>"Launch & Own managed site: "+slug;
-const legacy=slug=>"Elite Site Pipeline managed site: "+slug;
 const bodyMax=4096;
 
 async function digest(text){
@@ -70,7 +69,7 @@ export async function proposeWebsiteUpdate(input,{githubToken,fetchFn}={}){
   const repo=await gh(root);
   if(repo?.name!==repoName||repo?.owner?.login?.toLowerCase()!==owner.toLowerCase()||
     repo?.owner?.id!==user.id||repo.private!==true||repo.default_branch!=="main"||
-    ![managed(plan.customer),legacy(plan.customer)].includes(repo.description))
+    !isManagedRepositoryDescription(repo.description,plan.customer))
     throw Error("Existing repository is not an exact private Launch & Own managed resource");
   const branchHead=await gh(root+"/branches/main");
   const baseSha=branchHead?.commit?.sha;

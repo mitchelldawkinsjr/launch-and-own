@@ -7,10 +7,12 @@ const projectName="esp-test-client-site",site="https://"+projectName+".pages.dev
 const EXPECTED_SHA="a".repeat(40),NEXT_SHA="b".repeat(40);
 const DEFAULT_HTML="<html><body>Test Client</body></html>";
 const htmlHash=html=>createHash("sha256").update(html,"utf8").digest("hex");
-function mock({canonical=true,latestQueued=false,htmlStatus=200,htmlType="text/html",html=DEFAULT_HTML,otherSource=false}={}) {
+function mock({canonical=true,environment="production",latestQueued=false,htmlStatus=200,
+  htmlType="text/html",html=DEFAULT_HTML,otherSource=false}={}) {
  const calls=[];
  const project={name:projectName,source:{type:"github",config:{owner:"tester",repo_name:otherSource?"another-repo":"esp-test-client"}},
-  canonical_deployment:canonical?{id:"deploy-success",latest_stage:{name:"deploy",status:"success"},deployment_trigger:{metadata:{commit_hash:EXPECTED_SHA}}}:null,
+  canonical_deployment:canonical?{id:"deploy-success",environment,latest_stage:{name:"deploy",status:"success"},
+    deployment_trigger:{metadata:{commit_hash:EXPECTED_SHA}}}:null,
   latest_deployment:latestQueued?{id:"newer",latest_stage:{name:"queued",status:"idle"}}:{id:"deploy-success",latest_stage:{name:"deploy",status:"success"}}};
  const fetchFn=async(url,opts={})=>{
   calls.push(url);
@@ -122,6 +124,25 @@ test("correct canonical commit with stale public HTML fails closed",async()=>{
  assert.equal(result.expectedHtmlSha256,htmlHash(DEFAULT_HTML));
  assert.equal(result.publicHtmlSha256,htmlHash("<html><body>Old approved copy</body></html>"));
  assert.equal(h.calls.length,2);
+});
+test("an extra UTF-8 byte order mark changes the exact public digest",async()=>{
+ const html="\uFEFF"+DEFAULT_HTML;
+ const h=mock({html});
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"pending-expected-html");
+ assert.equal(result.publicHtmlSha256,htmlHash(html));
+});
+test("the expected commit and HTML cannot make a preview deployment count as production",async()=>{
+ const h=mock({environment:"preview"});
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"pending-deployment");
+ assert.equal(h.calls.length,1);
 });
 test("invalid approved HTML digest cannot trigger provider requests",async()=>{
  const h=mock();

@@ -114,6 +114,15 @@ test("a refresh response missing a replacement refresh token does not discard th
  assert.equal(h.session().github_refresh_token_ct,v.refreshCipher);
  assert.equal(h.session().github_refresh_locked_until,null);
 });
+test("refresh without a usable expiry fails closed",async()=>{
+ const h=harness(),v=await encryptGrant({provider:"github",sessionHash:id,encryptionKey:key,grant:grant("github"),now:now-200});
+ h.insert("github",v);
+ await assert.rejects(getFreshAccessToken({env:h.env,session:h.session(),provider:"github",clock:()=>now,
+  fetchFn:async()=>Response.json({access_token:"new-access",token_type:"bearer",refresh_token:"new-refresh"})}),
+  /could not be renewed/);
+ assert.equal(h.session().github_token_ct,v.accessCipher);
+ assert.equal(h.session().github_refresh_token_ct,v.refreshCipher);
+});
 test("invalid OAuth grant lifetimes fail before encrypted storage",async()=>{
  for(const bad of [{expires_in:-1},{expires_in:"3600"},{refresh_token_expires_in:0}]){
   await assert.rejects(encryptGrant({provider:"github",sessionHash:id,encryptionKey:key,

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {validateConfig,checkRemoteSchema} from "./validate-config.mjs";
+import {LAUNCH_SCHEMA_PROBE} from "./launch-schema.mjs";
 const cfg=JSON.parse(readFileSync(new URL("./wrangler.jsonc",import.meta.url),"utf8"));
 const expectedId="b89fb8aa-67a2-49fa-b48c-584e305b5bb2";
 const accountId="0123456789abcdef0123456789abcdef";
@@ -9,8 +10,10 @@ const expectedName="launch-and-own-onboarding-beta";
 const copy=()=>structuredClone(cfg);
 const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts",
  "idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
- "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry"];
-const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql"];
+ "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry","onboarding_launch_jobs","onboarding_launch_job_sessions",
+ "idx_onboarding_jobs_due","idx_onboarding_jobs_owner","idx_onboarding_jobs_expiry",
+ "idx_onboarding_job_sessions_session","idx_onboarding_launches_job","onboarding_jobs_delete_previews"];
+const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql","0004_launch_jobs.sql"];
 const tokenColumns=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
  "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
 const mock=(overrides={})=>{
@@ -22,6 +25,10 @@ const mock=(overrides={})=>{
     if(sql==="SELECT name FROM d1_migrations ORDER BY id"){
       if(overrides.ledgerUnavailable)return Response.json({success:false,result:[{success:false,errors:[{message:"missing ledger"}]}]});
       return Response.json({success:true,result:[{results:(overrides.migrations??migrationNames).map(name=>({name}))}]});
+    }
+    if(sql===LAUNCH_SCHEMA_PROBE){
+      if(overrides.launchSchemaUnavailable)return Response.json({success:false,result:[{success:false}]});
+      return Response.json({success:true,result:[{success:true,results:[]}]});
     }
     return Response.json({success:true,result:[{results:(sql.startsWith("PRAGMA")?(overrides.columns||tokenColumns):(overrides.schema||schemaNames)).map(name=>({name}))}]});
   }
@@ -50,13 +57,16 @@ test("placeholder, malformed ID, unrelated bindings and plain secret values are 
 test("remote readiness checks exact D1 metadata before read-only schema query",async()=>{
  const h=mock();
  const ready=await checkRemoteSchema({accountId,token:"test-secret",databaseId:expectedId,fetchFn:h.fetchFn});
- assert.equal(ready.status,"schema-ready");assert.equal(ready.tables,4);assert.equal(ready.indexes,5);assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,3);
- assert.equal(h.calls.length,4);
+ assert.equal(ready.status,"schema-ready");
+ assert.equal(ready.tables,6);assert.equal(ready.indexes,10);assert.equal(ready.triggers,1);
+ assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,4);
+ assert.equal(h.calls.length,5);
  assert.equal(h.calls[0].options.method,"GET");
+ assert.equal(JSON.parse(h.calls[4].options.body).sql,LAUNCH_SCHEMA_PROBE);
  assert.equal(JSON.parse(h.calls[3].options.body).sql,"SELECT name FROM d1_migrations ORDER BY id");
  assert.equal(JSON.parse(h.calls[2].options.body).sql,"PRAGMA table_info(onboarding_sessions)");
  assert.equal(h.calls[1].options.method,"POST");
- assert.equal(JSON.parse(h.calls[1].options.body).sql,"SELECT name FROM sqlite_master WHERE type IN ('table','index') ORDER BY name");
+ assert.equal(JSON.parse(h.calls[1].options.body).sql,"SELECT name FROM sqlite_master WHERE type IN ('table','index','trigger') ORDER BY name");
  assert(!JSON.stringify(ready).includes("test-secret"));
 });
 test("cannot accidentally target an unrelated D1 by UUID",async()=>{
@@ -103,9 +113,18 @@ test("missing durable receipt migration stops onboarding readiness",async()=>{
  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/schema incomplete/);
  assert.equal(h.calls.length,2);
 });
+test("missing job authorization table or preview cleanup trigger stops readiness",async()=>{
+ for(const required of ["onboarding_launch_job_sessions","onboarding_jobs_delete_previews"]){
+  const h=mock({schema:schemaNames.filter(name=>name!==required)});
+  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),
+   {message:"D1 schema incomplete: "+required});
+  assert.equal(h.calls.length,2);
+ }
+});
 
 test("empty or out-of-sync Wrangler migration registry blocks remote readiness",async()=>{
- for(const migrations of [[],["0001_initial.sql"],["0001_initial.sql","0003_launch_receipts.sql","0002_token_rotation.sql"],[...migrationNames,"0004_surprise.sql"]]){
+ const [initial,rotation,receipts,jobs]=migrationNames;
+ for(const migrations of [[],[initial],[initial,rotation,receipts],[initial,receipts,rotation,jobs],[...migrationNames,"0005_surprise.sql"]]){
   const h=mock({migrations});
   await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/migration ledger differs/);
   assert.equal(h.calls.length,4);
@@ -115,6 +134,12 @@ test("missing D1 migration ledger fails closed even if physical schema is correc
  const h=mock({ledgerUnavailable:true});
  await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/migration ledger is unavailable/);
  assert.equal(h.calls.length,4);
+});
+test("the correct migration ledger cannot mask missing durable job columns",async()=>{
+ const h=mock({launchSchemaUnavailable:true});
+ await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),
+  /durable launch schema is incomplete/);
+ assert.equal(h.calls.length,5);
 });
 test("required hostname, origin and isolation flags cannot be removed from Wrangler",()=>{
  const invalid=[

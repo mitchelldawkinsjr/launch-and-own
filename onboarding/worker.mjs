@@ -1,14 +1,16 @@
 import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app-oauth.mjs';
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount} from '../pipeline/cloudflare-oauth.mjs';
+import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
 import {normalizeSite,renderSite} from '../site/render-site.mjs';
 import {draftSiteFromBrief,aiDraftConfigured} from '../site/draft-site.mjs';
-import {applyWebsite} from '../pipeline/provision-site.mjs';
-import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {randomToken,sha256,seal,unseal} from './crypto.mjs';
 import {revokeConnectedAccounts} from './revoke-connections.mjs';
 import {encryptGrant,getFreshAccessToken} from './token-lifecycle.mjs';
-import {syncApprovedReceipt,listOwnedReceipts,getOwnedReceipt,purgeExpiredReceipts} from './launch-receipts.mjs';
+import {listOwnedReceipts,getOwnedReceipt,purgeExpiredReceipts} from './launch-receipts.mjs';
+import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
+import {launchSchemaReady} from './launch-schema.mjs';
+import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -54,7 +56,11 @@ async function session(request,env){
   const raw=cookies(request)[COOKIE_SESSION];
   if(!raw||!/^[a-f\d]{64}$/.test(raw))return null;
   const hash=await sha256(raw);
-  const record=await env.DB.prepare('SELECT id_hash,github_user_id,github_login,github_token_ct,github_refresh_token_ct,github_token_expires_at,github_refresh_expires_at,cloudflare_token_ct,cloudflare_refresh_token_ct,cloudflare_token_expires_at,cloudflare_refresh_expires_at,cloudflare_account_id,csrf_ct,expires_at FROM onboarding_sessions WHERE id_hash=? AND expires_at>?').bind(hash,now()).first();
+  const record=await env.DB.prepare(`SELECT id_hash, github_user_id, github_login, github_token_ct,
+    github_refresh_token_ct, github_token_expires_at, github_refresh_expires_at, cloudflare_token_ct,
+    cloudflare_refresh_token_ct, cloudflare_token_expires_at, cloudflare_refresh_expires_at,
+    cloudflare_account_id, csrf_ct, expires_at, authorization_epoch FROM onboarding_sessions
+    WHERE id_hash=? AND expires_at>?`).bind(hash,now()).first();
   if(!record)return null;
   const csrf=await unseal(env.TOKEN_ENCRYPTION_KEY,record.csrf_ct,'csrf:'+hash);
   return {...record,hash,csrf};
@@ -106,19 +112,22 @@ async function gitHubStart(request,env){
   await saveFlow(env,{provider:'github',binding:nonce,...flow});
   return redirect(authorizationUrl,cookie(COOKIE_LOGIN,nonce,600));
 }
-async function gitHubCallback(request,env){
+async function gitHubCallback(request,env,current){
   const url=new URL(request.url);
   if(url.searchParams.has('error'))return fail('GitHub authorization was cancelled. You can try again.');
   const nonce=cookies(request)[COOKIE_LOGIN];
   const verifier=await consumeFlow(env,{provider:'github',binding:nonce,state:url.searchParams.get('state')});
   const token=await completeGitHubAppOAuth({clientId:env.GH_CLIENT_ID,clientSecret:env.GH_CLIENT_SECRET,redirectUri:baseUrl(env)+'/oauth/github/callback',code:url.searchParams.get('code'),receivedState:url.searchParams.get('state'),expectedState:url.searchParams.get('state'),codeVerifier:verifier});
   const user=await apiGet('https://api.github.com/user',token.access_token);
-  if(typeof user.login!=='string'||!Number.isSafeInteger(user.id))throw Error('Unable to verify the connected GitHub user');
+  if(typeof user.login!=='string'||!Number.isSafeInteger(user.id)||user.id<1)throw Error('Unable to verify the connected GitHub user');
   const raw=randomToken(),hash=await sha256(raw),csrf=randomToken();
   const ghGrant=await encryptGrant({grant:token,provider:'github',sessionHash:hash,encryptionKey:env.TOKEN_ENCRYPTION_KEY});
   const csrfCipher=await seal(env.TOKEN_ENCRYPTION_KEY,csrf,'csrf:'+hash);
-  await env.DB.prepare('INSERT INTO onboarding_sessions(id_hash,github_user_id,github_login,github_token_ct,github_refresh_token_ct,github_token_expires_at,github_refresh_expires_at,csrf_ct,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .bind(hash,user.id,user.login,ghGrant.accessCipher,ghGrant.refreshCipher,ghGrant.accessExpiresAt,ghGrant.refreshExpiresAt,csrfCipher,now(),now()+3600).run();
+  const createSession=env.DB.prepare('INSERT INTO onboarding_sessions(id_hash,github_user_id,github_login,github_token_ct,github_refresh_token_ct,github_token_expires_at,github_refresh_expires_at,csrf_ct,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .bind(hash,user.id,user.login,ghGrant.accessCipher,ghGrant.refreshCipher,ghGrant.accessExpiresAt,ghGrant.refreshExpiresAt,csrfCipher,now(),now()+3600);
+  if(current){
+    await env.DB.batch([createSession,env.DB.prepare('DELETE FROM onboarding_sessions WHERE id_hash=?').bind(current.hash)]);
+  }else await createSession.run();
   const response=redirect('/');
   response.headers.append('set-cookie',cookie(COOKIE_SESSION,raw,3600));
   response.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
@@ -139,8 +148,13 @@ async function cloudflareCallback(request,env,current){
   const verifier=await consumeFlow(env,{provider:'cloudflare',binding:current.hash,state:url.searchParams.get('state')});
   const token=await completeCloudflareOAuth({clientId:env.CF_CLIENT_ID,clientSecret:env.CF_CLIENT_SECRET,redirectUri:baseUrl(env)+'/oauth/cloudflare/callback',code:url.searchParams.get('code'),receivedState:url.searchParams.get('state'),expectedState:url.searchParams.get('state'),codeVerifier:verifier});
   const encrypted=await encryptGrant({grant:token,provider:'cloudflare',sessionHash:current.hash,encryptionKey:env.TOKEN_ENCRYPTION_KEY});
-  await env.DB.prepare('UPDATE onboarding_sessions SET cloudflare_token_ct=?,cloudflare_refresh_token_ct=?,cloudflare_token_expires_at=?,cloudflare_refresh_expires_at=?,cloudflare_refresh_locked_until=NULL,cloudflare_account_id=NULL WHERE id_hash=? AND expires_at>?')
-    .bind(encrypted.accessCipher,encrypted.refreshCipher,encrypted.accessExpiresAt,encrypted.refreshExpiresAt,current.hash,now()).run();
+  const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET cloudflare_token_ct=?, cloudflare_refresh_token_ct=?,
+    cloudflare_token_expires_at=?, cloudflare_refresh_expires_at=?, cloudflare_refresh_locked_until=NULL,
+    cloudflare_account_id=NULL, authorization_epoch=authorization_epoch+1
+    WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
+    .bind(encrypted.accessCipher,encrypted.refreshCipher,encrypted.accessExpiresAt,encrypted.refreshExpiresAt,
+      current.hash,current.authorization_epoch,now()).first();
+  if(!updated)throw Error('Cloudflare authorization changed while connecting');
   return redirect('/');
 }
 async function accountOptions(env,current){
@@ -189,10 +203,14 @@ async function home(env,current,notice){
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
   if(!current.cloudflare_token_ct)throw Error('Connect Cloudflare before selecting an account');
-  const accountId=data.get('accountId');
+  const accountId=data.get('accountId')?.toLowerCase();
   const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   await verifyCloudflareAccount({accessToken:token,accountId});
-  await env.DB.prepare('UPDATE onboarding_sessions SET cloudflare_account_id=? WHERE id_hash=? AND expires_at>?').bind(accountId,current.hash,now()).run();
+  const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET
+    authorization_epoch=authorization_epoch+(cloudflare_account_id IS NOT ?), cloudflare_account_id=?
+    WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
+    .bind(accountId,accountId,current.hash,current.authorization_epoch,now()).first();
+  if(!updated)throw Error('Cloudflare authorization changed while selecting the account');
   return redirect('/');
 }
 async function draft(request,env,current){
@@ -237,236 +255,254 @@ async function preview(request,env,current){
   const config={name:site.name,accountId:current.cloudflare_account_id,githubOwner:current.github_login,forms:false};
   const plan=planCustomer(config);
   const id=crypto.randomUUID(),ts=now();
-  await env.DB.prepare('INSERT INTO onboarding_launches(id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)')
-    .bind(id,current.hash,site.name,current.cloudflare_account_id,current.github_login,JSON.stringify({...plan,site}),'preview',ts,ts).run();
+  await env.DB.prepare(`INSERT INTO onboarding_launches
+    (id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,created_at,updated_at,preview_html)
+    VALUES(?,?,?,?,?,?,'preview',?,?,?)`)
+    .bind(id,current.hash,site.name,current.cloudflare_account_id,current.github_login,
+      JSON.stringify({...plan,site}),ts,ts,renderSite(site)).run();
   return redirect('/review?id='+encodeURIComponent(id));
 }
+async function assertHistoryAccess(env,current){
+  if(!current?.cloudflare_account_id)throw Error('Reconnect GitHub and select your Cloudflare account');
+  const checkSession=async()=>{
+    const live=await env.DB.prepare(`SELECT 1 FROM onboarding_sessions
+      WHERE id_hash=? AND authorization_epoch=? AND cloudflare_account_id=? AND expires_at>?`)
+      .bind(current.hash,current.authorization_epoch,current.cloudflare_account_id,now()).first();
+    if(!live)throw Error('Account authorization changed');
+  };
+  const fetchFn=async(url,options)=>{
+    await checkSession();
+    return await fetch(url,{...options,signal:AbortSignal.timeout(8000)});
+  };
+  const githubToken=await getFreshAccessToken({env,session:current,provider:'github',fetchFn});
+  const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare',fetchFn});
+  await verifyProviderConnections({name:'Launch history',githubOwner:current.github_login,accountId:current.cloudflare_account_id},{
+    githubAccessToken:githubToken,cloudflareAccessToken:cloudflareToken,expectedGitHubUserId:current.github_user_id,fetchFn
+  });
+  await checkSession();
+}
+
+const launchIdField=id=>'<input type="hidden" name="id" value="'+escape(id)+'">';
+const reviewPath=id=>'/review?id='+encodeURIComponent(id);
+const receiptOwner=(current,time)=>({
+  githubUserId:current.github_user_id,cloudflareAccountId:current.cloudflare_account_id,time
+});
+
 async function launchHistory(env,current){
-  if(!current||!current.cloudflare_account_id)return fail('Connect GitHub and choose your Cloudflare account before viewing launch history.',401);
-  const receipts=await listOwnedReceipts(env,{githubUserId:current.github_user_id,
-    cloudflareAccountId:current.cloudflare_account_id,time:now()});
-  const cards=receipts.map(receipt=>{
-    const plan=JSON.parse(receipt.plan_json);
-    const website='https://esp-'+plan.customer+'-site.pages.dev/';
-    const status=escape(receipt.status),name=escape(receipt.customer_name);
-    const live=receipt.status==='live'?'<p>Verified site: <a href="'+escape(website)+'">'+escape(website)+'</a></p>':'';
-    const action=receipt.status!=='live'?button('/restore','Review and reapprove this website',current.csrf,
-      '<input type="hidden" name="id" value="'+escape(receipt.id)+'">'):'';
-    return '<section><h2>'+name+'</h2><p>Status when last connected: '+status+'</p>'+live+action+'</section>';
+  if(!current?.cloudflare_account_id)return fail('Connect GitHub and choose your Cloudflare account before viewing launch history.',401);
+  await assertHistoryAccess(env,current);
+  const time=now();
+  const [jobs,legacy]=await Promise.all([listOwnedJobs(env,current,time),listOwnedReceipts(env,receiptOwner(current,time))]);
+  const items=[...jobs,...legacy.map(receipt=>({
+    ...receipt,site_slug:JSON.parse(receipt.plan_json).customer,display_status:receipt.status,
+    can_restore:receipt.status!=='live',can_delete:true
+  }))].sort((a,b)=>b.updated_at-a.updated_at).slice(0,20);
+  const cards=items.map(item=>{
+    const website='https://esp-'+item.site_slug+'-site.pages.dev/';
+    const live=item.display_status==='live'?`<p>Verified site: <a href="${escape(website)}">${escape(website)}</a></p>`:'';
+    const action=item.can_restore?button('/restore','Review and reapprove this website',current.csrf,launchIdField(item.id)):'';
+    const deletion=item.can_delete?button('/delete-launch-history','Delete history entry',current.csrf,launchIdField(item.id)):'';
+    const diagnostic=item.error_code?`<p>Last result: <code>${escape(item.error_code)}</code></p>`:'';
+    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${live}${action}${deletion}</section>`;
   }).join('');
-  return view('Approved website history','<p>Only launches you approved are shown, for 30 days. Reconnect and explicitly reapprove an unfinished website before retrying. No provider tokens are retained in this history.</p>'+
+  return view('Approved website history','<p>History is retained for 30 days from the first approval. Reconnect and reapprove a paused launch to resume it. Deleting an entry leaves any customer-owned website and repository in place.</p>'+
     (cards||'<p>No approved launches found for this GitHub identity and Cloudflare account.</p>')+
     '<p><a href="/">Back to setup</a></p>');
 }
+
 async function restoreLaunch(request,env,current){
   await limitAttempts(request,env);
   const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
-  if(!current||!current.cloudflare_account_id||!current.cloudflare_token_ct)
-    throw Error('Reconnect GitHub and select an authorized Cloudflare account');
-  const receipt=await getOwnedReceipt(env,{id:form.get('id'),githubUserId:current.github_user_id,
-    cloudflareAccountId:current.cloudflare_account_id,time:now()});
-  if(!receipt||receipt.status==='live')throw Error('This unfinished launch is not accessible');
-  // Never take over a live browser session or an in-progress job.
-  const active=await env.DB.prepare(`SELECT l.id FROM onboarding_launches l
-    JOIN onboarding_sessions s ON l.session_hash=s.id_hash
-    WHERE l.id=? AND s.expires_at>? LIMIT 1`).bind(receipt.id,now()).first();
-  if(active)throw Error('This launch is still active in its original session');
-  const oldPlan=JSON.parse(receipt.plan_json);
-  const site=normalizeSite({...oldPlan.site,name:receipt.customer_name});
-  const recomputed=planCustomer({name:receipt.customer_name,githubOwner:current.github_login,
-    accountId:current.cloudflare_account_id,forms:false});
-  if(oldPlan.customer!==recomputed.customer)throw Error('The stored website plan has changed');
-  // Reauthorize this exact website content through a NEW private preview.
-  // No customer repo or Pages mutation happens on this POST.
-  const id=crypto.randomUUID(),ts=now();
+  await assertHistoryAccess(env,current);
+  const requestedId=form.get('id'),time=now();
+  const job=await getOwnedJob(env,current,requestedId,time);
+  let item=job;
+  let planJson=job?.plan_json;
+  let html=null;
+  if(job){
+    if(!job.can_restore||(await approvalSnapshot(job,job.github_user_id)).digest!==job.approval_digest)
+      throw Error('This launch cannot be reapproved');
+  }else{
+    item=await getOwnedReceipt(env,{id:requestedId,...receiptOwner(current,time)});
+    if(!item||item.status==='live')throw Error('This unfinished launch is not accessible');
+    const active=await env.DB.prepare(`SELECT l.id FROM onboarding_launches l
+      JOIN onboarding_sessions s ON l.session_hash=s.id_hash
+      WHERE l.id=? AND s.expires_at>?`).bind(item.id,time).first();
+    if(active)throw Error('This legacy launch is still in its original session');
+    const oldPlan=JSON.parse(item.plan_json);
+    const site=normalizeSite({...oldPlan.site,name:item.customer_name});
+    const plan=planCustomer({name:item.customer_name,githubOwner:item.github_login,
+      accountId:item.cloudflare_account_id,forms:false});
+    if(oldPlan.customer!==plan.customer)throw Error('The stored website plan has changed');
+    planJson=JSON.stringify({...plan,site});
+    html=renderSite(site);
+  }
+  if(item.github_login.toLowerCase()!==current.github_login.toLowerCase())throw Error('The GitHub target changed');
+  const id=crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO onboarding_launches
-    (id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?)`).bind(id,current.hash,receipt.customer_name,
-      current.cloudflare_account_id,current.github_login,JSON.stringify({...recomputed,site}),
-      'preview',ts,ts).run();
-  return redirect('/review?id='+encodeURIComponent(id));
+    (id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,
+      created_at,updated_at,job_id,legacy_receipt_id,preview_html)
+    VALUES(?,?,?,?,?,?,'preview',?,?,?,?,?)`)
+    .bind(id,current.hash,item.customer_name,item.cloudflare_account_id,item.github_login,planJson,time,time,
+      job?.id??null,job?job.legacy_receipt_id:item.id,html).run();
+  return redirect(reviewPath(id));
 }
+
+async function removeLaunchHistory(request,env,current){
+  await limitAttempts(request,env);
+  const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
+  await assertHistoryAccess(env,current);
+  if(!await deleteOwnedLaunch(env,current,form.get('id'),now()))throw Error('This history entry cannot be deleted');
+  return redirect('/history');
+}
+
 async function getLaunch(env,current,id){
-  if(!current||typeof id!=='string'||!(/^[a-f\d-]{36}$/i.test(id)))return null;
-  return await env.DB.prepare('SELECT id,customer_name,github_login,cloudflare_account_id,plan_json,status,provision_result,error_code,updated_at FROM onboarding_launches WHERE id=? AND session_hash=?')
-    .bind(id,current.hash).first();
+  if(!current?.cloudflare_account_id||!isLaunchId(id))return null;
+  const time=now();
+  const item=await env.DB.prepare(`SELECT p.*, COALESCE(j.approved_html,p.preview_html) AS approved_html,
+      j.approval_digest AS saved_digest,
+      j.status AS job_status, j.expected_commit_sha, j.error_code AS job_error,
+      j.attempts, j.next_attempt_at,
+      a.session_hash AS authorizing_session, a.authorization_epoch AS approved_epoch
+    FROM onboarding_launches p
+    LEFT JOIN onboarding_launch_jobs j ON j.id=p.job_id AND j.github_user_id=?
+      AND j.cloudflare_account_id=p.cloudflare_account_id AND j.expires_at>?
+    LEFT JOIN onboarding_launch_job_sessions a ON a.job_id=j.id
+    WHERE p.id=? AND p.session_hash=? AND p.cloudflare_account_id=? AND lower(p.github_login)=lower(?)`)
+    .bind(current.github_user_id,time,id,current.hash,current.cloudflare_account_id,current.github_login).first();
+  return item?.job_id&&!item.saved_digest?null:item;
 }
+
+async function itemSnapshot(item,current){
+  const snapshot=await approvalSnapshot(item,current.github_user_id);
+  if(item.saved_digest&&snapshot.digest!==item.saved_digest)throw Error('The approval snapshot changed');
+  return snapshot;
+}
+
 async function sitePreview(env,current,id){
   const item=await getLaunch(env,current,id);
   if(!item)return fail('This website preview is not accessible.',404);
-  const plan=JSON.parse(item.plan_json);
-  const html=renderSite({...plan.site,name:item.customer_name});
+  const {html}=await itemSnapshot(item,current);
   return new Response(html,{status:200,headers:{
     'content-type':'text/html; charset=utf-8','cache-control':'private, no-store',
     'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'no-referrer',
     'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
   }});
 }
+
 async function review(env,current,id){
   const item=await getLaunch(env,current,id);
   if(!item)return fail('This launch request is not accessible.',404);
-  const plan=JSON.parse(item.plan_json);
-  const details=`<p><strong>Name:</strong> ${escape(item.customer_name)}</p><p><strong>GitHub:</strong> ${escape(item.github_login)}</p><p><strong>Cloudflare:</strong> ${escape(item.cloudflare_account_id)}</p><p><strong>Private repository:</strong> ${escape('esp-'+plan.customer)}</p><p><strong>Public Pages URL:</strong> https://${escape('esp-'+plan.customer+'-site.pages.dev')}</p><p>Approving creates a private GitHub repository and a publicly accessible starter website. No forms, email, domain changes, billing changes, or deletions are included.</p><p>Cloudflare's Workers &amp; Pages GitHub App must have permission to access the new repository. <a href="https://github.com/settings/installations">Review GitHub App access</a>.</p>`;
+  const {slug,digest}=await itemSnapshot(item,current);
+  const website='https://esp-'+slug+'-site.pages.dev';
+  const details=`<p><strong>Name:</strong> ${escape(item.customer_name)}</p><p><strong>GitHub:</strong> ${escape(item.github_login)}</p><p><strong>Cloudflare:</strong> ${escape(item.cloudflare_account_id)}</p><p><strong>Private repository:</strong> ${escape('esp-'+slug)}</p><p><strong>Public Pages URL:</strong> ${escape(website)}</p><p>Approval allows Launch &amp; Own to create the private repository, publish the reviewed website, and retry while this session and both provider grants stay valid. Changes to the repository's production branch can trigger future Pages deployments.</p><p>Cloudflare's Workers &amp; Pages GitHub App needs access to the repository. <a href="https://github.com/settings/installations">Review GitHub App access</a>.</p>`;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open your website preview</a></p>';
-  const formId=`<input type="hidden" name="id" value="${escape(item.id)}">`;
-  const approveForm=item.status==='preview'?button('/approve','Approve and create website',current.csrf,formId):'';
-  const retryForm=(item.status==='failed'||(item.status==='provisioning'&&item.updated_at<now()-300))?button('/launch','Retry provisioning safely',current.csrf,formId):'';
-  const verifyForm=(item.status==='pending_deployment'||item.status==='live')?button('/verify','Check live deployment',current.csrf,formId):'';
+  let status=item.status;
+  let controls='';
   let output='';
-  if(item.provision_result){
-    const result=JSON.parse(item.provision_result);
-    if(typeof result.website==='string'&&result.website.startsWith('https://'))output=`<p>Website: <a href="${escape(result.website)}">${escape(result.website)}</a></p><p>Repository: <a href="${escape(result.repository)}">${escape(result.repository)}</a></p>`;
+  if(status==='preview'){
+    controls=button('/approve','Approve and create website',current.csrf,launchIdField(id)+
+      '<input type="hidden" name="digest" value="'+escape(digest)+'">');
+  }else{
+    const bound=item.authorizing_session===current.hash&&item.approved_epoch===current.authorization_epoch;
+    status=item.job_status??'needs_reauthorization';
+    if(!bound&&['queued','pending_deployment'].includes(status))status='needs_reauthorization';
+    if(status==='queued'){
+      output='<p>Your launch is queued. Refresh this page for updates.</p>';
+      controls=button('/launch','Run due launch steps',current.csrf,launchIdField(id));
+    }
+    if(status==='pending_deployment'){
+      output='<p>Cloudflare is building the approved revision.</p>';
+      controls=button('/verify','Check live deployment',current.csrf,launchIdField(id));
+    }
+    if(['failed','needs_reauthorization'].includes(status)){
+      output='<p>Launch is paused. <a href="/history">Open launch history</a> to review and reapprove it when available.</p>';
+    }
+    if(item.job_error)output+=`<p>Last result: <code>${escape(item.job_error)}</code></p>`;
+    if(item.attempts>0&&['queued','pending_deployment'].includes(status)&&item.next_attempt_at>now()){
+      const timestamp=new Date(item.next_attempt_at*1000).toISOString();
+      output+=`<p>Attempts used: ${escape(item.attempts)}. Next eligible retry <time datetime="${timestamp}">${timestamp}</time>.</p>`;
+    }
+    if(status==='live')output=`<p class="pill">Public website deployment verified</p><p><a href="${escape(website)}">${escape(website)}</a></p><p>Verified revision <code>${escape(item.expected_commit_sha)}</code></p>`;
   }
-  if(item.status==='pending_deployment')output+='<p>Cloudflare is building your website. It is not marked live until production verification succeeds.</p>';
-  if(item.status==='failed')output+='<p>Setup stopped. Check account permissions, especially the Cloudflare Workers &amp; Pages GitHub App installation, then retry. Existing resources are preserved.</p>';
-  if(item.status==='live')output+='<p class="pill">Public website deployment verified</p>';
-  return view('Review website launch',`${details}<p class="pill">Status: ${escape(item.status)}</p>${previewLink}${output}${approveForm}${retryForm}${verifyForm}<p><a href="/">Back to setup</a></p>`);
+  return view('Review website launch',`${details}<p class="pill">Status: ${escape(status)}</p>${previewLink}${output}${controls}<p><a href="/">Back to setup</a></p>`);
 }
-async function launchRequest(env,current,id){
-  const item=await getLaunch(env,current,id);
-  if(!item||!['approved','failed','provisioning'].includes(item.status))throw Error('This website is not approved for provisioning');
-  if(item.status==='provisioning'&&item.updated_at>=now()-300)throw Error('Provisioning is already in progress');
-  if(current.cloudflare_account_id!==item.cloudflare_account_id||current.github_login.toLowerCase()!==item.github_login.toLowerCase())throw Error('Authorized account changed since approval');
-  if(!current.cloudflare_token_ct)throw Error('Cloudflare account authorization is missing');
-  const fresh=await env.DB.prepare("UPDATE onboarding_launches SET status='provisioning',updated_at=? WHERE id=? AND session_hash=? AND (status IN ('approved','failed') OR (status='provisioning' AND updated_at<?)) RETURNING id")
-    .bind(now(),id,current.hash,now()-300).first();
-  if(!fresh)throw Error('Provisioning is already in progress or no longer authorized');
-  await syncApprovedReceipt(env,{id,sessionHash:current.hash});
-  try{
-    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
-    const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
-    const storedPlan=JSON.parse(item.plan_json);
-    const config={name:item.customer_name,githubOwner:item.github_login,accountId:item.cloudflare_account_id,forms:false,site:storedPlan.site};
-    const result=await applyWebsite(config,{githubToken,cloudflareToken});
-    await env.DB.prepare("UPDATE onboarding_launches SET status='pending_deployment',provision_result=?,error_code=NULL,updated_at=? WHERE id=? AND session_hash=?")
-      .bind(JSON.stringify(result),now(),id,current.hash).run();
-    await syncApprovedReceipt(env,{id,sessionHash:current.hash});
-  }catch{
-    await env.DB.prepare("UPDATE onboarding_launches SET status='failed',error_code='provision_failed',updated_at=? WHERE id=? AND session_hash=?")
-      .bind(now(),id,current.hash).run();
-    await syncApprovedReceipt(env,{id,sessionHash:current.hash});
-  }
-  return redirect('/review?id='+encodeURIComponent(id));
+
+function queueAttempt(context,env,id,sessionHash){
+  context?.waitUntil(runLaunchJob(env,id,sessionHash).catch(()=>{
+    console.error(JSON.stringify({event:'onboarding_launch_error',code:'runner_unavailable'}));
+  }));
 }
-async function approve(request,env,current){
-  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
-  const id=data.get('id');const item=await getLaunch(env,current,id);
-  if(!item||item.status!=='preview')throw Error('This launch request was already approved or is no longer accessible');
-  const updated=await env.DB.prepare('UPDATE onboarding_launches SET status=?,approved_at=?,updated_at=? WHERE id=? AND session_hash=? AND status=? RETURNING id')
-    .bind('approved',now(),now(),id,current.hash,'preview').first();
-  if(!updated)throw Error('This launch request was already approved');
-  await syncApprovedReceipt(env,{id,sessionHash:current.hash});
-  return await launchRequest(env,current,id);
-}
-async function launch(request,env,current){
-  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
-  return await launchRequest(env,current,data.get('id'));
-}
-async function verifyLaunchResult(env,current,item){
-  if(!item||!['pending_deployment','live'].includes(item.status))throw Error('There is no deployment to verify');
-  if(item.cloudflare_account_id!==current.cloudflare_account_id||item.github_login.toLowerCase()!==current.github_login.toLowerCase())
-    throw Error('Authorized account changed since approval');
-  if(!current.cloudflare_token_ct)throw Error('Reconnect your Cloudflare account');
-  const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
-  const provisioned=item.provision_result?JSON.parse(item.provision_result):null;
-  const expectedCommitSha=provisioned?.headCommitSha;
-  if(typeof expectedCommitSha!=='string'||!/^[a-f0-9]{40}$/i.test(expectedCommitSha))
-    throw Error('The approved source revision is missing. Deployment cannot be confirmed safely.');
-  const result=await verifyWebsite({name:item.customer_name,accountId:item.cloudflare_account_id,githubOwner:item.github_login,forms:false},{cloudflareToken:token,expectedCommitSha});
-  if(result.status==='live')
-    await env.DB.prepare("UPDATE onboarding_launches SET status='live',error_code=NULL,updated_at=? WHERE id=? AND session_hash=? AND status IN ('pending_deployment','live')")
-      .bind(now(),item.id,current.hash).run();
-  else
-    await env.DB.prepare("UPDATE onboarding_launches SET updated_at=? WHERE id=? AND session_hash=? AND status='pending_deployment'")
-      .bind(now(),item.id,current.hash).run();
-  await syncApprovedReceipt(env,{id:item.id,sessionHash:current.hash});
-  return result;
-}
-async function verify(request,env,current){
+
+async function approve(request,env,current,context){
+  await limitAttempts(request,env);
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
   const item=await getLaunch(env,current,data.get('id'));
-  await verifyLaunchResult(env,current,item);
-  return redirect('/review?id='+encodeURIComponent(item.id));
+  if(!item||item.status!=='preview')throw Error('This launch is not awaiting approval');
+  const snapshot=await itemSnapshot(item,current);
+  if(data.getAll('digest').length!==1||data.get('digest')!==snapshot.digest)throw Error('Review the current website preview again');
+  const time=now();
+  const receipt=item.legacy_receipt_id&&!item.job_id
+    ?await getOwnedReceipt(env,{id:item.legacy_receipt_id,...receiptOwner(current,time)}):null;
+  if(item.legacy_receipt_id&&!item.job_id&&!receipt)throw Error('This history entry expired');
+  if(!await approveJob(env,{preview:item,session:current,snapshot,receipt,time}))
+    return fail('This launch changed or its target already has an approved launch. Check launch history.',409);
+  queueAttempt(context,env,snapshot.id,current.hash);
+  return redirect(reviewPath(item.id));
 }
-// An interrupted launch is recoverable only while the customer has a valid,
-// encrypted session. Never retry a merely previewed/unapproved or failed job.
-async function recoverPendingLaunches(env){
-  const ts=now();
-  const rows=await env.DB.prepare(`SELECT
-    l.id,l.status,l.updated_at,l.customer_name,l.github_login AS launch_login,
-    l.cloudflare_account_id AS launch_account,l.provision_result,
-    s.id_hash,s.github_login,s.github_token_ct,s.github_refresh_token_ct,
-    s.github_token_expires_at,s.github_refresh_expires_at,s.cloudflare_token_ct,
-    s.cloudflare_refresh_token_ct,s.cloudflare_token_expires_at,s.cloudflare_refresh_expires_at,
-    s.cloudflare_account_id,s.expires_at
-    FROM onboarding_launches l JOIN onboarding_sessions s ON l.session_hash=s.id_hash
-    WHERE s.expires_at>? AND
-     ((l.status='provisioning' AND l.updated_at<?)
-      OR (l.status='pending_deployment' AND l.updated_at<?))
-    ORDER BY l.updated_at ASC LIMIT 5`)
-    .bind(ts,ts-300,ts-90).all();
-  for(const job of rows.results||[]){
-    const current={...job,hash:job.id_hash};
-    if(job.github_login.toLowerCase()!==String(job.launch_login).toLowerCase()||
-      job.cloudflare_account_id!==job.launch_account)continue;
-    try{
-      if(job.status==='provisioning'){
-        // launchRequest takes an atomic lease and is idempotent if the GitHub
-        // repository or Cloudflare project was already partially created.
-        await launchRequest(env,current,job.id);
-      }else if(job.status==='pending_deployment'){
-        await verifyLaunchResult(env,current,{
-          id:job.id,status:job.status,customer_name:job.customer_name,
-          github_login:job.launch_login,cloudflare_account_id:job.launch_account,
-          provision_result:job.provision_result
-        });
-      }
-    }catch{
-      // Keep provider errors and encrypted tokens out of the scheduled logs.
-      // A failed verification remains pending for later retry/owner inspection;
-      // an interrupted provisioning call is idempotently retried, not deleted.
-      await env.DB.prepare("UPDATE onboarding_launches SET updated_at=?,error_code=? WHERE id=? AND session_hash=? AND status IN ('pending_deployment','provisioning')")
-        .bind(now(),'scheduled_retry_waiting',job.id,current.hash).run();
-    }
-  }
+
+async function runDueStep(request,env,current,context,status){
+  await limitAttempts(request,env);
+  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
+  const item=await getLaunch(env,current,data.get('id'));
+  if(item?.status!=='approved'||item.job_status!==status||item.authorizing_session!==current.hash||
+      item.approved_epoch!==current.authorization_epoch)throw Error('This launch step is not authorized');
+  queueAttempt(context,env,item.job_id,current.hash);
+  return redirect(reviewPath(item.id));
 }
+
 async function logout(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
-  let githubToken=null,cloudflareToken=null,unsealFailed=false;
-  try{
-    githubToken=await unseal(env.TOKEN_ENCRYPTION_KEY,current.github_token_ct,'github:'+current.hash);
-    if(current.cloudflare_token_ct)cloudflareToken=await unseal(env.TOKEN_ENCRYPTION_KEY,current.cloudflare_token_ct,'cloudflare:'+current.hash);
-  }catch{
-    unsealFailed=true;
-  }
   // Delete the local session BEFORE attempting any external revocation.
-  // A provider outage must not leave the user signed into this Worker.
-  await env.DB.prepare('DELETE FROM onboarding_sessions WHERE id_hash=?').bind(current.hash).run();
-  let fullyRevoked=!unsealFailed;
-  if(!unsealFailed){
+  // Cascading the job binding immediately fences stale runners as well.
+  const removed=await env.DB.prepare(`DELETE FROM onboarding_sessions WHERE id_hash=? RETURNING
+    github_token_ct, cloudflare_token_ct, github_refresh_locked_until, cloudflare_refresh_locked_until`)
+    .bind(current.hash).first();
+  let fullyRevoked=false;
+  try{
+    const githubToken=await unseal(env.TOKEN_ENCRYPTION_KEY,removed.github_token_ct,'github:'+current.hash);
+    const cloudflareToken=removed.cloudflare_token_ct
+      ?await unseal(env.TOKEN_ENCRYPTION_KEY,removed.cloudflare_token_ct,'cloudflare:'+current.hash):null;
     const results=await revokeConnectedAccounts({
       githubToken,cloudflareToken,ghClientId:env.GH_CLIENT_ID,ghClientSecret:env.GH_CLIENT_SECRET,
       cfClientId:env.CF_CLIENT_ID,cfClientSecret:env.CF_CLIENT_SECRET
     });
-    fullyRevoked=results.fullyRevoked;
-  }
+    fullyRevoked=results.fullyRevoked&&!(removed.github_refresh_locked_until||removed.cloudflare_refresh_locked_until);
+  }catch{/* Local sign-out is already complete. */}
   const result=redirect(fullyRevoked?'/?disconnect=complete':'/?disconnect=unconfirmed');
   result.headers.append('set-cookie',cookie(COOKIE_SESSION,'',0));
   result.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
   return result;
 }
 export default {
-  async fetch(request,env){
+  async fetch(request,env,context){
     try{
       const url=new URL(request.url);
-      if(url.pathname==='/health'&&request.method==='GET')return Response.json({ok:true,configured:!!(env.DB&&env.ONBOARDING_LIMITER&&env.ONBOARDING_ORIGIN&&env.TOKEN_ENCRYPTION_KEY&&env.GH_CLIENT_ID&&env.GH_CLIENT_SECRET&&env.CF_CLIENT_ID&&env.CF_CLIENT_SECRET&&env.CF_SCOPES)},{headers:{'cache-control':'no-store'}});
+      if(url.pathname==='/health'&&request.method==='GET'){
+        let hasConfiguration=true;
+        try{configured(env)}catch{hasConfiguration=false}
+        const launchJobsReady=await launchSchemaReady(env.DB);
+        return Response.json({ok:launchJobsReady,configured:hasConfiguration,launchJobsReady},{
+          status:launchJobsReady?200:503,headers:{'cache-control':'no-store'}
+        });
+      }
       configured(env);
       if(url.origin!==baseUrl(env))return fail('This service requires its registered HTTPS origin.',400);
       const current=await session(request,env);
       if(request.method==='GET'){
         if(url.pathname==='/')return await home(env,current,url.searchParams.get('disconnect'));
         if(url.pathname==='/connect/github')return await gitHubStart(request,env);
-        if(url.pathname==='/oauth/github/callback')return await gitHubCallback(request,env);
+        if(url.pathname==='/oauth/github/callback')return await gitHubCallback(request,env,current);
         if(url.pathname==='/connect/cloudflare')return await cloudflareStart(request,env,current);
         if(url.pathname==='/oauth/cloudflare/callback')return await cloudflareCallback(request,env,current);
         if(url.pathname==='/review')return await review(env,current,url.searchParams.get('id'));
@@ -477,11 +513,12 @@ export default {
         if(url.pathname==='/account')return await selectAccount(request,env,current);
         if(url.pathname==='/preview')return await preview(request,env,current);
         if(url.pathname==='/draft')return await draft(request,env,current);
-        if(url.pathname==='/approve')return await approve(request,env,current);
-        if(url.pathname==='/launch')return await launch(request,env,current);
-        if(url.pathname==='/verify')return await verify(request,env,current);
+        if(url.pathname==='/approve')return await approve(request,env,current,context);
+        if(url.pathname==='/launch')return await runDueStep(request,env,current,context,'queued');
+        if(url.pathname==='/verify')return await runDueStep(request,env,current,context,'pending_deployment');
         if(url.pathname==='/logout')return await logout(request,env,current);
         if(url.pathname==='/restore')return await restoreLaunch(request,env,current);
+        if(url.pathname==='/delete-launch-history')return await removeLaunchHistory(request,env,current);
       }
       return fail('Page not found',404);
     }catch(error){
@@ -492,13 +529,14 @@ export default {
     }
   },
   async scheduled(_event,env){
-    // Best-effort bounded recovery of approved launches with still-valid
-    // customer authorization. Does not operate across expired sessions.
-    try{await recoverPendingLaunches(env)}finally{
+    try{
+      configured(env);
+      await runScheduledLaunches(env);
+    }finally{
       const expired=now();
       await env.DB.batch([
-        env.DB.prepare('DELETE FROM onboarding_flows WHERE expires_at<?').bind(expired),
-        env.DB.prepare('DELETE FROM onboarding_sessions WHERE expires_at<?').bind(expired)
+        env.DB.prepare('DELETE FROM onboarding_flows WHERE expires_at<=?').bind(expired),
+        env.DB.prepare('DELETE FROM onboarding_sessions WHERE expires_at<=?').bind(expired)
       ]);
       await purgeExpiredReceipts(env,expired);
     }
