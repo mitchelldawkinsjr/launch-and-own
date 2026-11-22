@@ -21,7 +21,7 @@ Run **npm run qa:distribution** to show and validate the capability matrix, or *
 Every entry-point status has three separate dimensions:
 
 - **Code:** planned → in_pr → merged → deployed. Merged code does not mean enabled hosting or approved distribution.
-- **Access:** not_available → hosted_beta → external_beta → public. Hosted beta requires real owner-account live evidence; external beta needs a **separately consenting independent** customer; public also requires recorded explicit owner release authorization.
+- **Access:** not_available → hosted_beta → external_beta → public for hosted/connected tools. A separately reviewed and tested portable skill may use **instructions_only** once its code is merged, without suggesting connected publishing. Hosted beta requires real owner-account live evidence; external beta needs a **separately consenting independent** customer; public also requires recorded explicit owner release authorization.
 - **Verification:** not_tested → ci_only → owner_live → independent_live. Workerd simulations are necessary regression evidence, but they do not prove provider-backed launch or customer acceptance.
 
 Example: browser ZIP may correctly show **merged / not_available / ci_only** while its private storage and production preview aren't ready. A portable skill may be distributed as **instructions only**; it must never imply connected publishing tools that do not exist. A Claude or ChatGPT connected client cannot be promoted until the **same shared MCP/API backend** is deployed and accessible.
