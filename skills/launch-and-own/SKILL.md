@@ -53,13 +53,15 @@ Chat instructions alone authorize **prepare** only.
 ### Flow 1 — Agent generates / validates a site
 
 1. Collect business name, headline, about, up to six services, optional contact email, theme preference if useful (`ocean` | `forest` | `sunset` | `graphite` for the product one-page renderer).
-2. Produce **static** HTML (and optional CSS/assets). Prefer a single `index.html` for the current one-page browser path.
-3. Validate locally: open the file in a browser or local static server; no secrets in files; no server-side code.
-4. Hand off to the browser (see below). Do not claim publication.
+2. Produce a **deployable static site directory** containing `index.html` (and any CSS, JavaScript, images and other assets the page actually references). For an agent-built website, **preserve those generated files** as the customer's proposed website; do not silently replace them with a different manual form design.
+3. Validate locally: open the pages in a browser or local static server; verify links and asset paths, and check for secrets or unsupported server-side files.
+4. **Default handoff for agent-generated files: package the validated deployable directory as a static ZIP** that satisfies [reference.md](reference.md). Include the final `index.html` and referenced assets; exclude `.env`, `.git`, `node_modules`, credentials, caches and unrelated project files. Provide the ZIP directly if the agent's authorized tools can create an attachment. Otherwise, give the customer the completed static folder and explain how to compress it locally; never claim a ZIP was created unless it exists.
+5. Direct the customer to **Upload a built website** at `https://onboard.360web.cloud` to inspect the exact uploaded site, then separately approve resource creation. **Do not send an agent-generated HTML site to the manual one-page editor** as the default: that editor re-creates a different page and would discard the generated HTML/assets. Use the manual editor only when there are no deployable files or the customer explicitly chooses it.
+6. This preparation and upload guidance does **not** publish anything. The customer still connects accounts, previews exact bytes and separately approves.
 
 ### Flow 2 — Prebuilt ZIP or web upload guidance
 
-1. Accept or help package a static site ZIP that meets [reference.md](reference.md) constraints.
+1. Accept an existing static site ZIP or package the **final built static output**, not the entire development repository. Validate it against [reference.md](reference.md); do not include source secrets, build caches, server code, or dependency trees.
 2. **Upload a built website** is enabled in the hosted browser beta: guide the customer to connect their accounts, upload a validated ZIP, inspect the manifest and private ticket-protected exact preview, then separately approve. If unavailable to this customer, report the actual UI/account state and offer local review or the manual one-page fallback. Never claim publication from chat.
 3. Never tell the customer to paste ZIP bytes or private file contents into public issues.
 
@@ -74,7 +76,7 @@ Give the customer these steps verbatim in spirit (you may format them):
 1. Open **https://onboard.360web.cloud**
 2. **Connect GitHub**, then **Install Launch & Own** on your personal GitHub account when prompted (OAuth alone cannot create the private repo).
 3. **Connect Cloudflare** and select the account that will own Pages.
-4. Choose **Create a simple website** to enter copy and generate an exact preview, **or Upload a built website** to submit a validated static ZIP, review its file manifest, and open the private ticket-protected exact preview.
+4. **For a site the agent already generated as files, choose Upload a built website** and submit the validated ZIP so the preview contains those same pages/assets. If the customer is starting without generated files, choose **Create a simple website** to enter copy. Review the uploaded manifest or generated preview and open the exact ticket-protected private preview as appropriate.
 5. On the review page, confirm the private repo name and public Pages URL, then click **Approve and create website** only if they intend to create those resources.
 6. Wait until status is genuinely **`live`** with a verified commit and matching public HTML — do not celebrate earlier statuses (`queued`, `pending_deployment`, `needs_reauthorization`) as success.
 
