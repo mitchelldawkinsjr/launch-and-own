@@ -16,6 +16,20 @@ const htmlPreviewHeaders={
   'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 };
 export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now}) {
+  // Re-check the live authorization epoch immediately before *each* provider call.
+  // Logging out or reselecting an account fences the rest of an in-flight PR attempt.
+  function fencedFetch(env,current) {
+    return async(url,options={})=>{
+      const active=await env.DB.prepare(`SELECT 1 FROM onboarding_sessions
+        WHERE id_hash=? AND authorization_epoch=? AND github_user_id=?
+          AND cloudflare_account_id=? AND github_token_ct IS NOT NULL
+          AND cloudflare_token_ct IS NOT NULL AND expires_at>?`)
+        .bind(current.hash,current.authorization_epoch,current.github_user_id,
+          current.cloudflare_account_id,now()).first();
+      if(!active)throw Error('Connected account authorization changed during update');
+      return await fetch(url,{...options,signal:options.signal??AbortSignal.timeout(8000)});
+    };
+  }
   const account=input=>({name:input.customer_name,githubOwner:input.github_login,
     accountId:input.cloudflare_account_id,githubUserId:input.github_user_id,
     repositoryId:input.repository_id,forms:false});
@@ -109,8 +123,9 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     const site=normalizeSite({name:item.job.customer_name,tagline:form.get('tagline')||'',
       about:form.get('about')||'',services:form.get('services')||'',
       theme:form.get('theme')||'ocean',contactEmail:form.get('contactEmail')||''});
-    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
-    const base=await readManagedSiteBase(account(item.job),{githubToken});
+    const fetchFn=fencedFetch(env,current);
+    const githubToken=await getFreshAccessToken({env,session:current,provider:'github',fetchFn});
+    const base=await readManagedSiteBase(account(item.job),{githubToken,fetchFn});
     const preview=await previewWebsiteUpdate(inputFor(item.job,site));
     const ticket=await encodeTicket(env,'review',current,{jobId:item.job.id,
       repositoryId:item.job.repository_id,baseCommitSha:base.baseCommitSha,
@@ -145,11 +160,12 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     await limitAttempts(request,env);
     const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
     const {item,site,ticket}=await reviewData(env,current,form.get('ticket'));
-    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    const fetchFn=fencedFetch(env,current);
+    const githubToken=await getFreshAccessToken({env,session:current,provider:'github',fetchFn});
     let proposal;
     try{
       proposal=await proposeWebsiteUpdate({...inputFor(item.job,site),explicitlyApproved:true,
-        approvedHtmlSha256:ticket.approvedHtmlSha256,expectedBaseCommitSha:ticket.baseCommitSha},{githubToken});
+        approvedHtmlSha256:ticket.approvedHtmlSha256,expectedBaseCommitSha:ticket.baseCommitSha},{githubToken,fetchFn});
     }catch {
       return fail('GitHub could not prepare the approved PR. Confirm the GitHub App has Pull requests: write permission and try a fresh preview. No merge or publication was performed.',409);
     }
@@ -170,12 +186,13 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     const item=await requireOwned(env,current,receipt.jobId);
     if(!item||item.job.repository_id!==receipt.repositoryId)
       return fail('This update does not belong to your connected accounts.',404);
-    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
-    const pr=await readApprovedUpdatePr({...account(item.job),...receipt},{githubToken});
+    const fetchFn=fencedFetch(env,current);
+    const githubToken=await getFreshAccessToken({env,session:current,provider:'github',fetchFn});
+    const pr=await readApprovedUpdatePr({...account(item.job),...receipt},{githubToken,fetchFn});
     let result;
     if(pr.status==='merged'){
-      const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
-      result=await verifyWebsite(inputFor(item.job,item.site),{cloudflareToken,
+      const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare',fetchFn});
+      result=await verifyWebsite(inputFor(item.job,item.site),{cloudflareToken,fetchFn,
         expectedCommitSha:pr.mergedCommitSha,expectedHtmlSha256:receipt.approvedHtmlSha256});
     }
     const refresh='<p><a href="/site-update-status?ticket='+encodeURIComponent(raw)+'">Check deployment status again</a></p>';
