@@ -6,6 +6,8 @@ Launch & Own is a customer-owned website launch and maintenance platform with **
 
 > **Hosted browser beta — independent customer acceptance still under QA.** Visit **https://onboard.360web.cloud** to connect your own GitHub and Cloudflare accounts and inspect a one-page website preview. The owner-account B13 rehearsal has created a private GitHub repository and a successful Cloudflare Pages production deployment at the approved commit. Approved HTML matches the repository bytes. **The owner B13 job has since reached `live`, and public HTML SHA-256 matches the approved bytes; a separately consenting customer's launch and approved website edit remain pending** ([Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)). A green CI run or successful Pages build alone is not end-to-end acceptance. Custom forms/domains, bespoke AI designs and a public ChatGPT plugin are not available end-to-end.
 
+**Portable instructions-only Agent Skill:** [skills/launch-and-own/SKILL.md](skills/launch-and-own/SKILL.md) is available to compatible agents for preparation and safe browser handoff. It is **not** an authenticated Claude/ChatGPT publishing connector.
+
 **For agent and connector builders:** [the shared distribution/release contract](docs/AGENT_DISTRIBUTION_RELEASE.md) tracks portable skills, Claude/ChatGPT connectors, owner-approval gates, and beta verification independently. Run `npm run qa:distribution` for current machine-checked status. Skills-only instructions are not authenticated publishing tools.
 
 ## Two ways to build and manage a website
