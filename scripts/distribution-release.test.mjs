@@ -28,6 +28,7 @@ test('checked-in matrix is valid and owner beta is not independent acceptance', 
   assert.match(report, /Browser: manual one-page creation \| deployed \| hosted_beta \| owner_live/);
   assert.match(report, /Browser: static ZIP upload \| merged \| not_available \| ci_only/);
   assert.match(report, /Portable agent skill \(instructions only\) \| merged \| instructions_only \| ci_only/);
+  assert.match(report, /Claude Code plugin \(instructions-only local packaging\) \| in_pr \| not_available \| ci_only/);
 });
 
 test('PRs, merged ZIPs, and local rehearsals cannot be advertised as hosted', () => {
