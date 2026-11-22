@@ -11,7 +11,7 @@ export async function revokeGitHubGrant({clientId,clientSecret,accessToken,fetch
   required(clientSecret,"GitHub client secret");
   required(accessToken,"GitHub access token");
   const r=await requestWithTimeout(fetchFn,"https://api.github.com/applications/"+encodeURIComponent(clientId)+"/grant",{
-    method:"DELETE",redirect:"error",headers:{
+    method:"DELETE",redirect:"manual",headers:{
       authorization:"Basic "+Buffer.from(clientId+":"+clientSecret).toString("base64"),
       accept:"application/vnd.github+json",
       "x-github-api-version":"2022-11-28",
@@ -27,7 +27,7 @@ export async function revokeCloudflareToken({clientId,clientSecret,accessToken,f
   required(clientSecret,"Cloudflare client secret");
   required(accessToken,"Cloudflare access token");
   const r=await requestWithTimeout(fetchFn,"https://dash.cloudflare.com/oauth2/revoke",{
-    method:"POST",redirect:"error",headers:{
+    method:"POST",redirect:"manual",headers:{
       authorization:"Basic "+Buffer.from(clientId+":"+clientSecret).toString("base64"),
       "content-type":"application/x-www-form-urlencoded",
       accept:"application/json"

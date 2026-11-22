@@ -37,7 +37,7 @@ test("token exchange sends verifier in form body but not URL or bearer header",a
    assert.equal(url,CLOUDFLARE_TOKEN_URL);
    assert.equal(opts.method,"POST");
    assert.equal(opts.headers.authorization,undefined);
-   assert.equal(opts.redirect,"error");
+   assert.equal(opts.redirect,"manual");
    const b=new URLSearchParams(opts.body);
    assert.equal(b.get("code_verifier"),session.codeVerifier);
    assert.equal(b.get("client_id"),client.clientId);

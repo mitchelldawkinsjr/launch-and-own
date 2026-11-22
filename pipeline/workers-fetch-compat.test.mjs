@@ -17,3 +17,15 @@ test("every api.github.com caller sends a User-Agent header",()=>{
   }
   assert.ok(checked.length>=5,"expected the known GitHub API callers to be checked");
 });
+
+// Workers' fetch throws on redirect:"error" (only "follow" or "manual"); Node accepts it, so mocks hide it.
+// validate-config.mjs and scripts/ run only under Node and may keep it.
+test("Worker-executed code never uses fetch redirect \"error\"",()=>{
+  for(const dir of ["pipeline","onboarding","site"]){
+    for(const name of readdirSync(new URL("../"+dir,import.meta.url))){
+      if(!name.endsWith(".mjs")||name.includes("test")||name==="validate-config.mjs")continue;
+      const source=readFileSync(new URL(`../${dir}/${name}`,import.meta.url),"utf8");
+      assert.doesNotMatch(source,/redirect:\s*["']error["']/,`${dir}/${name} uses redirect:"error", which Workers reject`);
+    }
+  }
+});

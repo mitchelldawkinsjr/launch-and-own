@@ -66,7 +66,7 @@ export async function completeCloudflareOAuth({
     nonempty(clientSecret,"clientSecret");
     headers.authorization="Basic "+Buffer.from(clientId+":"+clientSecret).toString("base64");
   }
-  const r=await fetchFn(CLOUDFLARE_TOKEN_URL,{method:"POST",headers,body:body.toString(),redirect:"error"});
+  const r=await fetchFn(CLOUDFLARE_TOKEN_URL,{method:"POST",headers,body:body.toString(),redirect:"manual"});
   if(!r.ok)throw Error("Cloudflare OAuth token exchange failed (HTTP "+r.status+")");
   const data=await r.json();
   if(typeof data.access_token!=="string"||!data.access_token||data.token_type?.toLowerCase()!=="bearer")
@@ -78,7 +78,7 @@ export async function verifyCloudflareAccount({accessToken,accountId,fetchFn=fet
   nonempty(accessToken,"accessToken");
   if(typeof accountId!=="string"||!/^[0-9a-f]{32}$/i.test(accountId))throw Error("Valid Cloudflare account ID is required");
   const url=API+"/accounts/"+encodeURIComponent(accountId);
-  const r=await fetchFn(url,{method:"GET",headers:{authorization:"Bearer "+accessToken,accept:"application/json"},redirect:"error"});
+  const r=await fetchFn(url,{method:"GET",headers:{authorization:"Bearer "+accessToken,accept:"application/json"},redirect:"manual"});
   if(!r.ok){
     if(strict)throw new ProviderRequestError(r);
     throw Error("Cannot access selected Cloudflare account (HTTP "+r.status+")");

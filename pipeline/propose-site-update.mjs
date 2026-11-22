@@ -34,7 +34,7 @@ function githubClient({token,fetchFn=fetch}){
   if(typeof token!=="string"||!token)throw Error("Authenticated GitHub user access is required");
   return async (path,{method="GET",body,allow404=false}={})=>{
     const response=await fetchFn("https://api.github.com"+path,{
-      method,redirect:"error",
+      method,redirect:"manual",
       headers:{authorization:"Bearer "+token,accept:"application/vnd.github+json","x-github-api-version":"2022-11-28","user-agent":"launch-and-own",
         ...(body!==undefined?{"content-type":"application/json"}:{})},
       ...(body!==undefined?{body:JSON.stringify(body)}:{})

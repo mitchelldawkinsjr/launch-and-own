@@ -48,7 +48,7 @@ async function refreshWithProvider({provider,refreshToken,clientId,clientSecret,
   if(provider==="github")payload.set("client_secret",clientSecret);
   else headers.authorization="Basic "+Buffer.from(clientId+":"+clientSecret).toString("base64");
   const res=await fetchFn(info.endpoint,{
-    method:"POST",redirect:"error",headers,body:payload.toString(),
+    method:"POST",redirect:"manual",headers,body:payload.toString(),
     signal:AbortSignal.timeout(12000)
   });
   if(!res.ok)throw Error("Account authorization renewal failed; reconnect the provider");

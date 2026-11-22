@@ -21,7 +21,7 @@ function requestFactory({githubToken,cloudflareToken,fetchFn=fetch,strict=false}
     const base=github?"https://api.github.com":"https://api.cloudflare.com/client/v4";
     const resp=await fetchFn(base+path,{
       method,
-      redirect:"error",
+      redirect:"manual",
       headers:{
         authorization:"Bearer "+(github?githubToken:cloudflareToken),
         accept:github?"application/vnd.github+json":"application/json",
