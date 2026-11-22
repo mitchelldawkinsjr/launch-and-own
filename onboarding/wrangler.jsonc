@@ -13,7 +13,7 @@
   ],
   "vars": {
     "ONBOARDING_ORIGIN": "https://onboard.360web.cloud",
-    "CF_SCOPES": "account-settings.read page.read page.write",
+    "CF_SCOPES": "account-settings.read page.read page.write offline_access",
     "GH_CLIENT_ID": "Iv23li8rVTNtZrfTctqJ",
     "CF_CLIENT_ID": "27de4e083c08b48f9a003ade56b9c8ea"
   },
