@@ -67,6 +67,10 @@ export async function proposeWebsiteUpdate(input,{githubToken,fetchFn}={}){
   if(user?.login?.toLowerCase()!==owner.toLowerCase()||!Number.isSafeInteger(user.id))
     throw Error("GitHub identity must match the authorized personal repository owner");
   const repo=await gh(root);
+  if(input.expectedRepositoryId!==undefined &&
+      (!Number.isSafeInteger(input.expectedRepositoryId)||input.expectedRepositoryId<1||
+       repo?.id!==input.expectedRepositoryId))
+    throw Error("Approved GitHub repository identity changed since review");
   if(repo?.name!==repoName||repo?.owner?.login?.toLowerCase()!==owner.toLowerCase()||
     repo?.owner?.id!==user.id||repo.private!==true||repo.default_branch!=="main"||
     !isManagedRepositoryDescription(repo.description,plan.customer))
