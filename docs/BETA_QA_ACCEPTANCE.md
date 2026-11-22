@@ -17,9 +17,24 @@ Expected fields in the machine-readable evidence: `mode=offline-localhost-only`,
 
 For a visual walkthrough, run `npm run demo:export`, `npm run demo:serve` and open `http://127.0.0.1:4173/`. The default sample is a **four-page** demo; for the one-page customer acceptance, remove `layout: "multi-page"` in a copy of the JSON and export to a new, unused directory. Do not publish the fictional example.
 
-## Stage B — real first launch (blocked pending Domain/OAuth confirmation)
+### Durable launch recovery in the Worker runtime
 
-**Prerequisites:** Domain/OAuth agent confirms both actual sign-ins for `https://onboard.360web.cloud`, Worker Custom Domain/TLS, provider secrets, Cloudflare OAuth authorization-code response and the installed Workers & Pages GitHub App's access to a new customer-owned **private** repo. Do not loosen permissions or publish the private OAuth client without owner authorization.
+Run this check from the repository root on Node.js 22.12 or newer:
+
+```sh
+npm ci --prefix scripts/worker-recovery
+npm run qa:rehearse:recovery
+```
+
+The check bundles the current onboarding Worker with its configured compatibility settings, applies the onboarding migrations to a fresh local D1 instance, and simulates GitHub and Cloudflare with the existing provider fixtures. It drives OAuth callbacks, approval, and the Cron handler through the local Worker runtime. It advances local D1 deadlines to exercise retry and session expiry without waiting for the production schedule.
+
+The result should show `liveProviderRequests: 0` and seven passing checks. In the rehearsal, one job survives a lost repository-creation reply and overlapping Cron invocations. Session expiry pauses the job at the pinned checkpoint. Reconnect and restore produce a private preview. The explicit reapproval then verifies the original commit and exact public HTML without recreating resources. A separate scenario checks that provider revocation pauses further work.
+
+## Stage B — real first launch (owner B13 deployed; public HTML and independent tester not yet accepted)
+
+**Prerequisites:** Domain/OAuth confirms actual sign-ins for `https://onboard.360web.cloud`, Worker TLS and secrets, Cloudflare authorization-code response, and **both** the Launch & Own and Workers & Pages GitHub App installations with the appropriate customer permissions. Do not loosen permissions or change public OAuth settings without owner authorization.
+
+**Owner B13 evidence, November 22, 2026:** A private customer-owned test repo and Git-connected Pages project exist. Canonical Pages production deployment reports success for Git commit `1b119a2cd7c99cd99bb1148f6548c303dcae122b`; the dedicated D1-approved homepage bytes match GitHub `public/index.html` at that commit. At the read-only audit time, D1 remained `pending_deployment` and the public URL's served HTML digest could not be fetched. These are **not** evidence that an independent consenting customer's full Stage B is complete; see [#21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21). Production Worker is an intentionally pre-ZIP hotfix; ZIP rollout [#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45) is a separate release.
 
 1. Invite an independent, consenting customer (not the owner's existing test account). Obtain permission before logging non-secret evidence. Customer connects **their own** GitHub and Cloudflare through provider consent pages; nobody pastes tokens into chats or issue comments. Verify that the customer also installed the **Launch & Own GitHub App** on the same personal account before approving a launch. [Tester walkthrough](BETA_TESTER_HANDOFF.md#walkthrough-from-description-to-approval)
 2. Capture the selected immutable GitHub user/account identities and Cloudflare account selection **privately**. Check deny/decline paths and mismatched account handling. No creation should occur before a visibly separate approval.
@@ -52,7 +67,7 @@ The private tester config must contain the authorized `name`, 32-character `acco
 4. Verify production with both the merged SHA and the new approved HTML digest. Ensure the old digest no longer matches live content. Try a stale base-SHA update and rejected approval attempt; each must fail closed.
 5. Report the PR number, check status, merge SHA, verified deployment, retry count, assistance needed and safe failures. Strip all OAuth/session tokens, private email and account IDs from public GitHub comments unless the customer explicitly approves their publication.
 
-**Current blockers:** Hosted OAuth/live deploy is owned by Domain/OAuth (#2); persistent lifecycle and recoveries belong to Codex Max (#12); the customer-facing maintenance UI and its GitHub App PR scope are not yet enabled. **Local tests cannot satisfy Stage B or C.** Product/distribution (#22) should use this guide for the tester handoff and record their first-preview usability feedback.
+**Current blockers:** First owner B13 GitHub/Pages provisioning is observed; **public HTML SHA-256, final D1 `live` status and a consenting independent customer are still outstanding**. The post-launch editor remains in [draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31), and imported ZIPs are code-merged but not hosted until [#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45). The durable D1/Worker recovery milestone is already merged with its own passing CI. **Local tests cannot satisfy Stage B or C.** Domain/QA coordinates public beta acceptance through [#2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2).
 
 ## Issue #21 completion evidence template
 

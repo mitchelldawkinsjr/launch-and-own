@@ -1,0 +1,13 @@
+{
+  "name": "launch-and-own-worker-recovery",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261119.0-beta"
+  }
+}
