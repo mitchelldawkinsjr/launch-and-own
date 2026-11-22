@@ -28,7 +28,7 @@ Queues would provide independent delivery and configurable retries, with a produ
 | Stale or unexpected public deployment | Accept the canonical **production** deployment only on exact commit SHA and verified project identity. Also fetch the canonical Pages hostname without credentials or redirects and compare its HTML byte for byte with the approval. |
 | Credential or customer-data exposure | Keep OAuth grants and job state separate. Use fixed application diagnostic codes. Treat private HTML, site copy and contact emails as customer data. Worker invocation logs and traces are a separate operator-controlled data surface. |
 
-These controls assume the Worker code, dedicated D1, encryption key and provider APIs are trusted. A GitHub owner can independently move the production branch or change Pages settings. This may cause Pages to build a different revision between the last branch check and the actual build. The review discloses Git-connected deployments and the service only records the approved revision as verified. Avoid out-of-band changes during the acceptance run.
+These controls assume the Worker code, dedicated D1, encryption key and provider APIs are trusted. For a project with zero deployments, the runner checks the private repository ID, owner and approved branch head immediately before requesting its first Pages build. Cloudflare builds from the branch's current head, so an owner can move the branch between that check and the build. The review discloses Git-connected deployments and the service only records the approved revision as verified. Avoid out-of-band changes during the acceptance run.
 
 ## State and recovery
 
