@@ -46,6 +46,18 @@ All tools reject unknown arguments, including model-supplied owner/account/crede
 - Automated tests exercise a **mock contract boundary** (mismatched owner, expired token/link, stale SHA, replayed link marker, digest substitution, unsafe URLs, invalid model fields, false live proof). They are not real client installs, OAuth linking, hosted MCP transport, provider publishing or consenting-customer acceptance.
 - Keep `distribution/release-matrix.json` unchanged while this module remains non-deployed; `shared_mcp_api`, connected Claude and ChatGPT remain **not available**. No plugin distribution, production Worker deployments, OAuth permission changes or customer-account mutations are authorized by this PR.
 
+## Transport + owner-linking slice (mock host; not deployed)
+
+In-repo pieces (still **not** a production MCP server or ChatGPT connector):
+
+| Module | Role |
+| --- | --- |
+| [`integration/protected-resource.mjs`](../integration/protected-resource.mjs) | Provisional protected-resource metadata (`RESOURCE_URI`, audience markers) |
+| [`integration/owner-link-store.mjs`](../integration/owner-link-store.mjs) | One-time link challenges + owner bind (memory adapter for tests) |
+| [`integration/bridge-transport.mjs`](../integration/bridge-transport.mjs) | Opaque bearer → server principal, `get_connection_status` / `start_connect_accounts`, browser `link/complete` |
+
+HTTP-shaped negative coverage lives in `integration/bridge-transport.test.mjs` (wrong/expired bearer, injected owner fields, challenge replay, cross-client consume, reconnect pin mismatch). Site inventory, drafts, approval, and job verification remain **not implemented** at the transport (501).
+
 ## Next implementation slice for #43
 
-Create an **isolated authenticated transport + owner linking** against the same existing backend, with a verified MCP resource identifier and protected-resource metadata. Add tenant-filtered read-only site inventory (reconcile long-term #39 identities), real immutable draft/preview storage and server-side approval handoff. Then bind durable job status/verification to the existing D1 runner. Run negative tests at the HTTP boundary (wrong audience, unlinked subject, expired link, different provider account, stale source, revoked authorization and replay), provider-backed QA with one **independent consenting** user, and release review through #2/#55. Refrain from touching `onboarding/worker.mjs` until #31/#53 integration and Domain window are coordinated.
+Wire this transport to a real Worker route **without** editing the contested onboarding UI surface until #31/#53 coordination allows it (prefer a sibling Worker or isolated module). Add tenant-filtered read-only site inventory (reconcile long-term #39 identities), real immutable draft/preview storage and server-side approval handoff. Then bind durable job status/verification to the existing D1 runner. Run provider-backed QA with one **independent consenting** user, and release review through #2/#55 before promoting `shared_mcp_api` in the distribution matrix.
