@@ -56,7 +56,7 @@
       "implementation": "in_pr",
       "access": "not_available",
       "verification": "ci_only",
-      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/issues/55"],
+      "evidence": ["https://github.com/mitchelldawkinsjr/launch-and-own/pull/60"],
       "blockers": ["Thin instructions-only wrapper in review; connected tools + independent Claude beta QA await shared MCP (#43) and owner distribution approval"]
     },
     "chatgpt_connector": {
