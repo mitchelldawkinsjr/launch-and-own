@@ -22,7 +22,7 @@ This skill is **instructions only**. It does **not** grant API tokens, create Gi
 | Browser onboarding at `https://onboard.360web.cloud` | **Available** (beta) |
 | Manual one-page create → exact preview → approve → verify | **Available** in browser |
 | Agent prepares local HTML / guides ZIP or copy into browser | **Available** (this skill) |
-| Hosted ZIP upload on production Worker | **Future / gated** until ZIP release (#45) is approved |
+| Hosted static ZIP upload | **Available (browser beta; owner-tested)** — private preview + separate approval. Independent customer acceptance remains pending (#21/#45) |
 | Agent MCP tools: prepare, preview, approve, verify | **Future** (#43) — do not invent tool calls or action URLs |
 | ChatGPT / Claude one-click publish | **Not available** — do not market or simulate it |
 | In-product website update editor | **Future** (draft #31) — do not claim it is live |
@@ -60,7 +60,7 @@ Chat instructions alone authorize **prepare** only.
 ### Flow 2 — Prebuilt ZIP or web upload guidance
 
 1. Accept or help package a static site ZIP that meets [reference.md](reference.md) constraints.
-2. If production ZIP upload is not confirmed available, say so and offer: (a) open files locally for review, (b) use the manual one-page editor on `onboard.360web.cloud`, or (c) wait for the approved ZIP release.
+2. **Upload a built website** is enabled in the hosted browser beta: guide the customer to connect their accounts, upload a validated ZIP, inspect the manifest and private ticket-protected exact preview, then separately approve. If unavailable to this customer, report the actual UI/account state and offer local review or the manual one-page fallback. Never claim publication from chat.
 3. Never tell the customer to paste ZIP bytes or private file contents into public issues.
 
 ### Flow 3 — Manual creation without an agent
@@ -74,7 +74,7 @@ Give the customer these steps verbatim in spirit (you may format them):
 1. Open **https://onboard.360web.cloud**
 2. **Connect GitHub**, then **Install Launch & Own** on your personal GitHub account when prompted (OAuth alone cannot create the private repo).
 3. **Connect Cloudflare** and select the account that will own Pages.
-4. Create or paste site copy → **Generate website preview** → open the **exact** preview.
+4. Choose **Create a simple website** to enter copy and generate an exact preview, **or Upload a built website** to submit a validated static ZIP, review its file manifest, and open the private ticket-protected exact preview.
 5. On the review page, confirm the private repo name and public Pages URL, then click **Approve and create website** only if they intend to create those resources.
 6. Wait until status is genuinely **`live`** with a verified commit and matching public HTML — do not celebrate earlier statuses (`queued`, `pending_deployment`, `needs_reauthorization`) as success.
 
@@ -85,7 +85,7 @@ Also note: Cloudflare’s separate **Workers & Pages** GitHub App may need acces
 Full rules: [reference.md](reference.md).
 
 - Static files only (HTML/CSS/JS/images/fonts, etc.). No PHP, `_worker.js`, `functions/`, Wrangler config, or secrets.
-- ZIP (when used): ≤ **6 MiB** archive; ≤ **8 MiB** extracted; ≤ **2 MiB** per file; ≤ **128** files; must include `index.html` at root or inside one build folder.
+- ZIP (hosted browser beta): ≤ **6 MiB** archive; ≤ **8 MiB** extracted; ≤ **2 MiB** per file; ≤ **128** files; must include `index.html` at root or inside one build folder. Plan/CPU quotas may affect larger uploads.
 - Safe relative paths only — no `..`, absolute paths, or backslashes.
 
 ## Error / fallback guidance
@@ -96,7 +96,7 @@ Full rules: [reference.md](reference.md).
 | `needs_reauthorization` / permission denied | Reconnect providers in browser; **reapprove the same launch** from history — do not create a duplicate site |
 | App installed but repo create fails | Confirm Launch & Own GitHub App install with Repository creation; refresh onboarding |
 | Pages stuck / 522 | Check Cloudflare Workers & Pages GitHub App repo access; wait for verified `live` |
-| ZIP rejected | Cite concrete constraint from reference.md; help rebuild a clean static ZIP |
+| ZIP rejected | Cite concrete constraint from reference.md; help rebuild a clean static ZIP, and avoid promising large ZIPs fit every Workers plan |
 | Update an existing live site | Today: edit source in their GitHub repo / future PR flow (#31). Do not claim in-product editor is live |
 
 ## Examples
