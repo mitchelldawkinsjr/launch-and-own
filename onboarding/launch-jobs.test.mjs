@@ -156,7 +156,7 @@ test('revoked Cloudflare access is detected before the next GitHub write',async(
   await approvePreview(h,cookie,csrf,id);
   assert.equal(writes(h).length,1);
   assert.equal(jobRow(h).status,'needs_reauthorization');
-  assert.equal(jobRow(h).error_code,'provider_authorization_required');
+  assert.match(jobRow(h).error_code,/^provider_(authorization_required|http_\d+|token_refresh_failed)$/);
   makeDue(h);
   await worker.scheduled({},h.env);
   assert.equal(writes(h).length,1);

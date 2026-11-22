@@ -102,7 +102,12 @@ async function requireProviderAccess(check) {
   } catch (error) {
     if (error instanceof JobStorageUnavailable || error instanceof AuthorizationEnded ||
         (error instanceof ProviderRequestError && error.retryable)) throw error;
-    throw new AuthorizationEnded('provider_authorization_required');
+    const detail = error instanceof ProviderRequestError
+      ? `provider_http_${error.status || 'unknown'}`
+      : (typeof error?.message === 'string' && /^[a-z0-9_:-]{3,64}$/i.test(error.message)
+        ? error.message.slice(0, 64)
+        : 'provider_authorization_required');
+    throw new AuthorizationEnded(detail);
   }
 }
 
@@ -116,7 +121,10 @@ async function verifiedConnections(env, job, input) {
     cloudflareToken = await getFreshAccessToken({ env, session, provider: 'cloudflare', fetchFn: refreshFetch });
   } catch (error) {
     if (error instanceof AuthorizationRefreshBusy || error instanceof JobStorageUnavailable) throw error;
-    throw new AuthorizationEnded('provider_authorization_required');
+    const detail = typeof error?.message === 'string' && /reconnect|expired|renewed|Connect /i.test(error.message)
+      ? 'provider_token_refresh_failed'
+      : 'provider_authorization_required';
+    throw new AuthorizationEnded(detail);
   }
   const fetchFn = guardedFetch(env, job, true);
   await requireProviderAccess(() => verifyProviderConnections(input, {
