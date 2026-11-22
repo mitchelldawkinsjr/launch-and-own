@@ -113,7 +113,9 @@ function jsonOk(body, status = 200) {
  * Supported routes:
  *   GET  /.well-known/oauth-protected-resource
  *   POST /mcp/tools/call   { name, arguments }  + Authorization: Bearer …
- *   POST /mcp/link/complete  { challenge_id, verified } + Bearer … (browser/backend only)
+ * Link completion is deliberately NOT an HTTP route: agent bearers cannot
+ * attest GitHub/Cloudflare OAuth verification. A future dedicated browser
+ * callback must derive both provider identities from a trusted OAuth session.
  */
 export function handleBridgeRequest(host, request) {
   const method = String(request.method || 'GET').toUpperCase();
@@ -128,8 +130,6 @@ export function handleBridgeRequest(host, request) {
   try {
     if (method === 'POST' && path === '/mcp/tools/call')
       return dispatchToolCall(host, request);
-    if (method === 'POST' && path === '/mcp/link/complete')
-      return completeLink(host, request);
   } catch (error) {
     if (error instanceof BridgeContractError) {
       const status = error.code === 'unauthenticated' ? 401 :
@@ -245,29 +245,3 @@ function dispatchToolCall(host, request) {
   return jsonError('not_implemented', 501);
 }
 
-/**
- * Browser/backend completion path after OAuth verified both providers.
- * Must not be exposed as a model-facing MCP tool.
- */
-function completeLink(host, request) {
-  const token = bearerFromAuthorization(request.headers?.authorization);
-  if (!token) deny('unauthenticated');
-  const principal = principalFromToken(host, token);
-  const now = host.nowSeconds();
-  const payload = readJsonBody(request);
-  if (typeof payload.challenge_id !== 'string' ||
-      !payload.verified || typeof payload.verified !== 'object')
-    deny('invalid_link_challenge');
-  const record = host.links.consumeLinkChallenge({
-    challengeId: payload.challenge_id,
-    verifiedIdentity: payload.verified,
-    principal,
-    nowSeconds: now
-  });
-  return jsonOk({
-    linked: true,
-    github_user_id: record.githubUserId,
-    cloudflare_account_id: record.cloudflareAccountId,
-    authorization_epoch: record.authorizationEpoch
-  });
-}

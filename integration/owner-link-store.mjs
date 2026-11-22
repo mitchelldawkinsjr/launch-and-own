@@ -44,6 +44,7 @@ export class MemoryOwnerLinkStore {
       clientId,
       expectedGithubUserId: existing ? existing.githubUserId : null,
       expectedCloudflareAccountId: existing ? existing.cloudflareAccountId : null,
+      expectedAuthorizationEpoch: existing ? existing.authorizationEpoch : null,
       expiresAt: nowSeconds + ttlSeconds,
       consumedAt: null
     });
@@ -67,13 +68,29 @@ export class MemoryOwnerLinkStore {
     const scope = assertTrustedPrincipal(principal, {nowSeconds});
     const row = this.#challenges.get(challengeId);
     if (!row) deny('invalid_link_challenge');
+    // Read the CURRENT link, not only the snapshot when challenge was issued.
+    // A first-link challenge must not be replayed after another challenge
+    // established a link; reconnect challenges are pinned to one epoch.
+    const prev = this.getLink(scope.subject, principal.clientId);
+    if (prev) {
+      if (!scope.owner ||
+          row.expectedGithubUserId !== prev.githubUserId ||
+          row.expectedCloudflareAccountId !== prev.cloudflareAccountId ||
+          row.expectedAuthorizationEpoch !== prev.authorizationEpoch ||
+          scope.owner.authorizationEpoch !== prev.authorizationEpoch)
+        deny('invalid_link_challenge');
+    } else if (scope.owner || row.expectedGithubUserId !== null ||
+               row.expectedCloudflareAccountId !== null ||
+               row.expectedAuthorizationEpoch !== null) {
+      deny('invalid_link_challenge');
+    }
+
     const challenge = Object.freeze({...row});
     const linked = assertLinkChallenge(challenge, verifiedIdentity, principal, {nowSeconds});
     if (row.consumedAt !== null) deny('invalid_link_challenge');
     row.consumedAt = nowSeconds;
     this.#challenges.set(challengeId, row);
 
-    const prev = this.getLink(scope.subject, principal.clientId);
     const authorizationEpoch = prev ? prev.authorizationEpoch + 1 : 0;
     const record = Object.freeze({
       subject: linked.subject,
