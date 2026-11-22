@@ -101,3 +101,39 @@ test("strict polling rejects when older commit remains live",async()=>{
  await assert.rejects(waitForWebsite(input,{cloudflareToken:"token",expectedCommitSha:NEXT_SHA,fetchFn:h.fetchFn},1,1000),/not verified/);
  assert.equal(h.calls.length,1);
 });
+
+test("exact approved HTML digest must match public page bytes before live is claimed",async()=>{
+ const h=mock();
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML).toUpperCase(),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"live");
+ assert.equal(result.publicHtmlSha256,htmlHash(DEFAULT_HTML));
+ assert.equal(h.calls.length,2);
+});
+test("correct canonical commit with stale public HTML fails closed",async()=>{
+ const h=mock({html:"<html><body>Old approved copy</body></html>"});
+ const result=await verifyWebsite(input,{
+  cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ });
+ assert.equal(result.status,"pending-expected-html");
+ assert.equal(result.expectedHtmlSha256,htmlHash(DEFAULT_HTML));
+ assert.equal(result.publicHtmlSha256,htmlHash("<html><body>Old approved copy</body></html>"));
+ assert.equal(h.calls.length,2);
+});
+test("invalid approved HTML digest cannot trigger provider requests",async()=>{
+ const h=mock();
+ await assert.rejects(verifyWebsite(input,{
+  cloudflareToken:"token",expectedHtmlSha256:"invalid",fetchFn:h.fetchFn
+ }),/64-character digest/);
+ assert.equal(h.calls.length,0);
+});
+test("old public content cannot satisfy bounded launch verification",async()=>{
+ const h=mock({html:"<html><body>Unexpected</body></html>"});
+ await assert.rejects(waitForWebsite(input,{
+  cloudflareToken:"token",expectedHtmlSha256:htmlHash(DEFAULT_HTML),fetchFn:h.fetchFn
+ },1,1000),/pending-expected-html/);
+ assert.equal(h.calls.length,2);
+});
