@@ -16,6 +16,7 @@ const otherDigest = 'd'.repeat(64);
 const clock = {nowSeconds: 120};
 const principal = (overrides = {}) => ({
   authenticated: true, audience: BRIDGE_AUDIENCE, subject: 'owner_user_1234',
+  clientId: 'chatgpt_client_1',
   expiresAt: 1000,
   linkedOwner: {
     githubUserId: 123, cloudflareAccountId: account,
@@ -63,6 +64,7 @@ test('resource authentication, expiry and audience are enforced, not caller IDs'
     null, {}, principal({authenticated: false}),
     principal({audience: 'github-token'}),
     principal({subject: 'a'}),
+    principal({clientId: 'x'}),
     principal({expiresAt: 119}),
     principal({linkedOwner: {...principal().linkedOwner, reauthorized: false}}),
     principal({linkedOwner: {...principal().linkedOwner, cloudflareAccountId: 'bad'}})
@@ -132,13 +134,20 @@ test('all site/job/draft records must match subject, both providers and epoch', 
 test('linking challenge rejects mismatched owner, expired or consumed challenges', () => {
   const challenge = {
     id: 'link_123456789', subject: 'owner_user_1234',
+    clientId: 'chatgpt_client_1',
     expectedGithubUserId: 123, expectedCloudflareAccountId: account,
     expiresAt: 500, consumedAt: null
   };
   const verified = {githubUserId: 123, cloudflareAccountId: account};
   assert.equal(assertLinkChallenge(challenge, verified, principal(), clock).githubUserId, 123);
+  // First-time linking has no preexisting provider IDs. Browser must verify
+  // both providers and then atomically consume the owner+client challenge.
+  assert.equal(assertLinkChallenge({...challenge,
+    expectedGithubUserId: null, expectedCloudflareAccountId: null
+  }, verified, principal(), clock).cloudflareAccountId, account);
   for (const change of [
-    {subject: 'other_user'}, {expiresAt: 119}, {consumedAt: 118},
+    {subject: 'other_user'}, {clientId: 'other_client_1'},
+    {expiresAt: 119}, {consumedAt: 118},
     {expectedGithubUserId: 222}, {expectedCloudflareAccountId: otherAccount}
   ]) fails('invalid_link_challenge', () =>
     assertLinkChallenge({...challenge, ...change}, verified, principal(), clock));
@@ -159,6 +168,8 @@ test('exact-approval draft rejects expired, swapped digest, changed repo and sta
   };
   assert.equal(assertPreparedDraft(draft, scope, options).operation, 'update');
   fails('stale_preview', () => assertPreparedDraft({...draft, expiresAt: 99}, scope, options));
+  fails('stale_preview', () => assertPreparedDraft(draft, scope,
+    {...options, nowSeconds: undefined}));
   fails('stale_preview', () => assertPreparedDraft(draft, scope,
     {...options, previewSha256: otherDigest}));
   fails('stale_source', () => assertPreparedDraft(draft, scope,
@@ -195,6 +206,10 @@ test('handoff only uses known non-sensitive browser URLs, never approval tokens'
     preview_sha256: digest, action: 'open_hosted_review',
     action_url: 'https://onboard.360web.cloud/review'
   });
+  fails('invalid_approval_handoff', () => humanApprovalHandoff({
+    url: 'https://onboard.360web.cloud/review', draftId: 'draft_1234',
+    previewSha256: digest, expiresAt: 400
+  }, getScope(), {nowSeconds: undefined}));
   fails('invalid_approval_handoff', () => humanApprovalHandoff({
     url: 'https://onboard.360web.cloud/review', draftId: 'draft_1234',
     previewSha256: digest, expiresAt: 5000
