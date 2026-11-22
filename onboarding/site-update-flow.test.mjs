@@ -210,3 +210,48 @@ test('status receipts require the same verified owner but survive a reconnect',a
   assert.equal((await h.request(statusPath,{cookie:sameOwner.cookie})).status,400);
  }finally{globalThis.fetch=originalFetch}
 });
+
+test('ZIP-imported website never shows a one-page editor link or accepts a manual edit',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await liveSite(h);
+  const job=h.sqlite.prepare('SELECT plan_json FROM onboarding_launch_jobs WHERE id=?').get(tenant.id);
+  const plan=JSON.parse(job.plan_json);
+  delete plan.site;
+  plan.zip={id:tenant.id,digest:'a'.repeat(64),fileCount:1,totalBytes:20};
+  h.sqlite.prepare('UPDATE onboarding_launch_jobs SET plan_json=? WHERE id=?')
+    .run(JSON.stringify(plan),tenant.id);
+  const history=await h.request('/history',{cookie:tenant.cookie});
+  assert.equal(history.status,200);
+  const html=await history.text();
+  assert.match(html,/Verified site:/);
+  assert.doesNotMatch(html,/Edit this website/);
+  const editor=await h.request('/site-update?id='+tenant.id,{cookie:tenant.cookie});
+  assert.equal(editor.status,404);
+  assert.equal(h.resourceState.updateBranch,null);
+  assert.equal(h.resourceState.updatePr,null);
+ }finally{globalThis.fetch=originalFetch}
+});
+
+test('non-editable generated site variants never show an update link',async()=>{
+ for(const variant of ['multi-page','forms']){
+  const h=harness();globalThis.fetch=h.fetchFn;
+  try{
+   const tenant=await liveSite(h);
+   const record=h.sqlite.prepare('SELECT plan_json FROM onboarding_launch_jobs WHERE id=?').get(tenant.id);
+   const plan=JSON.parse(record.plan_json);
+   if(variant==='multi-page')plan.site.layout='multi-page';
+   if(variant==='forms')plan.forms=true;
+   h.sqlite.prepare('UPDATE onboarding_launch_jobs SET plan_json=? WHERE id=?')
+     .run(JSON.stringify(plan),tenant.id);
+   const history=await h.request('/history',{cookie:tenant.cookie});
+   assert.equal(history.status,200);
+   assert.doesNotMatch(await history.text(),/Edit this website/);
+   const editor=await h.request('/site-update?id='+tenant.id,{cookie:tenant.cookie});
+   assert.equal(editor.status,404);
+   assert.equal(h.resourceState.updateBranch,null);
+   assert.equal(h.resourceState.updatePr,null);
+  }finally{globalThis.fetch=originalFetch}
+ }
+});
+>>>>>>> 776757c (Cover unsupported multi-page and form-enabled site editor visibility)
