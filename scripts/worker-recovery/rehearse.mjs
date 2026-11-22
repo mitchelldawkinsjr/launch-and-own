@@ -229,7 +229,7 @@ async function rejectRevokedGrant(harness) {
   await deliverCron(harness);
   const paused = await readJob(harness.db, id);
   assert.equal(paused.status, 'needs_reauthorization');
-  assert.equal(paused.error_code, 'provider_authorization_required');
+  assert.equal(paused.error_code, 'github_http_401', 'revocation must retain the safe provider-specific HTTP status');
   assert.equal(paused.expected_commit_sha, checkpoint.expected_commit_sha);
   const afterRevocation = harness.calls.length;
   await deliverCron(harness);
