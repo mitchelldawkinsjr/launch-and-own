@@ -191,7 +191,10 @@ export async function runLaunchJob(env, id, sessionHash = null) {
     if (error instanceof ClaimLost) return;
     if (error instanceof JobStorageUnavailable) throw error;
     if (error instanceof AuthorizationEnded || (error instanceof ProviderRequestError && error.authorizationLost)) {
-      await pauseJob(env, job, error.code ?? 'provider_authorization_required');
+      const code = error instanceof AuthorizationEnded
+        ? (error.code || 'session_ended')
+        : `provider_http_${error.status || 'unknown'}`;
+      await pauseJob(env, job, code);
       return;
     }
     try {
