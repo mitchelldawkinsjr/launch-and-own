@@ -45,8 +45,8 @@ Record client name/version, OS, dated redacted results, manual install method, e
 
 ## Shipping and consent boundary
 
-- The hosted **manual one-page browser beta** exists at https://onboard.360web.cloud; independent customer acceptance remains open (#21).
-- Hosted ZIP import is code-merged but not production-enabled until R2/QA gates (#45).
-- Claude wrapper is owned by a separate workstream. This installer intentionally supports only Codex and Cursor.
+- The hosted **manual one-page browser beta** and **static ZIP upload beta** exist at https://onboard.360web.cloud (owner-tested; independent customer acceptance remains open — #21/#45).
+- Near-limit ZIP uploads can use substantial Worker CPU; do not assume Free-plan limits cover maximum archives (#45).
+- Claude Code thin plugin packaging lives at `clients/claude-plugin/` (instructions-only local `--plugin-dir`). This installer intentionally supports only Codex and Cursor project paths.
 - ChatGPT and connected MCP tools are planned in #43. This installer cannot create or verify customer resources.
 - Exact preview, user approval, credential handling, private repo creation and live SHA/public HTML verification must remain in the authorized hosted workflow.

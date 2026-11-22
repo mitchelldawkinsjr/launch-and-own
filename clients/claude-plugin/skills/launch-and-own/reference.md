@@ -36,7 +36,7 @@ Mirrored from `onboarding/website-zip.mjs` (keep in sync when that module change
 
 **Ignored noise:** some macOS metadata (e.g. `__MACOSX`, `.DS_Store`) may be skipped; do not rely on shipping those files.
 
-**Production note:** ZIP onboarding code may be merged while **hosted production ZIP** remains gated (#45). Always state uncertainty if the live UI does not show an upload control.
+**Hosted browser beta:** ZIP upload passed real owner-consented acceptance: private ticket-protected preview, separate approval, and five public file digests matching the uploaded ZIP ([#45 evidence](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896)). It is enabled for beta users, but independent customer acceptance is pending. A near-limit upload used 95 ms Worker CPU ([#45 measurement](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087096052)); do **not** assume a 10 ms Workers Free CPU allowance or unlimited free usage supports that size.
 
 ## Launch job statuses (truthful language only)
 
@@ -52,7 +52,7 @@ Mirrored from `onboarding/website-zip.mjs` (keep in sync when that module change
 ## Future surfaces (do not simulate as live)
 
 - Shared MCP/API tools and AI-client linking (#43)
-- Hosted ZIP activation (#45)
+- Independent ZIP customer acceptance and large-ZIP CPU/quota confirmation (#45/#21)
 - In-product update editor / PR flow (#31)
 - Permanent owned-site discovery UI (#39)
 - Public ChatGPT plugin / Claude connector listings without owner approval

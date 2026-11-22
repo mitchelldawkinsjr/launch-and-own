@@ -16,15 +16,15 @@ Fictional businesses only. Do not paste real customer content into public tracke
 
 **Do not:** invent `esp-…pages.dev` URLs, commit SHAs, or “published successfully” messages.
 
-## 2) Launch my existing static ZIP (partially gated)
+## 2) Launch my existing static ZIP (hosted browser beta)
 
 **Customer:** “I already have a static site ZIP. Publish it.”
 
 **Agent should:**
 
 1. Validate ZIP constraints from `reference.md` (size, `index.html`, no `_worker.js` / PHP / secrets).
-2. State whether production ZIP upload is visible on `onboard.360web.cloud`. If not: explain ZIP release is gated (#45); offer local review + manual one-page path or wait for approved ZIP rollout.
-3. If upload is available in their session: guide them to upload → exact private preview → separate approve — still no chat-only publish.
+2. Explain **Upload a built website** is enabled in the hosted browser beta after owner testing; separate external customer acceptance is still outstanding. If the option is unavailable to the customer, acknowledge the actual UI/account state and suggest local review or manual fallback.
+3. Guide the customer to `https://onboard.360web.cloud` → connect their own accounts → upload the ZIP → inspect the manifest → private exact preview → separate approval. The customer, not the chat agent, authorizes publishing.
 4. Never ask them to paste ZIP binary contents into chat.
 
 ## 3) Update my verified site (mostly future in-product)
