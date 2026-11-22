@@ -1,26 +1,26 @@
 # Launch & Own — hosted onboarding service
 
-The Worker in this directory is an **unconfigured beta source template**, not an active production OAuth login.
+The Worker in this directory is deployed as a **hosted browser beta** at **https://onboard.360web.cloud**. Domain/OAuth has verified GitHub and Cloudflare user consent, account selection, TLS, and both public OAuth apps. A real customer-backed GitHub repository and exact approved Cloudflare Pages production deployment have **not yet passed independent acceptance**; see [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
 
 Its customer journey: connect GitHub, connect Cloudflare, choose an account, review a website, approve resource creation, and verify the exact approved GitHub commit in Cloudflare production.
 
 ## Operator setup
 
-1. A new **Launch & Own beta D1** (`launch-and-own-onboarding-beta`) has been created, and `migrations/0001_initial.sql` was applied. Its nonsecret UUID is set in `wrangler.jsonc`. Never reuse customer contact-form databases or the older prototype D1.
+1. The dedicated **Launch & Own beta D1** (`launch-and-own-onboarding-beta`) is provisioned and has **migrations 0001–0004 applied** and recorded in the ordered ledger. Its nonsecret UUID is set in `wrangler.jsonc`. Do not reapply migrations from old setup notes; verify the actual ledger and required schema. Never reuse a customer's contact-form database or the older prototype D1.
 2. Run `npm run preflight:onboarding` to verify the local configuration. To verify live database identity and schema with a read-scoped provider token, run `CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... node onboarding/validate-config.mjs --remote`. Do not store tokens in source.
-3. Register a GitHub App and Cloudflare OAuth client with minimal privileges and exact HTTPS callback URLs on a domain you control.
+3. The **public GitHub App** and **verified public Cloudflare OAuth client** have already been registered with exact HTTPS callbacks. Existing users may need to reaccept newly granted GitHub Repository creation or Pull requests permissions. Review actual provider consent before modifying app registration or scope.
 4. Configure Worker bindings `ONBOARDING_ORIGIN`, `GH_CLIENT_ID`, `CF_CLIENT_ID`, `CF_SCOPES`, and secrets `TOKEN_ENCRYPTION_KEY`, `GH_CLIENT_SECRET`, and `CF_CLIENT_SECRET`. The encryption key needs 32 random bytes encoded as 64 hex characters.
 5. Install/authorize Cloudflare's **separate** Workers & Pages GitHub App for the customer's repository; product GitHub consent alone cannot grant access.
-6. **Disconnect:** the hosted Worker deletes the local session and attempts to revoke its GitHub OAuth grant and Cloudflare access token. If either provider cannot confirm revocation, it displays a warning to review connected apps in both providers. This does not uninstall the GitHub App or remove the customer's websites. Before public beta, verify provider revocation, launch recovery, retention and abuse controls with an authorized beta account.
+6. **Disconnect:** the hosted Worker deletes the local session and attempts to revoke its GitHub OAuth grant and Cloudflare access token. If either provider cannot confirm revocation, it displays a warning to review connected apps in both providers. This does not uninstall the GitHub App or remove the customer's websites. Continue independent live provider-revocation, launch recovery, retention and abuse checks in [#21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21) and [#12](https://github.com/mitchelldawkinsjr/launch-and-own/issues/12).
 7. Verify an independent customer's OAuth consent, launch approval, private repository, Pages deployment, and exact GitHub revision.
 
-The product team previously verified the beta database identity and schema through migration 0003. Migration 0004 requires a fresh verification during rollout. This does **not** mean the Worker or OAuth login is deployed; OAuth app registrations, verified callback domain, and Worker secrets remain outstanding.
+**Current production configuration:** The Domain agent reports an active Worker Custom Domain/TLS, registered provider apps and required secrets, public app consent, live OAuth account selection, and D1 migrations **0001–0004**. The `/health` readiness check confirms the launch-job schema, not an independently successful customer website launch. Revalidate the current release against the remote D1 before any future deployment; coordinate on [Issue #2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2).
 
 Customer login and launch approval are separate actions. Never paste provider tokens into chat or commit them to GitHub.
 
 ## Selected beta onboarding hostname
 
-The approved onboarding origin is **`https://onboard.360web.cloud`**. GitHub callback: `https://onboard.360web.cloud/oauth/github/callback`; Cloudflare callback: `https://onboard.360web.cloud/oauth/cloudflare/callback`. The other agent owns the Cloudflare zone, Worker Custom Domain and OAuth provider app settings. The old `onboard.mitchelldawkins.com` URL is **not** an approved alternative. Domain checks currently report zone status `pending` and an existing proxied CNAME at the target hostname, so HTTPS/public routing is **not yet verified**. Coordinate with [domain handoff](../docs/HANDOFF_DOMAIN_OAUTH.md), and do not edit live DNS as part of backend changes.
+The approved onboarding origin is **`https://onboard.360web.cloud`**. GitHub callback: `https://onboard.360web.cloud/oauth/github/callback`; Cloudflare callback: `https://onboard.360web.cloud/oauth/cloudflare/callback`. The other agent owns the Cloudflare zone, Worker Custom Domain and OAuth provider app settings. The old `onboard.mitchelldawkins.com` URL is **not** an approved alternative. Domain has since verified the sole Worker Custom Domain, HTTPS and the public OAuth redirects for `onboard.360web.cloud`. This does **not** prove the GitHub repository/Pages launch flow works end to end. Coordinate with [domain handoff](../docs/HANDOFF_DOMAIN_OAUTH.md), and do not edit live DNS as part of backend changes.
 
 ## Secure disconnect behavior
 
@@ -37,7 +37,7 @@ The Worker now preserves `refresh_token` / `expires_in` returned from GitHub and
 
 **Provider registration detail:** GitHub App user tokens should be configured to expire (GitHub supports `offline_access` and rotating refresh tokens). The Cloudflare OAuth client must support `refresh_token` as an allowed grant type to return refresh credentials. Without an available refresh credential, the user must reauthorize when the access token expires. The `onboarding_sessions` cookie still expires after one hour; refresh handling does not create indefinite login sessions or unattended authorization.
 
-**Before deployment:** verify `0002` migration on the product-owned D1, `npm test`, the exact provider scopes/grants, and the real callback/refresh/revocation flows with a consenting beta account. This is CI-tested against simulated endpoints, **not** live OAuth acceptance.
+**Before any future deployment:** verify all four migrations in the dedicated product-owned D1, `npm test`, the remote preflight, actual provider scopes/grants, and a coordinated QA window. Live owner OAuth and token rotation have been checked by Domain/OAuth; provisioning, full revocation behavior and exact public-site deployment still require separate customer acceptance.
 
 
 ## Durable launch recovery
