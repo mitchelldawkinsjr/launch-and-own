@@ -106,7 +106,7 @@ async function requireProviderAccess(check) {
         (error instanceof ProviderRequestError && error.retryable)) throw error;
     let detail = 'provider_authorization_required';
     if (error instanceof ProviderRequestError) {
-      detail = `provider_http_${error.status || 'unknown'}`;
+      detail = error.code || `provider_http_${error.status || 'unknown'}`;
     } else if (typeof error?.message === 'string' && error.message.trim()) {
       // Safe, stable operator code: no spaces/PII, still more specific than a generic pause.
       detail = ('provider_' + error.message.toLowerCase().replace(/[^a-z0-9]+/g, '_')).replace(/_+/g, '_').slice(0, 64).replace(/^_|_$/g, '');
@@ -205,7 +205,7 @@ export async function runLaunchJob(env, id, sessionHash = null) {
     if (error instanceof AuthorizationEnded || (error instanceof ProviderRequestError && error.authorizationLost)) {
       const code = error instanceof AuthorizationEnded
         ? (error.code || 'session_ended')
-        : `provider_http_${error.status || 'unknown'}`;
+        : (error.code || `provider_http_${error.status || 'unknown'}`);
       await pauseJob(env, job, code);
       return;
     }

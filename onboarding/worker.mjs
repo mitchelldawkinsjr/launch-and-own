@@ -1,4 +1,5 @@
 import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app-oauth.mjs';
+import {githubAppCanCreateRepositories,githubAppInstallUrl} from '../pipeline/github-app-installation.mjs';
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
@@ -53,7 +54,7 @@ function baseUrl(env){
 }
 function configured(env){
   baseUrl(env);
-  for(const key of ['DB','TOKEN_ENCRYPTION_KEY','GH_CLIENT_ID','GH_CLIENT_SECRET','CF_CLIENT_ID','CF_CLIENT_SECRET','CF_SCOPES','ONBOARDING_LIMITER']){
+  for(const key of ['DB','TOKEN_ENCRYPTION_KEY','GH_CLIENT_ID','GH_CLIENT_SECRET','GH_APP_SLUG','CF_CLIENT_ID','CF_CLIENT_SECRET','CF_SCOPES','ONBOARDING_LIMITER']){
     if(!env[key])throw Error('Onboarding account connections are not configured');
   }
   if(!/^[a-f\d]{64}$/i.test(env.TOKEN_ENCRYPTION_KEY))throw Error('Invalid token encryption key');
@@ -176,9 +177,17 @@ async function home(env,current,notice){
   const disconnectNotice=notice==='unconfirmed'?'<p role="alert">Your local session was removed, but one or more provider authorizations could not be revoked automatically. Review connected applications in your GitHub and Cloudflare account settings.</p>':notice==='complete'?'<p role="status">You are signed out and provider revocation was confirmed for the connected accounts.</p>':'';
   const zipEnabled=zipPreviewConfigured(env);
   if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Upload a built website or create one here. Host it using your own GitHub and Cloudflare accounts.':'Build and maintain your own website using your GitHub and Cloudflare accounts.'}</p><p>Connect GitHub to get started. You approve each launch before any resources are created.</p><p><a href="/connect/github">Connect GitHub</a></p><small>We do not ask for API tokens or passwords.</small>`);
+  let appInstalled=false;
+  try{
+    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    appInstalled=await githubAppCanCreateRepositories({
+      accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login
+    });
+  }catch{appInstalled=false;}
+  const installHtml=appInstalled?'':`<p role="alert">Install Launch &amp; Own on your GitHub account so it can create your private website repository. OAuth sign-in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install on GitHub</a></p><p>After installing, return here and refresh.</p>`;
   const connected=!!current.cloudflare_token_ct;
   let accountHtml='';
-  if(connected&&!current.cloudflare_account_id){
+  if(appInstalled&&connected&&!current.cloudflare_account_id){
     try{
       const accounts=await accountOptions(env,current);
       accountHtml=accounts.length?`<section><h2>Choose your Cloudflare account</h2><p>Only the selected account will be used.</p>${button('/account','Select account',current.csrf,`<label for="account">Cloudflare account</label><select id="account" name="accountId" required>${accounts.map(a=>`<option value="${escape(a.id)}">${escape(a.name)}</option>`).join('')}</select>`)}</section>`:'<p>No authorized Cloudflare accounts were found. Check the connection permissions.</p>';
@@ -198,20 +207,21 @@ async function home(env,current,notice){
     '<label for="ai-theme">Color theme</label><select id="ai-theme" name="theme"><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="graphite">Graphite</option></select>',
     '<label for="ai-email">Contact email (optional)</label><input id="ai-email" name="contactEmail" type="email" maxlength="254" placeholder="hello@example.com">'
   ].join('');
-  const aiEntry=connected&&current.cloudflare_account_id&&aiDraftConfigured(env)?
+  const ready=appInstalled&&connected&&current.cloudflare_account_id;
+  const aiEntry=ready&&aiDraftConfigured(env)?
     '<section><h2>Describe it. Get a draft.</h2><p>Optional AI-assisted copy: your business name and description will be sent to the configured AI provider. AI may make mistakes; you must review and edit every claim before publishing. Contact email is not sent to the model.</p>'+
     button('/draft','Draft my website copy',current.csrf,aiFields)+'</section>':'';
-  const zipEntry=connected&&current.cloudflare_account_id&&zipEnabled?`<section><h2>Upload a built website</h2>
+  const zipEntry=ready&&zipEnabled?`<section><h2>Upload a built website</h2>
     <p>Upload a ZIP of your built site to preview it privately. Include <code>index.html</code> and its assets at the top of the ZIP or inside one build folder.</p>
     <form method="POST" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${escape(current.csrf)}">
     <label for="zip-name">Business or website name</label><input id="zip-name" name="name" maxlength="80" required>
     <label for="website-zip">Website ZIP (up to 6 MiB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
     <button type="submit">Upload and preview</button></form></section>`:'';
-  const next=connected&&current.cloudflare_account_id?
+  const next=ready?
     '<section><h2>Create a site</h2><p>Review your generated homepage before approving publication. Forms and custom domains remain a future beta milestone.</p>'+
     button('/preview','Generate website preview',current.csrf,siteFields)+'</section>':'';
-  const historyLink=connected&&current.cloudflare_account_id?'<p><a href="/history">View previous approved launches</a></p>':'';
-  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p><p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
+  const historyLink=ready?'<p><a href="/history">View previous approved launches</a></p>':'';
+  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}<p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${appInstalled&&!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));

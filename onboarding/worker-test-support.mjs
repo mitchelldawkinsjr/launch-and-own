@@ -40,7 +40,7 @@ function harness({withJobs=true}={}){
    }
   }
  };
- const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
+ const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',GH_APP_SLUG:'launch-and-own',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
  const calls=[];
  const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,failPagesOnce:false,
   failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42};
@@ -59,6 +59,15 @@ function harness({withJobs=true}={}){
   if(url==='https://api.github.com/user'){
     if(resourceState.githubRevoked)return new Response(null,{status:401});
     return Response.json({login:'tester',id:resourceState.githubUserId});
+  }
+  if(url.startsWith('https://api.github.com/user/installations')){
+    if(resourceState.githubRevoked)return new Response(null,{status:401});
+    if(resourceState.appNotInstalled)return Response.json({installations:[]});
+    return Response.json({installations:[{
+      app_slug:'launch-and-own',
+      account:{login:'tester',type:'User'},
+      permissions:{repository_creation:'write',contents:'write',metadata:'read',pull_requests:'write'}
+    }]});
   }
   if(url==='https://api.github.com/applications/Iv1.example/grant'){
     if(resourceState.failGitHubRevokeOnce){resourceState.failGitHubRevokeOnce=false;return new Response(null,{status:503})}

@@ -2,9 +2,17 @@
 
 **Describe it. Launch it. Own it.**
 
-Launch & Own is a customer-owned conversational website launch and maintenance platform in development. Its goal is to help people describe, preview, publish, and update websites using their own GitHub and Cloudflare accounts—without needing to write code.
+Launch & Own is a customer-owned website launch and maintenance platform with **two first-class entry points**: a planned ChatGPT conversational builder/manager and a standalone web onboarding experience for ZIP uploads or manual site creation. Both use the same GitHub/Cloudflare account ownership, preview, approval and publication backend.
 
 > **Hosted browser beta — first customer launch still under QA.** Visit **https://onboard.360web.cloud** to connect your own GitHub and Cloudflare accounts and inspect a one-page website preview. Both OAuth apps are public, and hosted sign-in/account selection is verified. **Real customer-backed repository creation and exact live deployment have not yet passed independent acceptance** ([Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)). Don't claim a preview, passing CI or a working hostname equals a successfully launched site. Custom forms/domains, bespoke AI designs and a public ChatGPT plugin are not available end-to-end.
+
+## Two ways to build and manage a website
+
+**ChatGPT flow (planned integration):** ask to create a site or make changes in conversational language; ChatGPT proposes copy/design changes and hands a structured plan to Launch & Own. The customer sees the **exact prepared site**, authorizes their own GitHub/Cloudflare accounts through official consent, separately approves publication, and receives verified deployment status. The current private `elite-site-pipeline` ChatGPT plugin is **skills-only** without hosted MCP/API tools; this production integration is tracked in [Issue #43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43).
+
+**Standalone web flow (hosted browser beta):** visit **https://onboard.360web.cloud** to create a simple site manually, or—after [ZIP-import PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40) is integrated and deployed—upload an existing static website ZIP, privately preview it, and approve publication. No ChatGPT account or paid model is required for this path. Web onboarding UI improvements are tracked in [Issue #41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41).
+
+**Shared product, not separate silos:** both entry points will use the same tenant/site ownership, provider connections, exact site preview, durable jobs and production-verification pipeline. Read the [two-flow product architecture](docs/TWO_FLOW_PRODUCT_ARCHITECTURE.md) for the complete product contract and coordination.
 
 ## Customer experience we're building
 
@@ -21,6 +29,15 @@ Customers keep ownership of their GitHub repositories and Cloudflare resources. 
 
 Open [`docs/architecture.html`](docs/architecture.html) in a browser for an interactive diagram: step through a customer's journey from first visit to owning a live website, and see which part of the system (onboarding Worker, D1, GitHub, Cloudflare, customer-owned resources) handles each step. Update it when the flow changes.
 
+## Product and design handoff
+
+Launch & Own has a **ChatGPT-first conversational experience (planned)** and a **standalone web experience (hosted beta)** for manually building or importing websites. Both should lead from exact preview through separate publication approval to verifiable customer-controlled hosting.
+
+- [**Standalone web onboarding UI/UX brief**](docs/ONBOARDING_UIUX_HANDOFF.md) — mobile/desktop design direction for manual site creation, ZIP import and account screens ([Issue #41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41)).
+- [**Two-flow product architecture**](docs/TWO_FLOW_PRODUCT_ARCHITECTURE.md) — ChatGPT builder + standalone website sharing one owner, source, approval and publishing platform ([Issue #43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43)).
+- [**Suggested repository About profile**](.github/REPOSITORY_PROFILE.md) — public description, hosted beta URL, discoverability topics and social-preview guidance.
+- [**Nontechnical beta tester guide**](docs/BETA_TESTER_HANDOFF.md) — what customers actually see, what is approved and the current live-QA limits.
+
 ## Source layout
 
 | Path | Purpose |
@@ -32,7 +49,7 @@ Open [`docs/architecture.html`](docs/architecture.html) in a browser for an inte
 
 **This repository does not contain the reference customer's website or contact form.** It is a product-only extraction from the existing verified reference implementation; the original site's GitHub repository and Cloudflare Pages connection remain unchanged.
 
-## Use the hosted browser beta — no coding needed
+## Use standalone hosted browser onboarding — no coding needed
 
 Open **https://onboard.360web.cloud** with your own GitHub and Cloudflare accounts. Follow the [plain-language tester guide](docs/BETA_TESTER_HANDOFF.md) to review OAuth permissions, choose a provider account, preview one-page content and decide whether to approve resource creation. **Hosted consent and preview are available, but a successful first real launch is still being verified in #21.** The customer owns the resulting private GitHub and Cloudflare resources if provisioned.
 

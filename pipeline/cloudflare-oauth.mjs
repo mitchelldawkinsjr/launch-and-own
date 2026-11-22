@@ -80,7 +80,11 @@ export async function verifyCloudflareAccount({accessToken,accountId,fetchFn=fet
   const url=API+"/accounts/"+encodeURIComponent(accountId);
   const r=await fetchFn(url,{method:"GET",headers:{authorization:"Bearer "+accessToken,accept:"application/json"},redirect:"manual"});
   if(!r.ok){
-    if(strict)throw new ProviderRequestError(r);
+    if(strict){
+      const err=new ProviderRequestError(r);
+      err.code="cloudflare_http_"+r.status;
+      throw err;
+    }
     throw Error("Cannot access selected Cloudflare account (HTTP "+r.status+")");
   }
   const data=await r.json();

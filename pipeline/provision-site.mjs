@@ -33,7 +33,12 @@ function requestFactory({githubToken,cloudflareToken,fetchFn=fetch,strict=false}
     });
     if(allow404&&resp.status===404)return null;
     if(!resp.ok){
-      if(strict)throw new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
+      if(strict){
+        const err=new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
+        const need=github?resp.headers.get("x-accepted-github-permissions"):null;
+        err.code=service+"_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/;/g,"_or_").replace(/[^a-z0-9_]+/g,"_").replace(/^_|_$/g,"").slice(0,64)):"");
+        throw err;
+      }
       throw Error(service+" "+method+" "+path+" failed (HTTP "+resp.status+")");
     }
     let data;
