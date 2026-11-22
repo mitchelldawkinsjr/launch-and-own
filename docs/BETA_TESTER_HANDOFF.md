@@ -2,7 +2,7 @@
 
 **Describe it. Launch it. Own it.**
 
-**Who this is for:** a willing beta tester who wants to try making a basic one-page business website without writing code. This is a real hosted **beta**, not a production-tested customer launch or a public ChatGPT plugin.
+**Who this is for:** a willing beta tester who wants to make a one-page business website **or upload an existing static website ZIP** without deployment coding. This is a hosted **beta** with owner-account live testing, not independent external customer acceptance or a public ChatGPT connector.
 
 ## Start here: no Node.js, Git commands, or API keys
 
@@ -11,7 +11,7 @@ Open **https://onboard.360web.cloud** in a normal browser. Launch & Own's public
 Before starting, have:
 
 - Your own **GitHub account** and **Cloudflare account**. You remain the owner of the resulting private GitHub repository and Cloudflare Pages project if the launch succeeds.
-- A basic business name, headline, description, service list, and (optional) public contact email. A **one-page** site is supported by the hosted beta; bespoke AI design and contact forms are not.
+- For manual creation: a business name, headline, description, service list and optional public email. For **Upload a built website**: a static ZIP with a homepage (at most 6 MiB compressed, 8 MiB unpacked, 2 MiB/file, 128 files). Bespoke AI design and customer contact forms are not part of this beta.
 - A few minutes to review both providers' permission screens and your **exact website preview before approval**.
 
 No payment details, ChatGPT paid account, Node.js, Git installation, or pasted OAuth/API tokens are needed for this browser flow. Providers can have plan limits and charges for optional services; do not opt into paid features without checking the provider's terms.
@@ -26,6 +26,8 @@ No payment details, ChatGPT paid account, Node.js, Git installation, or pasted O
 6. Only when everything is correct, use the separate **Approve and create website** control. This authorizes the stated repository and Pages operations, not arbitrary subsequent edits. Do **not** approve merely to test whether sign-in works; use preview-only if you do not want resources created.
 7. If a launch is queued, pending or paused, use **Review** or **History** to check its state and reapprove the same pending launch where offered. Do not repeatedly approve new site names or authorize extra applications as a workaround.
 8. If the public website appears, treat it as **verified only after** the beta QA team confirms that the live Cloudflare Pages production deployment matches the exact approved GitHub commit and homepage SHA-256. A visible URL or HTTP 200 by itself is not proof.
+
+**For an existing static ZIP instead:** choose **Upload a built website** after account connection. Upload your trusted static ZIP, inspect its manifest, open the private ticket-protected exact preview, and approve only after checking the pages and ownership target. ZIP launches do not yet have the in-product one-page edit flow. If a larger upload fails, report the status and avoid repeated unapproved retries. Never paste private ZIP contents or provider tokens into a public issue.
 
 **Important:** Cloudflare's **Workers & Pages** GitHub App is *different* from the Launch & Own GitHub App. Cloudflare Pages may require you to install or grant that Cloudflare-owned GitHub App access to the **new private site repository** before its build can start. Review the provider screen and grant only the repository access you intend.
 
@@ -78,6 +80,7 @@ The exporter intentionally refuses to overwrite an existing folder. For details 
 
 - **Confirmed by Domain/OAuth:** GitHub App public, Cloudflare OAuth client public/verified, hosted domain with TLS, provider sign-in/account selection and session-based form actions.
 - **Not yet independently accepted:** real one-page customer repository creation, Cloudflare Pages deployment and exact approved public HTML verification. Follow [Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
-- **In development:** customer-facing post-launch edits and owner-approved PR flow ([draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31)); ZIP upload ([Codex workstream](https://github.com/mitchelldawkinsjr/launch-and-own/issues/12)); hosted multi-page editor.
+- **Live owner-tested browser beta:** static ZIP upload with private preview, separate approval, and matching public ZIP file digests ([#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896)); a near-limit upload used 95 ms Worker CPU, so confirm Cloudflare plan/quotas before promising large uploads fit the Free tier.
+- **In development:** customer-facing post-launch edits and approved PR flow ([draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31)); hosted multi-page *manual* editor.
 - **Not offered today:** a public ChatGPT plugin/store listing, automated contact forms, custom customer domains, or an assurance of permanently free usage. Each provider's own terms and quotas apply.
 - **License:** the repository is publicly visible but no reuse license has been selected. Public GitHub visibility does not alone grant reuse rights.
