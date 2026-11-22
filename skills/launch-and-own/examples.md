@@ -8,10 +8,10 @@ Fictional businesses only. Do not paste real customer content into public tracke
 
 **Agent should:**
 
-1. Draft plain-language copy (name, tagline, about, ≤6 services, optional email).
-2. Optionally emit a static `index.html` the customer can open locally.
-3. Say clearly: *This is a draft. Nothing is published yet.*
-4. Hand off: open `https://onboard.360web.cloud` → Connect GitHub → **Install** Launch & Own → Connect Cloudflare → enter/adapt the copy → Generate website preview → review exact page → **Approve and create website** only if they want resources created.
+1. Draft accessible copy and generate a **deployable static site directory** containing `index.html` and its referenced assets; preview and check it locally.
+2. **Package the generated site as a static ZIP**, preserving the exact HTML/assets. Exclude secrets and development dependencies; verify the limits in `reference.md`. If packaging is unavailable, give the customer the completed static directory and clear local-compression instructions rather than inventing an attachment.
+3. Say clearly: *These are prepared website files. Nothing is published yet.*
+4. Hand off: open `https://onboard.360web.cloud` → Connect GitHub → **Install** Launch & Own → Connect Cloudflare → **Upload a built website** → upload the ZIP → review the exact private preview and file manifest → **Approve and create website** only if the customer wants resources created. **Do not send this generated HTML to the manual form**; re-entering copy there would replace the site with a different design.
 5. Refuse to claim a live URL until the customer reports status `live` (or a future verified tool does).
 
 **Do not:** invent `esp-…pages.dev` URLs, commit SHAs, or “published successfully” messages.
