@@ -15,6 +15,7 @@ export async function revokeGitHubGrant({clientId,clientSecret,accessToken,fetch
       authorization:"Basic "+Buffer.from(clientId+":"+clientSecret).toString("base64"),
       accept:"application/vnd.github+json",
       "x-github-api-version":"2022-11-28",
+      "user-agent":"launch-and-own",
       "content-type":"application/json"
     },body:JSON.stringify({access_token:accessToken})
   });

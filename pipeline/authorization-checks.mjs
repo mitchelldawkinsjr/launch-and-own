@@ -12,7 +12,8 @@ export async function verifyProviderConnections(input,{githubAccessToken,cloudfl
   const resp=await fetchFn("https://api.github.com/user",{method:"GET",headers:{
     authorization:"Bearer "+githubAccessToken,
     accept:"application/vnd.github+json",
-    "x-github-api-version":"2022-11-28"
+    "x-github-api-version":"2022-11-28",
+    "user-agent":"launch-and-own"
   },redirect:"error"});
   const strict=expectedGitHubUserId!==undefined;
   if(!resp.ok){

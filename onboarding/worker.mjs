@@ -96,7 +96,7 @@ async function consumeFlow(env,{provider,binding,state}){
   return await unseal(env.TOKEN_ENCRYPTION_KEY,row.verifier_ct,'flow:'+key);
 }
 async function apiGet(url,token){
-  const resp=await fetch(url,{headers:{'authorization':'Bearer '+token,'accept':'application/json','x-github-api-version':'2022-11-28'},redirect:'error'});
+  const resp=await fetch(url,{headers:{'authorization':'Bearer '+token,'accept':'application/json','x-github-api-version':'2022-11-28','user-agent':'launch-and-own'},redirect:'error'});
   if(!resp.ok)throw Error('Provider identity verification failed');
   return await resp.json();
 }
