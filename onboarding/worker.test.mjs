@@ -629,3 +629,9 @@ test("AI provider failure never reveals provider error or stores an unapproved p
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM onboarding_launches").get().n,0);
  }finally{globalThis.fetch=originalFetch}
 });
+
+test('form pages use a referrer policy that keeps the same-origin Origin header on POSTs',async()=>{
+ // Browsers send `Origin: null` for form POSTs under no-referrer, which assertCsrf rejects.
+ const h=harness();const res=await h.request('/');
+ assert.equal(res.headers.get('referrer-policy'),'same-origin');
+});

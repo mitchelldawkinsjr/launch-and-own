@@ -17,14 +17,15 @@ const COOKIE_LOGIN='__Host-esp_login';
 const textHeaders={
   'content-type':'text/html; charset=utf-8','cache-control':'no-store',
   'x-frame-options':'DENY','x-content-type-options':'nosniff',
-  'referrer-policy':'no-referrer',
+  // same-origin, not no-referrer: under no-referrer Chrome sends `Origin: null` on form POSTs, failing assertCsrf.
+  'referrer-policy':'same-origin',
   'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 };
 const now=()=>Math.floor(Date.now()/1000);
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cookie=(name,value,maxAge)=>`${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 const redirect=(path,setCookie)=>{
-  const headers=new Headers({'location':path,'cache-control':'no-store','referrer-policy':'no-referrer'});
+  const headers=new Headers({'location':path,'cache-control':'no-store','referrer-policy':'same-origin'});
   if(setCookie)headers.append('set-cookie',setCookie);
   return new Response(null,{status:303,headers});
 };
