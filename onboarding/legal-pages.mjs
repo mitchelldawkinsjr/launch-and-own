@@ -10,7 +10,7 @@ export const privacyHtml=`<p class="muted">Beta policy · Last updated ${LEGAL_U
 <li><strong>Provider authorizations:</strong> the access and refresh tokens GitHub and Cloudflare issue when you approve Launch &amp; Own. They are encrypted (AES-GCM) before storage and are never shown to you, other users, or logs.</li>
 <li><strong>Cloudflare account choice:</strong> the ID of the Cloudflare account you select.</li>
 <li><strong>Website content you enter:</strong> business name, headline, description, services, optional contact email and theme, plus the plan you approve.</li>
-<li><strong>Website uploads:</strong> the static pages and assets from a ZIP you upload, along with the file list and integrity hashes used to preview and launch your site.</li>
+<li><strong>Website uploads</strong> include the static pages and assets from your ZIP and the file list and integrity hashes used to preview and launch your site.</li>
 <li><strong>Operational logs:</strong> request errors without tokens, cookies, authorization codes or form contents.</li>
 </ul></section>
 <section><h2>How we use it</h2><p>Only to show your preview, create the private repository and Cloudflare Pages project you approve, open a pull request in that repository for website updates you approve (never merged for you), verify the deployment, and resume an approved launch that was interrupted. We do not sell your data, use it for advertising, or access your accounts for anything you did not approve.</p>
@@ -20,7 +20,7 @@ export const privacyHtml=`<p class="muted">Beta policy · Last updated ${LEGAL_U
 <li>Sign-in attempts: deleted after 10 minutes.</li>
 <li>Sessions and their encrypted tokens: deleted when they expire (about 1 hour) or when you sign out.</li>
 <li>Approved launch history: kept for 30 days, and you can delete entries sooner. Launch history does not contain your tokens.</li>
-<li>Website uploads: draft files are scheduled for deletion after one day. Files retained for an approved launch are scheduled for deletion after 32 days. Your copies in GitHub and Cloudflare stay in your accounts.</li>
+<li>Draft uploads are scheduled for deletion after one day. Files retained for an approved launch are scheduled for deletion after 32 days. Your copies in GitHub and Cloudflare stay in your accounts.</li>
 </ul></section>
 <section><h2>Your control</h2><p><strong>Disconnect and sign out</strong> deletes your session and asks GitHub and Cloudflare to revoke Launch &amp; Own's access. You can also revoke access at any time in your GitHub and Cloudflare settings. The repositories and websites created for you stay in your accounts, and you own them.</p></section>
 <section><h2>Third parties</h2><p>We rely on GitHub and Cloudflare, which process data under their own privacy policies, and on the AI provider only if you use AI drafting.</p></section>
