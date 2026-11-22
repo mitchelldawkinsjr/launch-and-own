@@ -139,21 +139,45 @@ test('linking challenge rejects mismatched owner, expired or consumed challenges
     expiresAt: 500, consumedAt: null
   };
   const verified = {githubUserId: 123, cloudflareAccountId: account};
-  assert.equal(assertLinkChallenge(challenge, verified, principal(), clock).githubUserId, 123);
-  // First-time linking has no preexisting provider IDs. Browser must verify
-  // both providers and then atomically consume the owner+client challenge.
-  assert.equal(assertLinkChallenge({...challenge,
+  const linked = principal();
+  assert.equal(assertLinkChallenge(challenge, verified, linked, clock).githubUserId, 123);
+
+  // Genuine first-time link: unlinked principal + null pins + browser-verified IDs.
+  const unlinked = principal({linkedOwner: null});
+  assert.equal(assertLinkChallenge({
+    ...challenge,
     expectedGithubUserId: null, expectedCloudflareAccountId: null
-  }, verified, principal(), clock).cloudflareAccountId, account);
+  }, verified, unlinked, clock).cloudflareAccountId, account);
+
+  // Linked owner must not reconnect with null/missing identity pins.
+  fails('invalid_link_challenge', () => assertLinkChallenge({
+    ...challenge, expectedGithubUserId: null, expectedCloudflareAccountId: null
+  }, verified, linked, clock));
+  fails('invalid_link_challenge', () => assertLinkChallenge({
+    ...challenge, expectedGithubUserId: null
+  }, verified, linked, clock));
+  fails('invalid_link_challenge', () => assertLinkChallenge({
+    ...challenge, expectedCloudflareAccountId: null
+  }, verified, linked, clock));
+
+  // Linked owner + altered verified provider fails closed.
+  fails('invalid_link_challenge', () => assertLinkChallenge(challenge, {
+    ...verified, githubUserId: 999
+  }, linked, clock));
+  fails('invalid_link_challenge', () => assertLinkChallenge(challenge, {
+    ...verified, cloudflareAccountId: otherAccount
+  }, linked, clock));
+
+  // Mismatched expected pins vs linked owner fail closed.
   for (const change of [
     {subject: 'other_user'}, {clientId: 'other_client_1'},
     {expiresAt: 119}, {consumedAt: 118},
     {expectedGithubUserId: 222}, {expectedCloudflareAccountId: otherAccount}
   ]) fails('invalid_link_challenge', () =>
-    assertLinkChallenge({...challenge, ...change}, verified, principal(), clock));
-  fails('invalid_link_challenge', () => assertLinkChallenge(challenge, {
-    ...verified, githubUserId: 999
-  }, principal(), clock));
+    assertLinkChallenge({...challenge, ...change}, verified, linked, clock));
+
+  // Unlinked first-time challenges must use null pins, not forged expected IDs.
+  fails('invalid_link_challenge', () => assertLinkChallenge(challenge, verified, unlinked, clock));
 });
 
 test('exact-approval draft rejects expired, swapped digest, changed repo and stale base', () => {

@@ -205,17 +205,36 @@ export function assertLinkChallenge(challenge, verifiedIdentity, principal, {now
       !nullable(challenge.consumedAt) ||
       !Number.isSafeInteger(verifiedIdentity.githubUserId) ||
       verifiedIdentity.githubUserId < 1 ||
-      !ACCOUNT_ID.test(String(verifiedIdentity.cloudflareAccountId)) ||
-      (!nullable(challenge.expectedGithubUserId) &&
-       verifiedIdentity.githubUserId !== challenge.expectedGithubUserId) ||
-      (!nullable(challenge.expectedCloudflareAccountId) &&
-       String(verifiedIdentity.cloudflareAccountId).toLowerCase() !==
-         String(challenge.expectedCloudflareAccountId).toLowerCase()))
+      !ACCOUNT_ID.test(String(verifiedIdentity.cloudflareAccountId)))
     deny('invalid_link_challenge');
+
+  const verifiedGithub = verifiedIdentity.githubUserId;
+  const verifiedCf = String(verifiedIdentity.cloudflareAccountId).toLowerCase();
+  const expectedGithub = challenge.expectedGithubUserId;
+  const expectedCf = challenge.expectedCloudflareAccountId;
+
+  if (scope.owner) {
+    // Reconnection: pins must be present and equal the already-linked owner.
+    // Null/missing pins must not allow a different GitHub/Cloudflare identity.
+    if (!Number.isSafeInteger(expectedGithub) || expectedGithub < 1 ||
+        !ACCOUNT_ID.test(String(expectedCf)) ||
+        expectedGithub !== scope.owner.githubUserId ||
+        String(expectedCf).toLowerCase() !== scope.owner.cloudflareAccountId ||
+        verifiedGithub !== scope.owner.githubUserId ||
+        verifiedCf !== scope.owner.cloudflareAccountId)
+      deny('invalid_link_challenge');
+  } else {
+    // First-time link: no prior provider pin; browser-verified identities bind.
+    // Explicit null pins are required so a stale reconnect challenge cannot
+    // silently become a first-time bind for an unlinked subject.
+    if (!(nullable(expectedGithub) && nullable(expectedCf)))
+      deny('invalid_link_challenge');
+  }
+
   return Object.freeze({
     subject: scope.subject,
-    githubUserId: verifiedIdentity.githubUserId,
-    cloudflareAccountId: String(verifiedIdentity.cloudflareAccountId).toLowerCase()
+    githubUserId: verifiedGithub,
+    cloudflareAccountId: verifiedCf
   });
 }
 
