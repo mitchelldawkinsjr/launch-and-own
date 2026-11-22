@@ -53,10 +53,18 @@ In-repo pieces (still **not** a production MCP server or ChatGPT connector):
 | Module | Role |
 | --- | --- |
 | [`integration/protected-resource.mjs`](../integration/protected-resource.mjs) | Provisional protected-resource metadata (`RESOURCE_URI`, audience markers) |
-| [`integration/owner-link-store.mjs`](../integration/owner-link-store.mjs) | One-time link challenges + owner bind (memory adapter for tests) |
-| [`integration/bridge-transport.mjs`](../integration/bridge-transport.mjs) | Opaque bearer → server principal, `get_connection_status` / `start_connect_accounts`, browser `link/complete` |
+| [`integration/owner-link-store.mjs`](../integration/owner-link-store.mjs) | One-time link challenges + owner bind, with current-link and authorization-epoch fencing (memory adapter for tests only) |
+| [`integration/bridge-transport.mjs`](../integration/bridge-transport.mjs) | Opaque bearer → server principal, `get_connection_status` / `start_connect_accounts`; **no HTTP link-completion route** |
 
-HTTP-shaped negative coverage lives in `integration/bridge-transport.test.mjs` (wrong/expired bearer, injected owner fields, challenge replay, cross-client consume, reconnect pin mismatch). Site inventory, drafts, approval, and job verification remain **not implemented** at the transport (501).
+HTTP-shaped negative coverage lives in `integration/bridge-transport.test.mjs` (wrong/expired bearer, injected owner fields, forged `verified` provider claims, challenge replay, stale first-time challenges, concurrent reconnect epoch races). The happy-path owner bind is a **direct in-memory test harness stand-in for a separately authenticated browser callback**; it is not a callable API. Site inventory, drafts, approval, and job verification remain **not implemented** at the transport (501).
+
+## Critical trust boundary: completing owner linking
+
+`POST /mcp/link/complete` was **removed** from the agent-bearer HTTP dispatcher because it accepted a caller-provided `verified` provider-identity object. A valid agent access token proves only the **agent identity**, not that GitHub and Cloudflare OAuth actually verified the stated provider accounts. This mock route would allow an agent client to bind an arbitrary provider identity if deployed. Unknown routes now return 404 without consuming a challenge or changing a link.
+
+A later production callback must be a **distinct browser-authenticated, CSRF/nonce-checked server route**, not an MCP tool or generic bearer completion endpoint. It must derive GitHub user ID and the selected Cloudflare account ID from fresh, provider-verified OAuth sessions held on the server; never from a request-body `verified` map, agent arguments or provider tokens pasted into chat. A secure challenge flow must bind the browser's authenticated customer to the agent subject/client and atomically consume a one-time challenge in D1. The current generic onboarding URL is not enough to complete that binding and must not be advertised as an already-operational connected client.
+
+The in-memory store also rechecks the **current linked identity and authorization epoch at challenge consumption**, rather than trusting only the snapshot at challenge creation: two outstanding first-link challenges cannot allow the later one to switch providers, and two reconnect challenges cannot allow the second to replay after the first advances the epoch. A real D1 adapter must make these compare-and-swap checks and challenge consumption **transactionally atomic**, including across parallel Workers. The Node tests simulate trusted OAuth results without making any real provider calls; they are not user acceptance or evidence of secure hosted linking.
 
 ## Next implementation slice for #43
 
