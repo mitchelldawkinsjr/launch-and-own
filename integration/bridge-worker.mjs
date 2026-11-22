@@ -6,6 +6,7 @@
  * not edit onboarding/worker.mjs and performs no provider I/O.
  */
 import {handleBridgeRequest, createBridgeHost} from './bridge-transport.mjs';
+import {createHostFromEnv} from './create-host-from-env.mjs';
 import {RESOURCE_METADATA_PATH} from './protected-resource.mjs';
 
 const securityHeaders = Object.freeze({
@@ -47,7 +48,7 @@ export function createBridgeFetch(host) {
         body: {error: 'invalid_arguments'}
       });
     const headers = Object.fromEntries(request.headers.entries());
-    return toResponse(handleBridgeRequest(host, {
+    return toResponse(await handleBridgeRequest(host, {
       method: request.method,
       url: request.url,
       headers,
@@ -58,8 +59,7 @@ export function createBridgeFetch(host) {
 
 /**
  * Worker entry. Refuses traffic unless BRIDGE_DEPLOYMENT=approved.
- * Even then, without D1 adapters this host is ephemeral memory only —
- * unsuitable for multi-isolate production until Domain wires persistence.
+ * Approved hosts use D1 for links/sites/drafts/jobs via createHostFromEnv.
  */
 export default {
   async fetch(request, env) {
@@ -72,10 +72,17 @@ export default {
         headers: {...securityHeaders, 'content-type': 'application/json'}
       });
     }
-    // Test harness may inject a host; production must replace with D1 stores.
-    const host = env.__bridgeHost || createBridgeHost({
-      nowSeconds: () => Math.floor(Date.now() / 1000)
-    });
+    // Test harness may inject a host. Approved production uses D1 + ticket key.
+    let host = env.__bridgeHost;
+    if (!host) {
+      try {
+        host = createHostFromEnv(env);
+      } catch {
+        host = createBridgeHost({
+          nowSeconds: () => Math.floor(Date.now() / 1000)
+        });
+      }
+    }
     return createBridgeFetch(host)(request);
   }
 };

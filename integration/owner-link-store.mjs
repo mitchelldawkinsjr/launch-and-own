@@ -23,7 +23,7 @@ export class MemoryOwnerLinkStore {
     return subject + '\0' + clientId;
   }
 
-  getLink(subject, clientId) {
+  async getLink(subject, clientId) {
     return this.#links.get(this.linkKey(subject, clientId)) || null;
   }
 
@@ -32,12 +32,12 @@ export class MemoryOwnerLinkStore {
    * First-time: expected provider IDs are null.
    * Reconnect: expected IDs must match the stored linked owner.
    */
-  createLinkChallenge({subject, clientId, nowSeconds, ttlSeconds = 600}) {
+  async createLinkChallenge({subject, clientId, nowSeconds, ttlSeconds = 600}) {
     if (typeof subject !== 'string' || typeof clientId !== 'string' ||
         !Number.isSafeInteger(nowSeconds) || nowSeconds < 0 ||
         !Number.isSafeInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 3600)
       deny('invalid_link_challenge');
-    const existing = this.getLink(subject, clientId);
+    const existing = await this.getLink(subject, clientId);
     const challenge = Object.freeze({
       id: newId('link'),
       subject,
@@ -53,7 +53,7 @@ export class MemoryOwnerLinkStore {
     return Object.freeze({...challenge});
   }
 
-  peekChallenge(id) {
+  async peekChallenge(id) {
     const row = this.#challenges.get(id);
     return row ? Object.freeze({...row}) : null;
   }
@@ -62,7 +62,7 @@ export class MemoryOwnerLinkStore {
    * Atomically consume a challenge after browser OAuth verified both providers.
    * Uses assertLinkChallenge so reconnect pins stay fail-closed.
    */
-  consumeLinkChallenge({
+  async consumeLinkChallenge({
     challengeId, verifiedIdentity, principal, nowSeconds
   }) {
     const scope = assertTrustedPrincipal(principal, {nowSeconds});
@@ -71,7 +71,7 @@ export class MemoryOwnerLinkStore {
     // Read the CURRENT link, not only the snapshot when challenge was issued.
     // A first-link challenge must not be replayed after another challenge
     // established a link; reconnect challenges are pinned to one epoch.
-    const prev = this.getLink(scope.subject, principal.clientId);
+    const prev = await this.getLink(scope.subject, principal.clientId);
     if (prev) {
       if (!scope.owner ||
           row.expectedGithubUserId !== prev.githubUserId ||
@@ -106,8 +106,8 @@ export class MemoryOwnerLinkStore {
   }
 }
 
-export function linkedOwnerFromStore(store, subject, clientId) {
-  const link = store.getLink(subject, clientId);
+export async function linkedOwnerFromStore(store, subject, clientId) {
+  const link = await store.getLink(subject, clientId);
   if (!link) return null;
   if (!Number.isSafeInteger(link.githubUserId) || link.githubUserId < 1 ||
       !ACCOUNT_ID.test(String(link.cloudflareAccountId)) ||

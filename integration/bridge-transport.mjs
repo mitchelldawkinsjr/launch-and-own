@@ -19,6 +19,7 @@ import {
 } from './protected-resource.mjs';
 import {MemorySiteDraftStore} from './site-draft-store.mjs';
 import {MemoryJobPublicationStore} from './job-publication-store.mjs';
+import {openBrowserLinkTicket} from './browser-link-ticket.mjs';
 import {randomBytes} from 'node:crypto';
 
 const deny = code => { throw new BridgeContractError(code); };
@@ -61,11 +62,13 @@ export function createBridgeHost({
   resourceUri = RESOURCE_URI,
   // Trusted provider facts for update fences — supplied by host, never by model.
   currentCommitSha = null,
-  currentRepositoryId = null
+  currentRepositoryId = null,
+  // 64-hex key shared with onboarding for sealed browser link tickets.
+  bridgeTicketKey = null
 } = {}) {
   return {
     tokens, links, sites, jobs, nowSeconds, resourceUri,
-    currentCommitSha, currentRepositoryId
+    currentCommitSha, currentRepositoryId, bridgeTicketKey
   };
 }
 
@@ -75,11 +78,11 @@ function bearerFromAuthorization(header) {
   return match ? match[1] : null;
 }
 
-function principalFromToken(host, token) {
+async function principalFromToken(host, token) {
   const now = host.nowSeconds();
-  const session = host.tokens.lookup(token, {nowSeconds: now});
+  const session = await Promise.resolve(host.tokens.lookup(token, {nowSeconds: now}));
   if (!session) deny('unauthenticated');
-  const linkedOwner = linkedOwnerFromStore(host.links, session.subject, session.clientId);
+  const linkedOwner = await linkedOwnerFromStore(host.links, session.subject, session.clientId);
   return {
     authenticated: true,
     audience: BRIDGE_AUDIENCE,
@@ -115,11 +118,11 @@ function jsonOk(body, status = 200) {
  * Supported routes:
  *   GET  /.well-known/oauth-protected-resource
  *   POST /mcp/tools/call   { name, arguments }  + Authorization: Bearer …
- * Link completion is deliberately NOT an HTTP route: agent bearers cannot
- * attest GitHub/Cloudflare OAuth verification. A future dedicated browser
- * callback must derive both provider identities from a trusted OAuth session.
+ *   POST /mcp/link/browser { ticket } + Bearer … — sealed onboarding ticket only
+ *
+ * Agent-supplied `verified` provider maps are never accepted.
  */
-export function handleBridgeRequest(host, request) {
+export async function handleBridgeRequest(host, request) {
   const method = String(request.method || 'GET').toUpperCase();
   // Resolve against the browser origin, not RESOURCE_URI (/mcp), so paths like
   // /mcp/tools/call do not double the resource suffix.
@@ -131,7 +134,9 @@ export function handleBridgeRequest(host, request) {
 
   try {
     if (method === 'POST' && path === '/mcp/tools/call')
-      return dispatchToolCall(host, request);
+      return await dispatchToolCall(host, request);
+    if (method === 'POST' && path === '/mcp/link/browser')
+      return await completeBrowserLink(host, request);
   } catch (error) {
     if (error instanceof BridgeContractError) {
       const status = error.code === 'unauthenticated' ? 401 :
@@ -155,10 +160,10 @@ function readJsonBody(request) {
   deny('invalid_arguments');
 }
 
-function dispatchToolCall(host, request) {
+async function dispatchToolCall(host, request) {
   const token = bearerFromAuthorization(request.headers?.authorization);
   if (!token) deny('unauthenticated');
-  const principal = principalFromToken(host, token);
+  const principal = await principalFromToken(host, token);
   const now = host.nowSeconds();
   const payload = readJsonBody(request);
   const name = payload.name;
@@ -191,7 +196,7 @@ function dispatchToolCall(host, request) {
   }
 
   if (call.name === 'start_connect_accounts') {
-    const challenge = host.links.createLinkChallenge({
+    const challenge = await host.links.createLinkChallenge({
       subject: principal.subject,
       clientId: principal.clientId,
       nowSeconds: now
@@ -207,20 +212,20 @@ function dispatchToolCall(host, request) {
   }
 
   if (call.name === 'list_sites')
-    return jsonOk({sites: host.sites.listSites(call.scope)});
+    return jsonOk({sites: await host.sites.listSites(call.scope)});
 
   if (call.name === 'get_site')
-    return jsonOk(host.sites.getSite(call.scope, call.arguments.site_id));
+    return jsonOk(await host.sites.getSite(call.scope, call.arguments.site_id));
 
   if (call.name === 'prepare_site')
-    return jsonOk(host.sites.prepareSite(call.scope, call.arguments.site_spec, {
+    return jsonOk(await host.sites.prepareSite(call.scope, call.arguments.site_spec, {
       nowSeconds: now
     }));
 
   if (call.name === 'prepare_site_update') {
     if (!host.currentCommitSha || !host.currentRepositoryId)
       return jsonError('not_implemented', 501);
-    return jsonOk(host.sites.prepareSiteUpdate(call.scope, {
+    return jsonOk(await host.sites.prepareSiteUpdate(call.scope, {
       siteId: call.arguments.site_id,
       baseCommitSha: call.arguments.base_commit_sha,
       changes: call.arguments.changes
@@ -232,23 +237,56 @@ function dispatchToolCall(host, request) {
   }
 
   if (call.name === 'get_exact_preview')
-    return jsonOk(host.sites.getExactPreview(call.scope, call.arguments.draft_id, {
+    return jsonOk(await host.sites.getExactPreview(call.scope, call.arguments.draft_id, {
       nowSeconds: now
     }));
 
   if (call.name === 'request_explicit_approval')
-    return jsonOk(host.sites.requestApproval(call.scope, {
+    return jsonOk(await host.sites.requestApproval(call.scope, {
       draftId: call.arguments.draft_id,
       previewSha256: call.arguments.preview_sha256,
       idempotencyKey: call.arguments.idempotency_key
     }, {nowSeconds: now}));
 
   if (call.name === 'get_job_status')
-    return jsonOk(host.jobs.getJob(call.scope, call.arguments.job_id));
+    return jsonOk(await host.jobs.getJob(call.scope, call.arguments.job_id));
 
   if (call.name === 'verify_publication')
-    return jsonOk(host.jobs.verifyPublication(call.scope, call.arguments.job_id));
+    return jsonOk(await host.jobs.verifyPublication(call.scope, call.arguments.job_id));
 
   return jsonError('not_implemented', 501);
+}
+
+/**
+ * Consume a sealed browser link ticket minted by onboarding after real OAuth.
+ * Rejects raw `verified` maps (agent forgery surface removed in #71).
+ */
+async function completeBrowserLink(host, request) {
+  const token = bearerFromAuthorization(request.headers?.authorization);
+  if (!token) deny('unauthenticated');
+  if (!host.bridgeTicketKey) deny('not_found');
+  const principal = await principalFromToken(host, token);
+  const now = host.nowSeconds();
+  const payload = readJsonBody(request);
+  if (typeof payload.ticket !== 'string' || payload.verified !== undefined)
+    deny('invalid_link_challenge');
+  const opened = await openBrowserLinkTicket(host.bridgeTicketKey, payload.ticket, {
+    nowSeconds: now
+  });
+  const record = await host.links.consumeLinkChallenge({
+    challengeId: opened.challengeId,
+    verifiedIdentity: {
+      githubUserId: opened.githubUserId,
+      cloudflareAccountId: opened.cloudflareAccountId
+    },
+    principal,
+    nowSeconds: now
+  });
+  return jsonOk({
+    linked: true,
+    github_user_id: record.githubUserId,
+    cloudflare_account_id: record.cloudflareAccountId,
+    authorization_epoch: record.authorizationEpoch
+  });
 }
 

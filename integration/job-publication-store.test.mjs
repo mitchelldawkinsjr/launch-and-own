@@ -18,7 +18,7 @@ const otherDigest = 'd'.repeat(64);
 let now = 1_700_000_000;
 const ORIGIN = 'https://onboard.360web.cloud';
 
-function linkedHost() {
+async function linkedHost() {
   const h = createBridgeHost({
     tokens: new MemoryAgentTokenStore(),
     links: new MemoryOwnerLinkStore(),
@@ -29,13 +29,13 @@ function linkedHost() {
   const token = h.tokens.issue({
     subject: 'owner_user_1234', clientId: 'chatgpt_client_1', nowSeconds: now
   });
-  const start = handleBridgeRequest(h, {
+  const start = await handleBridgeRequest(h, {
     method: 'POST', url: ORIGIN + '/mcp/tools/call',
     headers: {authorization: 'Bearer ' + token},
     body: {name: 'start_connect_accounts', arguments: {}}
   });
   const session = h.tokens.lookup(token, {nowSeconds: now});
-  h.links.consumeLinkChallenge({
+  await h.links.consumeLinkChallenge({
     challengeId: start.body.challenge_id,
     verifiedIdentity: {githubUserId: 123, cloudflareAccountId: account},
     principal: {
@@ -57,23 +57,23 @@ function linkedHost() {
   return {h, token, scope};
 }
 
-function call(h, token, name, args = {}) {
-  return handleBridgeRequest(h, {
+async function call(h, token, name, args = {}) {
+  return await handleBridgeRequest(h, {
     method: 'POST', url: ORIGIN + '/mcp/tools/call',
     headers: {authorization: 'Bearer ' + token},
     body: {name, arguments: args}
   });
 }
 
-test('queued jobs stay truthful; live requires trusted commit and HTML proof', () => {
-  const {h, token, scope} = linkedHost();
+test('queued jobs stay truthful; live requires trusted commit and HTML proof', async () => {
+  const {h, token, scope} = await linkedHost();
   const job = h.jobs.seedJob(scope, {status: 'queued', approvedHtmlSha256: digest});
-  const queued = call(h, token, 'get_job_status', {job_id: job.id});
+  const queued = await call(h, token, 'get_job_status', {job_id: job.id});
   assert.deepEqual(queued.body, {job_id: job.id, state: 'queued'});
 
   // Claiming live without verification facts still projects pending_deployment.
   h.jobs.setStatus(scope, job.id, 'live');
-  assert.deepEqual(call(h, token, 'verify_publication', {job_id: job.id}).body, {
+  assert.deepEqual((await call(h, token, 'verify_publication', {job_id: job.id})).body, {
     job_id: job.id, state: 'pending_deployment'
   });
 
@@ -82,14 +82,14 @@ test('queued jobs stay truthful; live requires trusted commit and HTML proof', (
     publicHtmlSha256: digest,
     markLive: true
   });
-  assert.deepEqual(call(h, token, 'verify_publication', {job_id: job.id}).body, {
+  assert.deepEqual((await call(h, token, 'verify_publication', {job_id: job.id})).body, {
     job_id: job.id, state: 'live',
     production_commit_sha: sha, public_html_sha256: digest
   });
 });
 
-test('verify_publication never accepts mismatched HTML digests as live', () => {
-  const {h, scope} = linkedHost();
+test('verify_publication never accepts mismatched HTML digests as live', async () => {
+  const {h, scope} = await linkedHost();
   const job = h.jobs.seedJob(scope, {status: 'pending_deployment', approvedHtmlSha256: digest});
   assert.throws(() => h.jobs.attachTrustedVerification(scope, job.id, {
     productionCommitSha: sha,
@@ -97,13 +97,13 @@ test('verify_publication never accepts mismatched HTML digests as live', () => {
   }), err => err instanceof BridgeContractError && err.code === 'invalid_publication_status');
 });
 
-test('job IDs are tenant-fenced and projections omit secrets', () => {
-  const {h, token, scope} = linkedHost();
+test('job IDs are tenant-fenced and projections omit secrets', async () => {
+  const {h, token, scope} = await linkedHost();
   const job = h.jobs.seedJob(scope, {status: 'failed', approvedHtmlSha256: digest});
   const verified = h.jobs.attachTrustedVerification(scope, job.id, {
     productionCommitSha: sha, publicHtmlSha256: digest, markLive: true
   });
-  const live = call(h, token, 'get_job_status', {job_id: verified.id});
+  const live = await call(h, token, 'get_job_status', {job_id: verified.id});
   assert.equal(live.body.state, 'live');
   assert.deepEqual(Object.keys(live.body).sort(), [
     'job_id', 'production_commit_sha', 'public_html_sha256', 'state'
@@ -120,6 +120,6 @@ test('job IDs are tenant-fenced and projections omit secrets', () => {
   }, {nowSeconds: now});
   assert.throws(() => h.jobs.getJob(foreign, job.id),
     err => err instanceof BridgeContractError && err.code === 'not_found');
-  assert.equal(call(h, token, 'get_job_status', {job_id: 'job_guessed'}).body.error,
+  assert.equal((await call(h, token, 'get_job_status', {job_id: 'job_guessed'})).body.error,
     'not_found');
 });
