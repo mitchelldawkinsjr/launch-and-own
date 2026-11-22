@@ -68,8 +68,8 @@ test('ZIP limits in reference stay aligned with website-zip.mjs', () => {
   assert.match(reference, /index\.html/);
 });
 
-test('today vs future matrix marks MCP publish and ZIP production carefully', () => {
-  assert.match(skill, /Hosted ZIP upload on production Worker[\s\S]*\*\*Future \/ gated\*\*/);
+test('hosted ZIP browser beta is supported while MCP publish remains future', () => {
+  assert.match(skill, /Hosted static ZIP upload[\s\S]*\*\*Available \(browser beta; owner-tested\)\*\*/);
   assert.match(skill, /Agent MCP tools:[\s\S]*\*\*Future\*\*/);
   assert.match(skill, /Browser onboarding[\s\S]*\*\*Available\*\*/);
   assert.match(packaging, /elite-site-pipeline[\s\S]*\*\*not\*\* a production tool-backed publisher/i);
@@ -85,4 +85,13 @@ test('examples cover the four required scenarios', () => {
 test('packaging points at this canonical path without inventing store listings', () => {
   assert.match(packaging, /skills\/launch-and-own/);
   assert.match(packaging, /stub manifest is intentionally \*\*not\*\* published/i);
+});
+
+test('ZIP examples and reference reflect owner-tested beta without chat-side publish', () => {
+  assert.match(examples, /hosted browser beta/i);
+  assert.match(reference, /five public file digests matching the uploaded ZIP/i);
+  assert.match(skill, /private ticket-protected exact preview/i);
+  assert.match(reference, /95 ms Worker CPU/i);
+  assert.doesNotMatch(all, /ZIP release is gated|Future \/ gated|hosted production ZIP.*remains gated/i);
+  assert.match(skill, /Chat instructions alone authorize \*\*prepare\*\* only/);
 });
