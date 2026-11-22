@@ -28,15 +28,16 @@
     },
     "browser_zip": {
       "label": "Browser: static ZIP upload",
-      "implementation": "merged",
-      "access": "not_available",
-      "verification": "ci_only",
+      "implementation": "deployed",
+      "access": "hosted_beta",
+      "verification": "owner_live",
       "evidence": [
-        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/40",
-        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/45"
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087096052"
       ],
       "blockers": [
-        "Explicit R2 account activation, private bucket, preview Worker, TLS and owner-consented ZIP QA (#45)"
+        "Independent consenting customer acceptance and post-launch update acceptance remain pending (#21/#45)",
+        "Near-limit 5.19 MiB upload used 95 ms Worker CPU; confirm Workers plan and quotas before claiming free large-ZIP capacity (#45)"
       ]
     },
     "site_updates": {
