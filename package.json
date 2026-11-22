@@ -3,7 +3,7 @@
   "version": "0.1.0-beta",
   "private": true,
   "type": "module",
-  "description": "Customer-owned conversational website launch and maintenance pipeline",
+  "description": "Browser-first website onboarding for customer-owned GitHub and Cloudflare Pages sites (beta)",
   "engines": {
     "node": ">=22.5.0"
   },
