@@ -36,14 +36,20 @@ function linkedHost(extra = {}) {
     headers: {authorization: 'Bearer ' + token},
     body: {name: 'start_connect_accounts', arguments: {}}
   });
-  handleBridgeRequest(h, {
-    method: 'POST', url: ORIGIN + '/mcp/link/complete',
-    headers: {authorization: 'Bearer ' + token},
-    body: {
-      challenge_id: start.body.challenge_id,
-      verified: {githubUserId: 123, cloudflareAccountId: account}
-    }
+  // Test-only simulation of a separately provider-verified browser OAuth
+  // callback. HTTP agent bearers must NEVER be able to assert provider IDs.
+  const session = h.tokens.lookup(token, {nowSeconds: now});
+  const linked = h.links.consumeLinkChallenge({
+    challengeId: start.body.challenge_id,
+    verifiedIdentity: {githubUserId: 123, cloudflareAccountId: account},
+    principal: {
+      authenticated: true, audience: BRIDGE_AUDIENCE,
+      subject: session.subject, clientId: session.clientId,
+      expiresAt: session.expiresAt, linkedOwner: null
+    },
+    nowSeconds: now
   });
+  assert.equal(linked.authorizationEpoch, 0);
   return {h, token};
 }
 
