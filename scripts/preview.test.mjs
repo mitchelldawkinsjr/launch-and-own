@@ -48,7 +48,8 @@ test("export writes new directory with exact pages, manifest and no remote provi
   const manifest=JSON.parse(await readFile(join(output,"preview-manifest.json"),"utf8"));
   assert.equal(manifest.approvedBundleSha256,await siteBundleApprovalSha256(site));
   assert.equal(manifest.pageCount,4);
-  await assert.rejects(writeLocalPreview({site,outputDir:output}),/EEXIST/);
+  await assert.rejects(writeLocalPreview({site,outputDir:output}),
+    /Output directory already exists/);
   assert.equal((await readFile(join(output,"index.html"),"utf8")),
     renderSiteBundle(site).pages[0].html);
  }finally{await rm(root,{recursive:true,force:true})}
@@ -119,7 +120,8 @@ test("local CLI parses an example JSON file without a cloud credential or networ
   await cli(["--input",sample,"--out",output]);
   const index=await readFile(join(output,"index.html"),"utf8");
   assert.match(index,/Moments worth keeping/);
-  await assert.rejects(cli(["--input",sample,"--out",output]),/EEXIST/);
+  await assert.rejects(cli(["--input",sample,"--out",output]),
+    /Output directory already exists/);
   await assert.rejects(cli(["--input",sample]),/--out are required/);
  }finally{await rm(root,{recursive:true,force:true})}
 });

@@ -30,18 +30,18 @@ Customers keep ownership of their GitHub repositories and Cloudflare resources. 
 
 ## Try a website locally without cloud accounts
 
-You can inspect a genuine four-page website **before OAuth onboarding is live**. The zero-dependency [offline preview exporter](docs/OFFLINE_BETA_PREVIEW.md) builds the same HTML used by the production provisioner without GitHub/Cloudflare credentials, AI inference or publishing anything.
+**Private-beta entry point today:** there is no public ChatGPT plugin yet. Invited testers use the zero-account [beta tester handoff](docs/BETA_TESTER_HANDOFF.md). The [offline preview exporter](docs/OFFLINE_BETA_PREVIEW.md) builds the same HTML used by the production provisioner without GitHub/Cloudflare credentials, AI inference or publishing anything. Requires **Node.js 22.5+** (Node 22.0.0 is too old for this repo’s tests).
 
 ```sh
 npm run demo:export
 npm run demo:serve
 ```
 
-Open `http://127.0.0.1:4173/` on the same computer. The server exposes only known static HTML routes on localhost; the output is ignored by Git. You can also supply your own JSON brief with `node scripts/export-preview.mjs --input <input-file> --out <new-directory>`. The exporter refuses to overwrite an existing directory. The generated manifest includes SHA-256 hashes for individual pages and the full approved bundle digest, but generating a preview is **not** a customer launch approval.
+Open `http://127.0.0.1:4173/` on the same computer. The server exposes only known static HTML routes on localhost; the output is ignored by Git. For a custom brief, call `node scripts/export-preview.mjs --input <input-file> --out <new-directory>` directly—do not append those flags to `npm run demo:export`. The exporter refuses to overwrite an existing directory. The generated manifest includes SHA-256 hashes for individual pages and the full approved bundle digest, but generating a preview is **not** a customer launch approval.
 
 ## Develop and test
 
-Node.js 22+ required:
+Node.js **22.5+** required (`node:sqlite`):
 
 ```sh
 npm test
@@ -86,5 +86,6 @@ The beta onboarding D1 is now provisioned and migrated under a dedicated Launch 
 - **Opt-in four-page site bundles:** CI-tested Home/About/Services/Contact renderer, full-bundle SHA-256 approval and safe idempotent provisioning; **not yet connected to the onboarding UI**. See [multi-page bundle design](docs/MULTIPAGE_SITE_BUNDLES.md).
 - Customer-specific forms, custom domains, image generation and fully bespoke AI website design: **future milestones**.
 - No license has been selected yet: this is publicly visible source, **not automatically an open-source grant**.
+- **Private-beta tester kit:** ready offline via `npm run demo:export` / `demo:serve`; see [beta tester handoff](docs/BETA_TESTER_HANDOFF.md). Hosted login and public plugin distribution are not available yet.
 
 **Product:** Launch & Own · **Tagline:** Describe it. Launch it. Own it.
