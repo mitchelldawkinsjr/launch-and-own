@@ -49,8 +49,8 @@ function parseArgs(args) {
 }
 
 function directoryOrAbsent(path) {
-  if (!existsSync(path)) return false;
-  const stat = lstatSync(path);
+  const stat = lstatSync(path, {throwIfNoEntry: false});
+  if (!stat) return false;
   if (stat.isSymbolicLink() || !stat.isDirectory())
     throw Error('Unsafe non-directory or symbolic link: ' + path);
   return true;
