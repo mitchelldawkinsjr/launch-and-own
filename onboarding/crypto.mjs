@@ -6,8 +6,11 @@ export function randomToken(bytes=32){
   return Array.from(raw,b=>b.toString(16).padStart(2,"0")).join("");
 }
 export async function sha256(text){
-  const bytes=new Uint8Array(await crypto.subtle.digest("SHA-256",encoder.encode(text)));
-  return Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");
+  return sha256Bytes(encoder.encode(text));
+}
+export async function sha256Bytes(bytes){
+  const hash=await crypto.subtle.digest("SHA-256",bytes);
+  return Buffer.from(hash).toString('hex');
 }
 function decodeKey(text){
   if(typeof text!=="string"||!/^[a-f0-9]{64}$/i.test(text))throw Error("Encryption key must be 32 hexadecimal bytes");

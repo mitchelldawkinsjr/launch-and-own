@@ -10,15 +10,17 @@ export const privacyHtml=`<p class="muted">Beta policy · Last updated ${LEGAL_U
 <li><strong>Provider authorizations:</strong> the access and refresh tokens GitHub and Cloudflare issue when you approve Launch &amp; Own. They are encrypted (AES-GCM) before storage and are never shown to you, other users, or logs.</li>
 <li><strong>Cloudflare account choice:</strong> the ID of the Cloudflare account you select.</li>
 <li><strong>Website content you enter:</strong> business name, headline, description, services, optional contact email and theme, plus the plan you approve.</li>
+<li><strong>Website uploads</strong> include the static pages and assets from your ZIP and the file list and integrity hashes used to preview and launch your site.</li>
 <li><strong>Operational logs:</strong> request errors without tokens, cookies, authorization codes or form contents.</li>
 </ul></section>
 <section><h2>How we use it</h2><p>Only to show your preview, create the private repository and Cloudflare Pages project you approve, open a pull request in that repository for website updates you approve (never merged for you), verify the deployment, and resume an approved launch that was interrupted. We do not sell your data, use it for advertising, or access your accounts for anything you did not approve.</p>
 <p><strong>Optional AI drafting:</strong> if you choose it, your business name and description are sent to the configured AI provider to draft website copy. Your contact email is not sent. You can always write the content yourself instead.</p></section>
-<section><h2>Cookies</h2><p>Two strictly necessary, secure, HTTP-only cookies: a sign-in cookie (up to 10 minutes) and a session cookie (up to 1 hour). No tracking or advertising cookies.</p></section>
+<section><h2>Cookies</h2><p>We use secure, HTTP-only cookies for sign-in (up to 10 minutes), setup sessions (up to 1 hour), and access to a private website preview (up to 15 minutes). We use no tracking or advertising cookies.</p></section>
 <section><h2>How long we keep it</h2><ul>
 <li>Sign-in attempts: deleted after 10 minutes.</li>
 <li>Sessions and their encrypted tokens: deleted when they expire (about 1 hour) or when you sign out.</li>
 <li>Approved launch history: kept for 30 days, and you can delete entries sooner. Launch history does not contain your tokens.</li>
+<li>Draft uploads are scheduled for deletion after one day. Files retained for an approved launch are scheduled for deletion after 32 days. Your copies in GitHub and Cloudflare stay in your accounts.</li>
 </ul></section>
 <section><h2>Your control</h2><p><strong>Disconnect and sign out</strong> deletes your session and asks GitHub and Cloudflare to revoke Launch &amp; Own's access. You can also revoke access at any time in your GitHub and Cloudflare settings. The repositories and websites created for you stay in your accounts, and you own them.</p></section>
 <section><h2>Third parties</h2><p>We rely on GitHub and Cloudflare, which process data under their own privacy policies, and on the AI provider only if you use AI drafting.</p></section>
@@ -29,7 +31,7 @@ export const termsHtml=`<p class="muted">Beta terms · Last updated ${LEGAL_UPDA
 <section><h2>The service</h2><p>Launch &amp; Own is a free beta that helps you create a website in your own GitHub and Cloudflare accounts. Features may change, pause or stop without notice while it is in beta.</p></section>
 <section><h2>Your accounts and content</h2><ul>
 <li>You must be authorized to use the GitHub and Cloudflare accounts you connect.</li>
-<li>Nothing is created until you review and approve it. You own the repositories, Pages projects and website content created for you.</li>
+<li>Resources in your GitHub and Cloudflare accounts are created only after you review and approve them. You own those resources and your website content.</li>
 <li>You are responsible for the content you publish and must not use the service for unlawful, harmful or infringing material.</li>
 <li>Your use of GitHub and Cloudflare remains subject to their terms, plans and any charges they apply.</li>
 </ul></section>

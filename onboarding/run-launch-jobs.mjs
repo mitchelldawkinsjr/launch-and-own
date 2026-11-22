@@ -5,6 +5,8 @@ import { ProviderRequestError } from '../pipeline/provider-errors.mjs';
 import { verifyWebsite } from '../pipeline/verify-site.mjs';
 import { activeJobSession, approvalSnapshot, HAS_APPROVAL, RUNNABLE, UNCLAIMED } from './launch-jobs.mjs';
 import { AuthorizationRefreshBusy, getFreshAccessToken } from './token-lifecycle.mjs';
+import { WebsiteZipError } from './website-zip.mjs';
+import { loadApprovedZip } from './zip-artifacts.mjs';
 
 const clock = () => Math.floor(Date.now() / 1000);
 const LEASE_SECONDS = 120;
@@ -150,12 +152,21 @@ async function performClaim(env, job) {
   if (snapshot.digest !== job.approval_digest || snapshot.slug !== job.site_slug)
     return await finishAttempt(env, job, 'approval_snapshot_mismatch');
   const { input } = snapshot;
+  let files;
+  if (snapshot.zip) {
+    try {
+      files = await loadApprovedZip(env.ZIP_ARTIFACTS, snapshot.zip);
+    } catch (error) {
+      if (error instanceof WebsiteZipError) return await finishAttempt(env, job, 'approved_zip_unavailable');
+      return await finishAttempt(env, job, 'artifact_storage_unavailable', { retryable: true });
+    }
+  }
   const connection = await verifiedConnections(env, job, input);
   const checkpoint = job.expected_commit_sha ? { repositoryId: job.repository_id,
     branch: job.production_branch, headCommitSha: job.expected_commit_sha, projectId: job.pages_project_id } : null;
   if (job.status === 'queued') {
     const provisioned = await applyWebsite(input, { ...connection, approved: {
-      id: job.id, githubUserId: job.github_user_id, html: snapshot.html,
+      id: job.id, githubUserId: job.github_user_id, html: snapshot.html, files,
       allowLegacy: job.legacy_receipt_id !== null, checkpoint,
       assertCloudflareAccess: connection.assertCloudflareAccess,
       saveCheckpoint: async ({ repositoryId, branch, headCommitSha }) => {
@@ -171,7 +182,8 @@ async function performClaim(env, job) {
     return;
   }
   const result = await verifyWebsite(input, {
-    ...connection, expectedCommitSha: checkpoint.headCommitSha, approved: { ...checkpoint, html: snapshot.html }
+    ...connection, expectedCommitSha: checkpoint.headCommitSha, approved: { ...checkpoint, html: snapshot.html,
+      htmlBytes: files?.find(file => file.path === 'index.html').bytes }
   });
   if (result.status === 'live') {
     await writeActiveClaim(env, job, `status = 'live', updated_at = ?, error_code = NULL,
