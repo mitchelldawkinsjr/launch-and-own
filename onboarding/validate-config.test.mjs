@@ -155,3 +155,13 @@ test("required hostname, origin and isolation flags cannot be removed from Wrang
   assert.throws(()=>validateConfig(c),/Custom Domain|Disable workers.dev|ONBOARDING_ORIGIN/);
  }
 });
+
+test("ZIP preview Worker only gets its preview bindings, on the sibling-host route",()=>{
+  const p=JSON.parse(readFileSync(new URL("./wrangler.preview.jsonc",import.meta.url),"utf8"));
+  assert.equal(p.main,"zip-preview-worker.mjs");assert.equal(p.workers_dev,false);assert.equal(p.preview_urls,false);
+  assert.deepEqual(p.routes,[{pattern:"*-zp.360web.cloud/*",zone_name:"360web.cloud"}]);
+  assert.equal(p.d1_databases,undefined);assert.equal(p.ratelimits,undefined);assert.equal(p.triggers,undefined);
+  assert.deepEqual(Object.keys(p.vars).sort(),["ONBOARDING_ORIGIN","ZIP_PREVIEW_DOMAIN"]);
+  assert.equal(p.vars.ZIP_PREVIEW_DOMAIN,cfg.vars.ZIP_PREVIEW_DOMAIN);
+  assert.equal(p.r2_buckets[0].bucket_name,cfg.r2_buckets[0].bucket_name);
+});

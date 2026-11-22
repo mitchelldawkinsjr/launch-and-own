@@ -16,7 +16,8 @@
     "CF_SCOPES": "account-settings.read page.read page.write offline_access",
     "GH_CLIENT_ID": "Iv23li8rVTNtZrfTctqJ",
     "GH_APP_SLUG": "launch-and-own",
-    "CF_CLIENT_ID": "27de4e083c08b48f9a003ade56b9c8ea"
+    "CF_CLIENT_ID": "27de4e083c08b48f9a003ade56b9c8ea",
+    "ZIP_PREVIEW_DOMAIN": "-zp.360web.cloud"
   },
   "compatibility_flags": [
     "nodejs_compat"
@@ -53,6 +54,12 @@
       "database_name": "launch-and-own-onboarding-beta",
       "database_id": "b89fb8aa-67a2-49fa-b48c-584e305b5bb2",
       "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ZIP_ARTIFACTS",
+      "bucket_name": "launch-and-own-zip-artifacts"
     }
   ]
 }
