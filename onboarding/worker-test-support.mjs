@@ -96,7 +96,7 @@ function harness({withJobs=true}={}){
     resourceState.repo={id:101,owner:{login:'tester',id:resourceState.githubUserId},name:'esp-willow-studio',description:JSON.parse(opts.body).description,private:true,default_branch:'main'};
     return Response.json(resourceState.repo,{status:201});
   }
-  if(url.startsWith(root+'/branches/launch-and-own/site-')){
+  if(url.startsWith(root+'/branches/')&&decodeURIComponent(url.slice((root+'/branches/').length)).startsWith('launch-and-own/site-')){
     const name=decodeURIComponent(url.slice((root+'/branches/').length));
     return resourceState.updateBranch===name?Response.json({commit:{sha:resourceState.updateHtml?'f'.repeat(40):GENERATED_SHA}}):new Response('{}',{status:404});
   }
