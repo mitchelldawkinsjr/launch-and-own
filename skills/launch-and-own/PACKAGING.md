@@ -6,11 +6,15 @@ Canonical source of truth: this directory (`skills/launch-and-own/`), versioned 
 
 | Client | Suggested install |
 | --- | --- |
-| Cursor project skill | Copy or symlink `skills/launch-and-own` → `.cursor/skills/launch-and-own` in a checkout (do not edit Cursor’s reserved `~/.cursor/skills-cursor/`). |
-| Claude Code / Agent Skills | Point the client at this folder’s `SKILL.md` using that client’s documented skill import path. |
-| Codex | Load `SKILL.md` (+ `reference.md` / `examples.md` as needed) as project instructions; do not invent undocumented tool schemas. |
+| Codex project skill | From this checkout: `node scripts/install-agent-skill.mjs --client codex --target /path/to/project`. Installs canonical files into `.agents/skills/launch-and-own/`. |
+| Cursor project skill | From this checkout: `node scripts/install-agent-skill.mjs --client cursor --target /path/to/project`. Installs canonical files into `.cursor/skills/launch-and-own/`. Never edit Cursor's reserved `~/.cursor/skills-cursor/`. |
+| Claude Code / Agent Skills | Point the client at this folder's `SKILL.md` using its documented import path. Claude plugin packaging is owned by a separate branch. |
 
-Keep wrappers **thin**: same markdown, no duplicated provisioning logic.
+Run the installer with `--dry-run` to see the destination without writing or `--check` to verify byte-for-byte content and a SHA-256 bundle. It refuses to overwrite local edits or follow symlinked install directories. It copies public skill instructions only, with no API credentials or cloud operations.
+
+Follow [INSTALL_QA.md](INSTALL_QA.md) for manual testing in *real* Codex and Cursor sessions. Automated installer tests establish safe layout and file integrity only: they are **not** an actual model or connected publishing acceptance test.
+
+Keep wrappers **thin**: the same canonical markdown, no duplicated provisioning logic.
 
 ## Claude plugin wrapper (thin)
 
