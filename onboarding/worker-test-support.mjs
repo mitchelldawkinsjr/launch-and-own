@@ -91,7 +91,13 @@ function harness({withJobs=true}={}){
   }
   const root='https://api.github.com/repos/tester/esp-willow-studio';
   const pages='https://api.cloudflare.com/client/v4/accounts/'+accountId+'/pages/projects';
-  if(url===root && opts.method!=='POST')return resourceState.repo?Response.json(resourceState.repo):new Response('{}',{status:404});
+  if(url===root && opts.method!=='POST'){
+    if(resourceState.invalidateSessionOnRepoRead){
+      resourceState.invalidateSessionOnRepoRead=false;
+      sqlite.prepare('UPDATE onboarding_sessions SET authorization_epoch=authorization_epoch+1').run();
+    }
+    return resourceState.repo?Response.json(resourceState.repo):new Response('{}',{status:404});
+  }
   if(url==='https://api.github.com/user/repos' && opts.method==='POST'){
     resourceState.repo={id:101,owner:{login:'tester',id:resourceState.githubUserId},name:'esp-willow-studio',description:JSON.parse(opts.body).description,private:true,default_branch:'main'};
     return Response.json(resourceState.repo,{status:201});
