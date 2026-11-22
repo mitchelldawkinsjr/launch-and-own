@@ -652,3 +652,24 @@ test('logo is served publicly as a PNG for the provider consent screens',async()
  const bytes=new Uint8Array(await res.arrayBuffer());
  assert.deepEqual([...bytes.slice(0,4)],[0x89,0x50,0x4e,0x47]);
 });
+
+test('pressing Run due launch steps after the job already advanced shows the review page, not an error',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  const p=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL('https://onboard.example.com'+p.headers.get('location')).searchParams.get('id');
+  await approvePreview(h,sessionCookie,csrf,id);
+  assert.notEqual(jobRow(h).status,'queued');
+  const attempts=jobRow(h).attempts;
+  const r=await post(h,'/launch',sessionCookie,{csrf,id});
+  assert.equal(r.status,303);assert.match(r.headers.get('location'),/^\/review\?id=/);
+  assert.equal(jobRow(h).attempts,attempts);
+  // A different session (not the one that approved) is still refused.
+  const other=await bootstrap(h);
+  const o=await post(h,'/launch',other.sessionCookie,{csrf:csrfFrom(await (await h.request('/',{cookie:other.sessionCookie})).text()),id});
+  assert.notEqual(o.status,303);
+ }finally{globalThis.fetch=originalFetch}
+});
