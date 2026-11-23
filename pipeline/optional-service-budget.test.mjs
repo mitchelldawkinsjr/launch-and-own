@@ -39,7 +39,8 @@ const reqR2=service('r2',{standardGbMonthsPerMonth:1,
   {purpose:'media-uploads',dataClassification:'private',
    deletionPlan:'owner-delete',retentionDays:30});
 const args={principal,site,accountEvidence,requests:[reqWorkers]};
-const plan=(changes={},opts={})=>prepareOptionalExtensionReview({...args,...changes},{now,...opts});
+const plan=(changes={},opts={})=>prepareOptionalExtensionReview({...args,...changes},
+  {now,assertCurrentAuthorization:async()=>true,...opts});
 
 test('published Free caps are separate per-service units and immutable',()=>{
  assert.deepEqual(Object.keys(PUBLISHED_FREE_LIMITS),['workers','d1','kv','r2']);
@@ -200,6 +201,37 @@ test('reject unsupported/duplicate services, platform staging and invalid foreca
  }
 });
 
+test('mandatory backend authorization callback fences all cost review results',async()=>{
+ const without=await prepareOptionalExtensionReview(args,{now});
+ assert.equal(without.state,'blocked_permission_or_plan');
+ assert.equal(without.reason,'live_authorization_fence_required');
+ assert.equal(without.planDigest,null);
+ let calls=0;
+ const no=await plan({}, {assertCurrentAuthorization:async()=>{calls++;return false;}});
+ assert.equal(calls,1);
+ assert.equal(no.reason,'live_authorization_changed_or_expired');
+ assert.equal(no.planDigest,null);
+ const throwing=await plan({}, {assertCurrentAuthorization:async()=>{throw Error('secret-protected');}});
+ assert.equal(throwing.reason,'live_authorization_changed_or_expired');
+ assert(!JSON.stringify(throwing).includes('secret-protected'));
+});
+test('revoke the session between the initial and final digest checks',async()=>{
+ const references=[];let calls=0;
+ const result=await plan({}, {assertCurrentAuthorization:async reference=>{
+  references.push(reference);calls++;
+  assert(Object.isFrozen(reference));
+  assert.equal(reference.githubUserId,principal.githubUserId);
+  assert.equal(reference.cloudflareAccountId,accountId);
+  assert.equal(reference.repositoryId,site.repositoryId);
+  assert.equal(reference.baseCommitSha,sha);
+  assert(!Object.hasOwn(reference,'usageByService'));
+  return calls<2;
+ }});
+ assert.equal(calls,2);
+ assert.equal(result.reason,'live_authorization_changed_or_expired');
+ assert.equal(result.canActivate,false);
+ assert.equal(result.planDigest,null);
+});
 test('digest binds current source, requested retention, account limits and intent',async()=>{
  const base=await plan();
  const diffs=[
@@ -231,11 +263,12 @@ test('mutating a bound owner, forecast or usage during digest invalidates the pl
     requests:[{...reqWorkers,projectedUsage:{...reqWorkers.projectedUsage}}]};
   const pending=prepareOptionalExtensionReview({
     principal:state.principal,site:state.site,accountEvidence:state.account,
-    requests:state.requests},{now});
+    requests:state.requests},{now,assertCurrentAuthorization:async()=>true});
   change(state);
   const result=await pending;
   assert.equal(result.state,'blocked_permission_or_plan');
-  assert.equal(result.reason,'account_or_forecast_changed_during_review');
+  assert(['account_or_forecast_changed_during_review',
+    'live_authorization_changed_or_expired'].includes(result.reason));
   assert.equal(result.planDigest,null);
  }
 });
