@@ -155,7 +155,7 @@ test('provider HTTP failures and redirects never expose credentials or silently 
     [302,'provider_operation_failed']
   ]) {
     const {provider} = rig({override:{
-      '/client/v4/accounts/'+account+'/pages/projects/esp-fern-site':
+      ['/client/v4/accounts/'+account+'/pages/projects/esp-fern-site']:
         ()=>new Response(null,{status})
     }});
     await fail(provider.readPagesProject(site()),expected);
