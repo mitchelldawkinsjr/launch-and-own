@@ -125,13 +125,14 @@ function publicCommit(project) {
 }
 function safeSite(owner, repository, project, baseCommitSha) {
   const siteId = 'managed_' + repository.id + '_' + project.id;
-  if (siteId.length > 160) denied('invalid_managed_identity');
+  // Match the merged #84 capability projection's maximum 128-character site ID.
+  if (siteId.length > 128) denied('invalid_managed_identity');
   return Object.freeze({
     siteId, githubUserId: owner.githubUserId, githubOwner: owner.githubLogin,
     cloudflareAccountId: owner.cloudflareAccountId,
     repositoryId: repository.id, repositoryName: repository.name,
     pagesProjectId: project.id, pagesProjectName: project.name,
-    branch: 'main', sourceKind: 'managed-existing',
+    branch: 'main', productionBranch: 'main', sourceKind: 'managed-existing',
     baseCommitSha, productionCommitSha: publicCommit(project),
     publicationVerified: false,
     sourceState: 'github_main_verified_publication_unverified',
