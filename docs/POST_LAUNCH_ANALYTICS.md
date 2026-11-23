@@ -9,6 +9,12 @@
 - [Web Analytics limits](https://developers.cloudflare.com/web-analytics/limits/) lists **10 tracked sites not proxied via Cloudflare** versus no limit for proxied sites, and plan-dependent rules (Free: 0 custom rules). Do not assume these quota rules apply identically to every Pages site/account configuration. #84 owns per-customer plan/scopes/entitlement truth.
 - Metrics dashboards and API querying are **not implemented** here. A project tag does **not** prove the beacon is present in the deployed HTML, that data has arrived, that Core Web Vitals are available, or that visitor counts are zero. Respect privacy disclosures and relevant consent requirements before enabling real-user monitoring.
 
+## Read-only owner-account audit (2026-11-22, GPT-6)
+
+Using the existing **connected owner account** and Cloudflare GET APIs only, I listed Pages projects and Web Analytics registration records, then independently fetched each of the three visible `esp-*` managed Pages projects by its project name. **All three individual project GETs succeeded**, had GitHub source and `main` production branch, and **0/3 reported `build_config.web_analytics_tag` or `web_analytics_token`**. The account-level RUM site list was readable and included **four registered Web Analytics sites**, none with a tag matching these three managed Pages projects. No secrets, project IDs, site tags or private account records were copied into this repository.
+
+**Interpretation:** This verifies *no Pages analytics configuration tag observed on those three managed projects at audit time*. It does **not** prove a lack of external analytics scripts, rule out other accounts or sites, verify visitors/traffic, establish a plan limit, or prove those sites have no beacon through some other mechanism. Do not surface an `active_verified` state based on this result. No Cloudflare resource or site content was changed during the audit. Account Settings Read supports Web Analytics registration GET; Pages Read supports Pages project GET. More general per-user scopes and paid/free truth remain assigned to #84.
+
 ## Adapter contract
 
 `pipeline/pages-analytics.mjs` exports `readPagesAnalyticsStatus({site, principal, cloudflareAccessToken, fetchFn?})`.
