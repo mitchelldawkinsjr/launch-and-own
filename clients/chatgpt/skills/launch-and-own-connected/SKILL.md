@@ -57,13 +57,17 @@ the SAME backend and customer identity with the standalone hosted website:
    SAME request. Direct the customer to the returned trusted
    `onboard.360web.cloud` review page for the actual separate click to
    approve. Never approve or launch on the customer's behalf through chat.
-5. Check `get_job_status` and/or `verify_publication` using the
+5. When a linked customer asks about existing sites, use `list_sites`
+   and `get_site` to show only the sites returned for that authenticated
+   linked agent. These are scoped inventory views, not permission to edit
+   an unrelated GitHub repository.
+6. Check `get_job_status` and/or `verify_publication` using the
    **draft ID as job ID** for agent-created drafts. Report exactly what
    the server says. Only claim *live* after a trusted
    `verify_publication` result confirms live commit AND public HTML
    digest. A `last_verified` result is historical; do not call it
    a fresh check. Pending, failed, and reauthorization statuses are not live.
-6. If the customer asks for an unsupported update, offer the existing
+7. If the customer asks for an unsupported update, offer the existing
    GitHub PR/owner review flow or hosted browser options without pretending
    that `prepare_site_update` is functional.
 
