@@ -216,15 +216,16 @@ test('same-name replaced GitHub repository or Pages project after sidecar read r
 });
 
 test('a stale or wrong owner reference is denied before sidecar GET', async () => {
-  for (const override of [
-    {siteId: 'managed_999_elsewhere'},
-    {reference: {...fixtures().reference, repositoryId:999}},
-    {principal: {...fixtures().principal, githubUserId: 99}},
-    {reference: {...fixtures().reference, cloudflareAccountId:'f'.repeat(32)}},
-    {reference: {...fixtures().reference, baseCommitSha:moved}}
+  for (const [override, expected] of [
+    [{siteId: 'managed_999_elsewhere'}, 'current_source_unavailable'],
+    [{reference: {...fixtures().reference, repositoryId:999}}, 'current_source_unavailable'],
+    [{principal: {...fixtures().principal, githubUserId: 99}}, 'current_source_unavailable'],
+    [{reference: {...fixtures().reference, cloudflareAccountId:'f'.repeat(32)}},
+      'current_source_unavailable'],
+    [{reference: {...fixtures().reference, baseCommitSha:moved}}, 'current_source_changed']
   ]) {
     const h=harness();
-    await assert.rejects(h.read(override),code('current_source_unavailable'));
+    await assert.rejects(h.read(override),code(expected));
     assert(!h.calls.some(c => c.url.includes('/site-config.json')));
   }
 });
@@ -260,7 +261,7 @@ test('redirect and token-bearing transport errors are safe and produce no sideca
 
 test('rejected/expired authorization before any provider call fails closed', async () => {
   const h=harness();h.revoke();
-  await assert.rejects(h.read(),code('current_source_unavailable'));
+  await assert.rejects(h.read(),code('authorization_changed'));
   assert.equal(h.calls.length,0);
 });
 
