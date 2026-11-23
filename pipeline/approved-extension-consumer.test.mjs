@@ -212,7 +212,11 @@ test('email refuses changed hostname or changed forwarding mailbox', async () =>
     {hostname: 'other.example.com'},
     {mailbox: 'attacker@example.net'}
   ]) {
-    const r = rig(row('email', payload));
+    const original = row('email');
+    // Attacker alters persisted payload while retaining the owner's original digest.
+    const r = rig({...original, payload_json: JSON.stringify({
+      hostname: 'example.com', mailbox: 'user@example.net', ...payload
+    })});
     await rejected(r, 'approval_digest_mismatch', {noProvider: true});
   }
 });
@@ -239,7 +243,7 @@ test('email never enables routing or MX; creates only the fixed contact alias af
 });
 
 test('email fails closed on owner zone mismatch, unready DNS, and existing alias collision', async () => {
-  for (let variant = 0; variant < 3; variant++) {
+  for (let variant = 0; variant < 4; variant++) {
     const r = rig(row('email')); r.state.domain = {name: 'example.com', status: 'active'};
     if (variant === 0) r.provider.readOwnedZone = async () =>
       ({id: zoneId, name: 'example.com', account: {id: 'd'.repeat(32)}, status: 'active'});
@@ -248,7 +252,11 @@ test('email fails closed on owner zone mismatch, unready DNS, and existing alias
     if (variant === 2) r.state.rule = {
       enabled: true, actions: [{type: 'forward', value: ['attacker@example.org']}]
     };
-    await rejected(r, ['owned_zone_required','email_routing_dns_not_ready','existing_email_rule_conflict'][variant],
+    if (variant === 3) r.state.rule = {
+      enabled: true, actions: [{type: 'forward', value: ['user@example.net']}],
+      matchers: [{type: 'literal', field: 'to', value: 'different@example.com'}]
+    };
+    await rejected(r, ['owned_zone_required','email_routing_dns_not_ready','existing_email_rule_conflict','existing_email_rule_conflict'][variant],
       {noWrites: true});
   }
 });
