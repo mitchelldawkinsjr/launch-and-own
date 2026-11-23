@@ -1,6 +1,5 @@
-// Issue #39 / GPT-6: derive current managed-site inventory from owner-scoped
-// provider reads, not expiring launch-history records or browser-provided IDs.
-// This adapter makes NO GitHub/Cloudflare writes and stores NO customer data.
+// #39 / GPT-6: read-only current managed-site discovery and source verification.
+// No launch-history dependency, D1 writes, provider mutations, or unverified live claims.
 import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
 import { isManagedRepositoryDescription } from './managed-site-repository.mjs';
 
@@ -10,8 +9,9 @@ const PROJECT = /^(esp-[a-z0-9]+(?:-[a-z0-9]+)*)-site$/;
 const OPAQUE = /^[a-z0-9_-]{1,128}$/i;
 const GIT_SHA = /^[a-f0-9]{40}$/i;
 const NUMERIC = /^[1-9][0-9]*$/;
-const MAX_PAGES = 10;
-const PER_PAGE = 10;
+const PER_PAGE = 3; // 3 candidates x 3 reads + /user + Pages list = <=11 GETs.
+const MAX_PROVIDER_REQUESTS = 11;
+const MAX_PAGE_NUMBER = 100;
 const MAX_SOURCE_BYTES = 128 * 1024;
 
 export class ManagedSiteInventoryError extends Error {
@@ -28,7 +28,7 @@ function id(value) {
 }
 function sameId(a, b) { return id(a) && id(b) && String(a) === String(b); }
 function ownerSnapshot(principal) {
-  if (!id(principal?.githubUserId) || typeof principal.githubUserId !== 'number' ||
+  if (typeof principal?.githubUserId !== 'number' || !id(principal.githubUserId) ||
       typeof principal.githubLogin !== 'string' || !LOGIN.test(principal.githubLogin) ||
       typeof principal.cloudflareAccountId !== 'string' || !ACCOUNT.test(principal.cloudflareAccountId))
     denied('verified_owner_required');
@@ -47,6 +47,7 @@ function reader({principal, githubAccessToken, cloudflareAccessToken,
   if (typeof githubAccessToken !== 'string' || !githubAccessToken ||
       typeof cloudflareAccessToken !== 'string' || !cloudflareAccessToken)
     denied('provider_reauthorization_required');
+  let requests = 0;
 
   async function authorized() {
     if (principal?.githubUserId !== owner.githubUserId ||
@@ -54,15 +55,14 @@ function reader({principal, githubAccessToken, cloudflareAccessToken,
         principal?.cloudflareAccountId !== owner.cloudflareAccountId) denied('authorization_changed');
     try {
       if (await assertCurrentAuthorization(owner) !== true) denied('authorization_changed');
-    } catch {
-      denied('authorization_changed');
-    }
+    } catch { denied('authorization_changed'); }
     if (principal?.githubUserId !== owner.githubUserId ||
         principal?.githubLogin !== owner.githubLogin ||
         principal?.cloudflareAccountId !== owner.cloudflareAccountId) denied('authorization_changed');
   }
   async function get(provider, path, {allow404 = false} = {}) {
     await authorized();
+    if (++requests > MAX_PROVIDER_REQUESTS) denied('provider_request_budget_exceeded');
     const token = provider === 'github' ? githubAccessToken : cloudflareAccessToken;
     const prefix = provider === 'github' ? 'https://api.github.com' :
       'https://api.cloudflare.com/client/v4';
@@ -81,7 +81,12 @@ function reader({principal, githubAccessToken, cloudflareAccessToken,
     } catch { denied(provider + '_temporarily_unavailable'); }
     await authorized();
     if (response?.status === 401) denied(provider + '_reauthorization_required');
-    if (response?.status === 403) denied(provider + '_permission_denied');
+    if (response?.status === 403) {
+      if (response.headers?.get('retry-after') ||
+          response.headers?.get('x-ratelimit-remaining') === '0')
+        denied(provider + '_rate_limited');
+      denied(provider + '_permission_denied');
+    }
     if (response?.status === 429) denied(provider + '_rate_limited');
     if (response?.status === 404 && allow404) return null;
     if (!response?.ok || response.status >= 300) denied(provider + '_temporarily_unavailable');
@@ -93,9 +98,9 @@ function reader({principal, githubAccessToken, cloudflareAccessToken,
       denied(provider + '_unexpected_response');
     if (provider === 'cloudflare' && data.success !== true)
       denied('cloudflare_unexpected_response');
-    return provider === 'github' ? data : data;
+    return data;
   }
-  return {owner, get, authorized};
+  return {owner, get, authorized, getRequestCount: () => requests};
 }
 
 function exactManagedProject(project, repository, owner) {
@@ -123,18 +128,21 @@ function publicCommit(project) {
     deployment.latest_stage?.status === 'success' &&
     typeof hash === 'string' && GIT_SHA.test(hash) ? hash.toLowerCase() : null;
 }
-function safeSite(owner, repository, project, baseCommitSha) {
-  const siteId = 'managed_' + repository.id + '_' + project.id;
-  // Match the merged #84 capability projection's maximum 128-character site ID.
+function makeSiteId(repoId, projectId) {
+  const siteId = 'managed_' + repoId + '_' + projectId;
   if (siteId.length > 128) denied('invalid_managed_identity');
+  return siteId;
+}
+function safeSite(owner, repository, project, baseCommitSha) {
   return Object.freeze({
-    siteId, githubUserId: owner.githubUserId, githubOwner: owner.githubLogin,
+    siteId: makeSiteId(repository.id, project.id),
+    githubUserId: owner.githubUserId, githubOwner: owner.githubLogin,
     cloudflareAccountId: owner.cloudflareAccountId,
     repositoryId: repository.id, repositoryName: repository.name,
     pagesProjectId: project.id, pagesProjectName: project.name,
     branch: 'main', productionBranch: 'main', sourceKind: 'managed-existing',
     baseCommitSha, productionCommitSha: publicCommit(project),
-    publicationVerified: false,
+    publicationVerified: false, historicalContinuityVerified: false,
     sourceState: 'github_main_verified_publication_unverified',
     repositoryUrl: 'https://github.com/' + owner.githubLogin + '/' + repository.name,
     pagesProjectDashboardUrl: 'https://dash.cloudflare.com/' + owner.cloudflareAccountId +
@@ -142,70 +150,101 @@ function safeSite(owner, repository, project, baseCommitSha) {
   });
 }
 
-async function listWithReader(read) {
+function checkedReference(reference, owner, siteId) {
+  // The reference MUST be taken from a backend-owned or authenticated, bounded
+  // session handoff. A browser-provided reference is not ownership evidence.
+  if (typeof siteId !== 'string' ||
+      !/^managed_[1-9][0-9]*_[a-z0-9_-]{1,128}$/i.test(siteId) ||
+      !reference || reference.siteId !== siteId ||
+      !sameId(reference.githubUserId, owner.githubUserId) ||
+      reference.githubOwner?.toLowerCase() !== owner.githubLogin.toLowerCase() ||
+      reference.cloudflareAccountId !== owner.cloudflareAccountId ||
+      !Number.isSafeInteger(reference.repositoryId) || !id(reference.repositoryId) ||
+      !PROJECT.test(reference.pagesProjectName ?? '') ||
+      reference.pagesProjectName !== reference.repositoryName + '-site' ||
+      !OPAQUE.test(reference.pagesProjectId ?? '') ||
+      reference.branch !== 'main' || reference.productionBranch !== 'main' ||
+      reference.sourceKind !== 'managed-existing' ||
+      makeSiteId(reference.repositoryId, reference.pagesProjectId) !== siteId)
+    denied('owned_site_not_found');
+}
+
+async function verifyCurrentSite(read, reference) {
+  const {owner, get} = read;
+  const root = '/repos/' + encodeURIComponent(owner.githubLogin) +
+    '/' + reference.repositoryName;
+  const projectPath = '/accounts/' + owner.cloudflareAccountId + '/pages/projects/' +
+    reference.pagesProjectName;
+  const repository = await get('github', root, {allow404: true});
+  if (!repository || repository.id !== reference.repositoryId) denied('owned_site_not_found');
+  const page = await get('cloudflare', projectPath, {allow404: true});
+  if (!page?.result || page.result.id !== reference.pagesProjectId ||
+      !exactManagedProject(page.result, repository, owner)) denied('owned_site_not_found');
+  const branch = await get('github', root + '/branches/main', {allow404: true});
+  if (!GIT_SHA.test(branch?.commit?.sha ?? '')) denied('current_source_requires_review');
+  return {root, projectPath, baseCommitSha: branch.commit.sha.toLowerCase()};
+}
+
+/**
+ * Page-scoped, GET-only discovery. `page` is a selector, NEVER ownership.
+ * At most 3 candidate sites / 11 provider calls and 3 auth checks per GET
+ * (+ one final), below the 50-subrequest Workers Free allowance when an
+ * authorization fence uses a single D1 query per check.
+ * Older pages may change between requests: never claim stable full-account
+ * coverage or historical continuity from a copied, editable repo marker.
+ */
+export async function discoverOwnedManagedSites({page = 1, ...options} = {}) {
+  if (!Number.isSafeInteger(page) || page < 1 || page > MAX_PAGE_NUMBER)
+    denied('invalid_inventory_page');
+  const read = reader(options);
   const {owner, get, authorized} = read;
   const user = await get('github', '/user');
   if (user?.id !== owner.githubUserId ||
       user?.login?.toLowerCase() !== owner.githubLogin.toLowerCase())
     denied('github_owner_mismatch');
-
   const root = '/accounts/' + owner.cloudflareAccountId + '/pages/projects';
-  const results = [], seen = new Set();
-  let pages = 1;
-  for (let page = 1; page <= pages; page++) {
-    const data = await get('cloudflare', root + '?page=' + page + '&per_page=' + PER_PAGE);
-    if (!Array.isArray(data.result)) denied('cloudflare_unexpected_response');
-    const list = data.result;
-    const info = data.result_info;
-    if (info) {
-      if (!Number.isSafeInteger(info.total_pages) || info.total_pages < 1 ||
-          !Number.isSafeInteger(info.page) || info.page !== page ||
-          info.total_pages > MAX_PAGES || (page > 1 && info.total_pages !== pages))
-        denied('cloudflare_pagination_unverified');
-      pages = info.total_pages;
-    } else if (list.length >= PER_PAGE) {
-      // Never report an incomplete account inventory as complete.
-      denied('cloudflare_pagination_unverified');
-    }
-    if (list.length > PER_PAGE) denied('cloudflare_pagination_unverified');
+  const data = await get('cloudflare', root + '?page=' + page + '&per_page=' + PER_PAGE);
+  if (!Array.isArray(data.result) || data.result.length > PER_PAGE)
+    denied('cloudflare_pagination_unverified');
+  const info = data.result_info;
+  const emptyAccount = info?.total_pages === 0 && page === 1 &&
+    info.page === 1 && data.result.length === 0;
+  if (!emptyAccount &&
+      (!Number.isSafeInteger(info?.page) || info.page !== page ||
+       !Number.isSafeInteger(info.total_pages) || info.total_pages < page ||
+       info.total_pages > MAX_PAGE_NUMBER))
+    denied('cloudflare_pagination_unverified');
 
-    for (const entry of list) {
-      if (!PROJECT.test(entry?.name ?? '')) continue;
-      if (!OPAQUE.test(entry?.id ?? '') || seen.has(entry.name))
-        denied('cloudflare_pagination_unverified');
-      seen.add(entry.name);
-      const projectResult = await get('cloudflare', root + '/' + encodeURIComponent(entry.name), {allow404: true});
-      if (!projectResult?.result) continue; // Removed between list and read.
-      const project = projectResult.result;
-      if (project.id !== entry.id || project.name !== entry.name) continue;
-      const repoName = entry.name.slice(0, -5);
-      const repoRoot = '/repos/' + encodeURIComponent(owner.githubLogin) + '/' + repoName;
-      const repository = await get('github', repoRoot, {allow404: true});
-      if (!repository || !exactManagedProject(project, repository, owner)) continue;
-      const branch = await get('github', repoRoot + '/branches/main', {allow404: true});
-      if (!GIT_SHA.test(branch?.commit?.sha ?? '')) continue;
-      results.push(safeSite(owner, repository, project, branch.commit.sha.toLowerCase()));
-    }
+  const results = [], seen = new Set();
+  for (const entry of data.result) {
+    if (!PROJECT.test(entry?.name ?? '')) continue;
+    if (!OPAQUE.test(entry?.id ?? '') || seen.has(entry.name))
+      denied('cloudflare_pagination_unverified');
+    seen.add(entry.name);
+    const projectResult = await get('cloudflare', root + '/' +
+      encodeURIComponent(entry.name), {allow404: true});
+    if (!projectResult?.result) continue;
+    const project = projectResult.result;
+    if (project.id !== entry.id || project.name !== entry.name) continue;
+    const repoName = entry.name.slice(0, -5);
+    const repoRoot = '/repos/' + encodeURIComponent(owner.githubLogin) + '/' + repoName;
+    const repository = await get('github', repoRoot, {allow404: true});
+    if (!repository || !exactManagedProject(project, repository, owner)) continue;
+    const branch = await get('github', repoRoot + '/branches/main', {allow404: true});
+    if (!GIT_SHA.test(branch?.commit?.sha ?? '')) continue;
+    results.push(safeSite(owner, repository, project, branch.commit.sha.toLowerCase()));
   }
   await authorized();
-  return Object.freeze({status: 'fresh_owner_scoped_inventory', accountId: owner.cloudflareAccountId,
-    scanCompleted: true, sites: Object.freeze(results)});
+  const nextPage = page < (info.total_pages || 0) ? page + 1 : null;
+  return Object.freeze({
+    status: 'fresh_owner_scoped_inventory_page', accountId: owner.cloudflareAccountId,
+    coverage: 'single_provider_page', page, pageComplete: true, nextPage,
+    sites: Object.freeze(results)
+  });
 }
-
-/**
- * Backend-only, zero-storage discovery after launch receipts expire.
- * The principal comes from the current authorized backend session. The callback
- * MUST independently verify that session hash, authorization epoch, selected
- * account and live grants on each call; an in-memory boolean is insufficient.
- * Provider pagination is bounded and incomplete scans fail, not silently omit.
- */
-export async function discoverOwnedManagedSites(options = {}) {
-  return listWithReader(reader(options));
-}
-
-async function sha256(content) {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
-  return Array.from(new Uint8Array(bytes), x => x.toString(16).padStart(2, '0')).join('');
+async function sha256Bytes(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, '0')).join('');
 }
 function decodeGitHubFile(file) {
   if (file?.type !== 'file' || file.encoding !== 'base64' ||
@@ -216,55 +255,60 @@ function decodeGitHubFile(file) {
   if (encoded.length > Math.ceil(MAX_SOURCE_BYTES / 3) * 4 + 8 ||
       !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))
     denied('current_source_requires_review');
-  let bytes;
+  let bytes, html;
   try {
     const binary = atob(encoded);
     bytes = Uint8Array.from(binary, x => x.charCodeAt(0));
+    if (bytes.length !== file.size) denied('current_source_requires_review');
+    // ignoreBOM:true preserves U+FEFF in the internal representation.
+    html = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes);
   } catch { denied('current_source_requires_review'); }
-  if (bytes.length !== file.size) denied('current_source_requires_review');
-  try { return new TextDecoder('utf-8', {fatal: true}).decode(bytes); }
-  catch { denied('current_source_requires_review'); }
+  return {bytes, html};
 }
 
 /**
- * Read the *current* GitHub main HTML, not an expired launch snapshot. siteId is
- * only a selector: rediscover and verify ownership again before using it.
- * The returned HTML is INTERNAL/UNTRUSTED customer content: never inject into
- * the onboarding origin or use as automatic editable structured config.
- * Older one-page repos lack an approved sidecar; any migration requires a
- * separate, exact-HTML-reviewed feature PR, not a silent main rewrite.
+ * Read an owner-selected site's latest current GitHub source DIRECTLY against
+ * a server-held, current verified reference. `siteId` is just a selector.
+ * The backend MUST authenticate/bind `reference` to this session itself (e.g.
+ * short-lived signed/sealed server ticket), never trust a browser JSON object.
+ * Recheck user, exact repo/project and branch before/after SHA-pinned source GET.
+ *
+ * Source HTML is internal and untrusted; no unsandboxed UI render or automatic
+ * sidecar generation. Historic ownership and live public bytes remain unproved.
  */
-export async function readCurrentManagedHomepage({siteId, ...options} = {}) {
-  if (typeof siteId !== 'string' || !/^managed_[1-9][0-9]*_[a-z0-9_-]{1,128}$/i.test(siteId))
-    denied('invalid_site_selector');
+export async function readCurrentManagedHomepage({siteId, reference, ...options} = {}) {
   const read = reader(options);
-  const inventory = await listWithReader(read);
-  const site = inventory.sites.find(item => item.siteId === siteId);
-  if (!site) denied('owned_site_not_found');
-  const root = '/repos/' + encodeURIComponent(site.githubOwner) + '/' + site.repositoryName;
-  const current = await read.get('github', root + '/contents/public/index.html?ref=' + site.baseCommitSha,
-    {allow404: true});
+  const {owner, get, authorized} = read;
+  checkedReference(reference, owner, siteId);
+  const user = await get('github', '/user');
+  if (user?.id !== owner.githubUserId ||
+      user?.login?.toLowerCase() !== owner.githubLogin.toLowerCase())
+    denied('github_owner_mismatch');
+  const verified = await verifyCurrentSite(read, reference);
+  const current = await get('github', verified.root +
+    '/contents/public/index.html?ref=' + verified.baseCommitSha, {allow404: true});
   if (!current) denied('current_source_requires_review');
-  const html = decodeGitHubFile(current);
-  const contentSha256 = await sha256(html);
-  await read.authorized();
+  const {bytes, html} = decodeGitHubFile(current);
+  const contentSha256 = await sha256Bytes(bytes); // Exact Git blob bytes, INCLUDING BOM.
+  await authorized();
 
-  // Ensure no new main commit or switched repo/project occurred during this
-  // source read. A valid old SHA is NOT authority to propose an update today.
-  const branch = await read.get('github', root + '/branches/main');
-  const repo = await read.get('github', root);
-  const pages = await read.get('cloudflare', '/accounts/' + site.cloudflareAccountId +
-    '/pages/projects/' + site.pagesProjectName);
-  if (branch?.commit?.sha?.toLowerCase() !== site.baseCommitSha ||
-      repo?.id !== site.repositoryId || !pages?.result ||
-      pages.result.id !== site.pagesProjectId || !exactManagedProject(pages.result, repo, read.owner))
+  // A same-name repository/project swap or moving main is never authorized by
+  // an old SHA. Repeat exact provider reads without scanning every account site.
+  const branch = await get('github', verified.root + '/branches/main');
+  const repository = await get('github', verified.root);
+  const projectResult = await get('cloudflare', verified.projectPath);
+  if (branch?.commit?.sha?.toLowerCase() !== verified.baseCommitSha ||
+      repository?.id !== reference.repositoryId ||
+      projectResult?.result?.id !== reference.pagesProjectId ||
+      !exactManagedProject(projectResult.result, repository, owner))
     denied('current_source_changed');
-  await read.authorized();
+  await authorized();
   return {
-    status: 'github_current_source_verified', siteId: site.siteId,
-    baseCommitSha: site.baseCommitSha, homepageHtmlSha256: contentSha256,
-    homepageGitBlobSha: current.sha.toLowerCase(),
-    publicationVerified: false, editMode: 'approved_migration_required',
-    html // INTERNAL: untrusted customer content, never render unsandboxed.
+    status: 'github_current_source_verified',
+    siteId: reference.siteId, baseCommitSha: verified.baseCommitSha,
+    homepageHtmlSha256: contentSha256, homepageGitBlobSha: current.sha.toLowerCase(),
+    publicationVerified: false, historicalContinuityVerified: false,
+    editMode: 'approved_migration_required',
+    html // INTERNAL untrusted bytes represented as UTF-8, preserving BOM.
   };
 }
