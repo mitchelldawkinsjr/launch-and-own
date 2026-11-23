@@ -148,7 +148,7 @@ test('approval, expiry, tenant and privacy gate before any network',async()=>{
 });
 test('missing and revoked connections do not expose URL',async()=>{
  const h=harness();
- assert.equal((await verifyExistingPrPreview(input,{githubToken:'',cloudflareToken:'cf',fetchFn:h.fetchFn})).status,'reauthorization-required');
+ assert.equal((await verifyExistingPrPreview(input,{...auth,githubToken:'',cloudflareToken:'cf',fetchFn:h.fetchFn})).status,'reauthorization-required');
  assert.equal(h.calls.length,0);
  h.state.forbidden='/user';
  await assert.rejects(verify(h),/authorization is unavailable/);
