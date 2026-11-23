@@ -33,6 +33,14 @@ Payload contracts: domain contains hostname; email contains hostname and externa
 
 Provider adapter is backend-only: readPagesProject, readGithubRepository, readPagesDomain, attachPagesDomain, readOwnedZone, readEmailRoutingSettings, readVerifiedDestination, readEmailRoutingRule, createEmailRoutingRule, createTurnstileWidget, createCustomerD1, deployServerVerifiedFormWorker and verifyFormAcceptance. All provider URLs and tokens must come from the current trusted owner session. Provider adapters must be idempotent, verify returned resource IDs and reject redirects, external-resource collisions and non-owner scopes.
 
+## Actual backend Cloudflare adapter (new)
+
+`pipeline/cloudflare-extension-provider.mjs` provides the bounded HTTP methods for real Cloudflare **Pages custom-domain association** and **Email Routing rule creation**. It is backend-only, accepts current owner session OAuth tokens through explicit dependency injection, never logs tokens, forbids cross-account/project references, disallows HTTP redirects and retries, caps GETs, and never exposes DNS, nameserver, MX, SPF, DKIM, destination mailbox creation, billing, Turnstile, D1 or Worker mutation endpoints.
+
+Every individual POST is blocked unless a trusted `assertOperatorApprovedExecution({principal,provider,method,path,requestBody})` callback validates the separate operator-authorized CAS lease **at the moment of that mutation**. A browser boolean is not accepted. The isolated API adapter is **not wired into the hosted worker**, so testing it cannot mutate a live Cloudflare account. The consumer separately rechecks current GitHub/Cloudflare session authorization before and after provider boundaries.
+
+Additional Cloudflare scopes beyond current Pages-only OAuth are needed for email routing: **Zone Zone Read** (owned zone list), **Zone Settings Read** (Email Routing settings), **Email Routing Addresses Read** (verified forwarding destinations), **Email Routing Rules Read** (collision check) and **Email Routing Rules Write** (rule creation). Do not request these permissions or deploy activation without Domain #2 review and verified current owner consent. Provider documentation: https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/domains/methods/create/ and https://developers.cloudflare.com/api/resources/email_routing/subresources/rules/methods/create/.
+
 ## Domain attachment
 
 Only attach the digest-approved hostname to the exact, currently verified customer's Git-integrated Pages project. The consumer compares immutable GitHub repo owner/ID and private flag, Pages project ID and source, production main and static build output. Recheck session at every provider boundary. The Pages custom domain can be pending DNS/TLS after attachment; pending does not mean live. No DNS, nameserver, SPF, DKIM or MX mutation or domain purchase is authorized.
