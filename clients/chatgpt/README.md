@@ -21,6 +21,16 @@ For a **branded web-installable** version, register the shared remote MCP connec
 
 Official references: [ChatGPT plugin compatibility](https://help.openai.com/en/articles/20001256-plugins-in-chatgpt), [imported plugin Desktop only behavior](https://help.openai.com/en/articles/20001504-importing-and-syncing-plugin-marketplaces-from-github), and [custom MCP server setup](https://developers.openai.com/api/docs/guides/custom-mcp-server).
 
+## Custom MCP app description and icon
+
+The ChatGPT **Add custom MCP server** form currently accepts an optional user-entered description; an empty field does **not** imply that the remote MCP connection is broken. Recommended description to paste (or edit in the app's Manage screen if offered):
+
+> Build and launch websites you own using ChatGPT, GitHub, and Cloudflare. Create a website draft, preview the exact result, approve publication securely in your browser, and verify when your site is live.
+
+The shared bridge also advertises that exact text in `initialize.serverInfo.description`, plus `websiteUrl` and a **public fallback logo** at `https://onboard.360web.cloud/logo.png`. Its `icons` metadata follows MCP protocol version 2025-11-25. The owner may upload a custom square **Launch & Own** icon in ChatGPT's app settings if the UI supports it. Clients are not guaranteed to auto-populate the description or icon from server metadata. Existing custom app settings may need an explicit edit, reconnect, or refresh and Domain-owned Worker deployment for updated server metadata.
+
+**Release note:** this source-only enhancement does not change the ten MCP tools, authentication, tenant permissions or launch approval. Neither an app icon nor a description grants production access.
+
 ## Source layout
 
 - `plugin.json` — portable Agent Plugins 1.0 identity and ChatGPT presentation.
