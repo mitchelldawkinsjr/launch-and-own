@@ -13,6 +13,7 @@ import {privacyHtml,termsHtml} from './legal-pages.mjs';
 import {LOGO_PNG_BASE64} from './logo.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,hasCurrentOwnerSession,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {createSiteOptionsRoutes} from './post-launch-options.mjs';
+import {executeOwnedStoredOption,OptionExecutionDisabled} from './execute-option.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
@@ -621,6 +622,30 @@ async function logout(request,env,current){
 }
 const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
+async function applyApprovedOption(request,env,current){
+  await limitAttempts(request,env);
+  const data=await formData(request);
+  assertCsrf(request,data,current,baseUrl(env));
+  if(data.getAll('id').length!==1 || data.size!==2)
+    return fail('Open the approved option from your existing toolkit.',400);
+  let result;
+  try {
+    result=await executeOwnedStoredOption(env,current,data.get('id'));
+  }catch(error){
+    if(error instanceof OptionExecutionDisabled)
+      return fail('That option has no currently authorized activation grant.',403);
+    throw error;
+  }
+  const label=result.kind==='domain'
+    ?result.status==='attached_active'
+      ?'The custom hostname is active on your Pages project.'
+      :'The custom hostname is attached to Pages; DNS and TLS may still need manual setup.'
+    :'An Email Routing alias was recorded for the previously verified forwarding mailbox.';
+  return view('Optional feature activation', '<p>'+escape(label)+'</p>'+
+    '<p>No DNS or MX records were changed by this action.</p>'+
+    '<p><a href="/toolkit">Back to toolkit</a></p>');
+}
+
 export default {
   async fetch(request,env,context){
     try{
@@ -674,7 +699,7 @@ export default {
         if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
-        if(url.pathname==='/site-options-apply')return await siteOptions.apply(request,env,current);
+        if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);
       }
       return fail('Page not found',404);
     }catch(error){
