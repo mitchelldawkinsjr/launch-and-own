@@ -113,7 +113,8 @@ function safeTree(tree,sourceKind) {
   if ([...entries.values()].some(e =>
     (e.type === 'blob' && /^public\/.*\.html?$/i.test(e.path) &&
       !PAGES[sourceKind].includes(e.path)) ||
-    e.path === 'functions' || e.path.startsWith('functions/') ||
+    e.path.toLowerCase() === 'functions' ||
+    e.path.toLowerCase().startsWith('functions/') ||
     ['public/_worker.js','public/_routes.json'].includes(e.path.toLowerCase()))) return null;
   if (entries.has('public/_redirects') ||
       [...entries.keys()].some(p=>p.startsWith('public/_redirects/'))) return null;
