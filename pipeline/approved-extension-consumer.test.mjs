@@ -9,6 +9,9 @@ import {
 
 const account = 'a'.repeat(32);
 const zoneId = 'b'.repeat(32);
+const routingMx = hostname => [1,2,3].map((n,i) => ({
+  type:'MX', name:hostname, content:'route'+n+'.mx.cloudflare.net', priority:10+i*10
+}));
 const owner = () => ({githubUserId: 42, githubLogin: 'siteowner', cloudflareAccountId: account});
 const id = '12345678-1234-4234-8234-123456789abc';
 const jobId = '87654321-4321-4321-8321-cba987654321';
@@ -105,6 +108,9 @@ function rig(reviewRow = row(), overrides = {}) {
     async readEmailRoutingSettings() {
       calls.push('provider.emailSettings'); return {enabled: true, status: 'ready'};
     },
+    async readRoutingMxRecords(_zone, hostname) {
+      calls.push('provider.mxRead'); return routingMx(hostname);
+    },
     async readVerifiedDestination(_account, mailbox) {
       calls.push('provider.destination');
       return {email: mailbox, verified: '2026-11-22T12:00:00Z'};
@@ -112,7 +118,8 @@ function rig(reviewRow = row(), overrides = {}) {
     async readEmailRoutingRule() {calls.push('provider.rule'); return state.rule;},
     async createEmailRoutingRule(_zone, spec) {
       calls.push('provider.createRule'); state.rule = {
-        id: 'routing1', enabled: true, actions: spec.actions
+        id: 'routing1', enabled: true, actions: spec.actions,
+        matchers:spec.matchers, zone:{tag:zoneId}
       }; return state.rule;
     },
     async createTurnstileWidget() {
@@ -270,14 +277,57 @@ test('email fails closed on owner zone mismatch, unready DNS, and existing alias
     if (variant === 1) r.provider.readEmailRoutingSettings = async () =>
       ({enabled: false, status: 'unconfigured'});
     if (variant === 2) r.state.rule = {
-      enabled: true, actions: [{type: 'forward', value: ['attacker@example.org']}]
+      id:'existing', enabled: true, zone:{tag:zoneId},
+      matchers:[{type:'literal',field:'to',value:'contact@example.com'}],
+      actions: [{type: 'forward', value: ['attacker@example.org']}]
     };
     if (variant === 3) r.state.rule = {
-      enabled: true, actions: [{type: 'forward', value: ['user@example.net']}],
+      id:'existing', enabled: true, zone:{tag:zoneId},
+      actions: [{type: 'forward', value: ['user@example.net']}],
       matchers: [{type: 'literal', field: 'to', value: 'different@example.com'}]
     };
     await rejected(r, ['owned_zone_required','email_routing_dns_not_ready','existing_email_rule_conflict','existing_email_rule_conflict'][variant],
       {noWrites: true});
+  }
+});
+
+test('email never creates routing alias without exact Cloudflare MX records on its hostname', async () => {
+  for (const bad of [
+    [],
+    routingMx('example.com').slice(0,2),
+    [...routingMx('example.com').slice(0,2),{type:'MX',name:'example.com',content:'mx.google.com',priority:30}],
+    routingMx('www.example.com'),
+    routingMx('example.com').map(r=>({...r,type:'TXT'})),
+    routingMx('example.com').map(r=>({...r,content:'route1.mx.cloudflare.net'})),
+    routingMx('example.com').map(r=>({...r,priority:null}))
+  ]) {
+    const r=rig(row('email')); r.state.domain={name:'example.com',status:'active'};
+    r.provider.readRoutingMxRecords=async()=>{r.calls.push('provider.mxRead');return bad;};
+    await rejected(r,'email_hostname_mx_not_ready',{noWrites:true});
+    assert.equal(r.calls.includes('provider.destination'),false);
+  }
+  const noPermission=rig(row('email'));noPermission.state.domain={name:'example.com',status:'active'};
+  delete noPermission.provider.readRoutingMxRecords;
+  await rejected(noPermission,'email_permissions_required',{noWrites:true});
+});
+
+test('email does not mark an unverified, wrong-zone, or replaced rule as applied', async () => {
+  for (const mutate of [
+    rule=>({...rule,zone:{tag:'c'.repeat(32)}}),
+    rule=>({...rule,id:'another-rule'}),
+    rule=>({...rule,actions:[{type:'forward',value:['attacker@example.net']}]}),
+    rule=>({...rule,enabled:false})
+  ]) {
+    const r=rig(row('email'));r.state.domain={name:'example.com',status:'active'};
+    const original=r.provider.readEmailRoutingRule;
+    let calls=0;
+    r.provider.readEmailRoutingRule=async (...args)=>{
+      const record=await original(...args);
+      return ++calls===1 ? record : mutate(record);
+    };
+    await rejected(r,'email_rule_unverified');
+    assert.equal(r.calls.includes('store.finish'),false);
+    assert.equal(r.calls.includes('store.fail'),true);
   }
 });
 
