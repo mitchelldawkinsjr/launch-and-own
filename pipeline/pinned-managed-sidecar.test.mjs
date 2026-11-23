@@ -88,7 +88,8 @@ function harness() {
   return {f, calls, checks, custom, data,
     revoke: () => {allowed = false;},
     getBranchReads: () => branchReads,
-    read: (overrides = {}) => readPinnedManagedSidecar({...data, ...overrides})};
+    // Pass the live options object so a mid-request SHA/token swap is visible.
+    read: (overrides = {}) => readPinnedManagedSidecar(Object.assign(data, overrides))};
 }
 const code = expected => err => {
   assert(err instanceof PinnedSidecarError);

@@ -53,7 +53,10 @@ function copyInputs(options) {
           options.assertCurrentAuthorization !== assertCurrentAuthorization ||
           (options.fetchFn ?? fetch) !== fetchFn)
         deny('verified_reference_changed');
-    } catch { deny('verified_reference_changed'); }
+    } catch (error) {
+      if (error?.name === 'PinnedSidecarError') throw error;
+      deny('verified_reference_changed');
+    }
   }
   return {principal, reference, siteId,
     expectedBaseCommitSha: expectedBaseCommitSha.toLowerCase(),
