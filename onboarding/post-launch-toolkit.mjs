@@ -1,8 +1,85 @@
 /** Owner-scoped launch history and update status views (#87). */
 import {hasCurrentOwnerSession, isLaunchId, listOwnedJobs} from './launch-jobs.mjs';
+import {TOOLKIT_CAPABILITY_STATES} from '../pipeline/toolkit-capabilities.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
+const STATES = new Set(TOOLKIT_CAPABILITY_STATES);
+
+const CAP_LABELS = Object.freeze({
+  static_hosting: 'Static hosting',
+  https: 'HTTPS',
+  deployment_health: 'Deployment health',
+  website_updates: 'Safe website updates',
+  web_analytics: 'Visitor insights',
+  pr_previews: 'Private update previews',
+  custom_domains: 'Custom domain',
+  email_routing: 'Email forwarding',
+  seo_bundle: 'SEO setup',
+  contact_forms: 'Contact forms',
+  advanced_services: 'Advanced services'
+});
+
+function cap(state, reason, detail) {
+  if (!STATES.has(state)) throw new Error('unknown toolkit capability state');
+  return Object.freeze({state, reason, detail});
+}
+
+/**
+ * History-retained labels using #84 states. Live provider evidence stays with
+ * summarizeOwnedToolkitSite once #39 owned-site reads exist.
+ */
+export function historyToolkitCapabilities({
+  verified = false, canEdit = false, uploadedZip = false
+} = {}) {
+  const hosting = verified
+    ? cap('included_verified', 'verified_launch_job',
+      'Customer-owned Cloudflare Pages from a verified launch in your history.')
+    : cap('not_available', 'awaiting_public_https_verification',
+      'Hosting appears after Launch & Own verifies the public site.');
+  const https = verified
+    ? cap('included_verified', 'verified_https_publication',
+      'Public HTTPS was confirmed with the approved revision.')
+    : cap('not_available', 'awaiting_public_https_verification',
+      'HTTPS status waits on verified publication.');
+  const health = verified
+    ? cap('included_verified', 'verified_launch_job',
+      'Last successful verify for this retained launch record.')
+    : cap('not_available', 'awaiting_public_https_verification',
+      'Deployment health is shown after a verified live check.');
+  let updates;
+  if (uploadedZip)
+    updates = cap('not_available', 'uploaded_source_has_no_supported_editor',
+      'Uploaded ZIP sites keep the GitHub workflow; the one-page editor does not apply.');
+  else if (canEdit && verified)
+    updates = cap('available_opt_in', 'editor_eligible',
+      'Edit → exact preview → approve → merge one GitHub update → we verify live.');
+  else
+    updates = cap('not_available', 'update_acceptance_pending',
+      verified
+        ? 'This retained site is not eligible for the one-page editor yet.'
+        : 'Website updates unlock after the site is verified live.');
+  return Object.freeze({
+    static_hosting: hosting,
+    https,
+    deployment_health: health,
+    website_updates: updates,
+    web_analytics: cap('manual_setup', 'review_provider_settings',
+      'Not configured here yet. Use Cloudflare Pages → Metrics → Web Analytics when ready (#85).'),
+    pr_previews: cap('blocked_permission_or_plan', 'preview_access_and_approval_required',
+      'GitHub PR previews stay off until you opt in; draft URLs can be public (#86).'),
+    custom_domains: cap('manual_setup', 'verified_domain_setup_required',
+      'Point a domain through your Cloudflare Pages project when you are ready.'),
+    email_routing: cap('not_available', 'owned_custom_domain_needed',
+      'Needs a custom domain and inbox you control.'),
+    seo_bundle: cap('not_available', 'separate_reviewed_artifact_needed',
+      'Extra SEO packaging is a separate reviewed update.'),
+    contact_forms: cap('not_available', 'verified_server_form_integration_needed',
+      'Forms need a separately approved delivery path.'),
+    advanced_services: cap('not_available', 'separate_usage_and_approval_review_needed',
+      'Workers, D1, KV, or R2 need a reviewed usage plan.')
+  });
+}
 
 const STATUS_COPY = Object.freeze({
   live: {
@@ -63,7 +140,7 @@ function timestamp(seconds) {
   return Number.isFinite(time.valueOf()) ? time.toISOString() : null;
 }
 
-export function projectToolkitCard(job, {canEdit = false} = {}) {
+export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} = {}) {
   if (!job || !isLaunchId(job.id)) return null;
   const status = job.display_status || job.status;
   const time = timestamp(job.updated_at);
@@ -75,6 +152,7 @@ export function projectToolkitCard(job, {canEdit = false} = {}) {
   if (status === 'live' && !verified)
     copy = {label: 'Verification details unavailable', detail: 'Open launch history for the recorded result.'};
   const editable = verified && canEdit;
+  const zip = Boolean(uploadedZip) || Number(job.uploaded_zip) === 1;
   return {
     name: job.customer_name,
     statusLabel: copy.label,
@@ -86,13 +164,19 @@ export function projectToolkitCard(job, {canEdit = false} = {}) {
     approvalFingerprint: typeof job.approval_digest === 'string' && DIGEST.test(job.approval_digest)
       ? job.approval_digest.toLowerCase() : null,
     errorCode: typeof job.error_code === 'string' ? job.error_code : null,
-    editPath: editable ? '/site-update?id=' + encodeURIComponent(job.id) : null
+    editPath: editable ? '/site-update?id=' + encodeURIComponent(job.id) : null,
+    capabilities: historyToolkitCapabilities({
+      verified, canEdit: editable, uploadedZip: zip
+    })
   };
 }
 
 export async function loadToolkitCards(env, session, time) {
   const rows = await listOwnedJobs(env, session, time);
-  const cards = rows.map(job => projectToolkitCard(job, {canEdit: Number(job.can_edit) === 1})).filter(Boolean);
+  const cards = rows.map(job => projectToolkitCard(job, {
+    canEdit: Number(job.can_edit) === 1,
+    uploadedZip: Number(job.uploaded_zip) === 1
+  })).filter(Boolean);
   if (!await hasCurrentOwnerSession(env, session, Math.floor(Date.now() / 1000)))
     throw Error('Account authorization changed');
   return cards;
@@ -126,13 +210,14 @@ function renderCard(card, escape) {
     ? '<p>Last result code <code>' + escape(card.errorCode) + '</code></p>' : '';
   const edit = card.editPath
     ? '<p><a href="' + escape(card.editPath) + '">Update this website</a></p>' : '';
+  const caps = Object.entries(card.capabilities || {}).map(([id, item]) => {
+    const label = CAP_LABELS[id] || id;
+    return '<li><strong>' + escape(label) + '</strong> (' + escape(item.state) + '): ' +
+      escape(item.detail) + '</li>';
+  }).join('');
   return '<section><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' +
     '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + digest + error + edit +
-    '<details><summary>Toolkit capabilities</summary><ul>' +
-    '<li>Website editor · ' + (card.editPath ? 'Available for this launch' : 'Unavailable for this launch') + '</li>' +
-    '<li>Visitor insights · Setup and traffic verification pending</li>' +
-    '<li>GitHub pull request previews · Protected preview setup pending</li>' +
-    '</ul></details></section>';
+    '<details><summary>Toolkit capabilities</summary><ul>' + caps + '</ul></details></section>';
 }
 
 export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ticketRaw, jobId, escape}) {
