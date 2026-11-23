@@ -87,15 +87,50 @@ async function getJson(fetchFn, url, token, {cloudflare = false} = {}) {
 }
 /**
  * Provider records are re-fetched using active owner-scoped grants; no resource
- * writes are performed. `site` and `consent` MUST come from trusted backend state,
+ * writes are performed. assertCurrentAuthorization(snapshot) is required and
+ * must independently recheck the live session epoch, grants and account/site
+ * selection at every boundary. A static true callback is NOT sufficient in production. `site` and `consent` MUST come from trusted backend state,
  * NEVER request fields or a model response. Never returns a preview URL or claims content/Access protection.
  * This is not a preview-enablement action or a canonical production verifier.
  */
-export async function verifyExistingPrPreview(input, {githubToken, cloudflareToken, fetchFn = fetch} = {}) {
+export async function verifyExistingPrPreview(input, {
+  githubToken, cloudflareToken, assertCurrentAuthorization, fetchFn = fetch
+} = {}) {
   if (!required(input)) return denied('blocked-approval-or-inventory');
+  if (typeof assertCurrentAuthorization !== 'function')
+    return denied('blocked-authorization-fence');
   if (typeof githubToken !== 'string' || !githubToken ||
       typeof cloudflareToken !== 'string' || !cloudflareToken) return denied('reauthorization-required');
-  const {site: s, consent: c, prNumber, deploymentId} = input;
+  // Everything here is an immutable, server-trusted snapshot, NOT browser fields.
+  const s = Object.freeze({...input.site});
+  const c = Object.freeze({...input.consent});
+  const {prNumber, deploymentId} = input;
+  const snapshot = Object.freeze({
+    githubUserId: s.githubUserId, githubRepositoryId: s.githubRepositoryId,
+    githubOwner: s.githubOwner, githubRepositoryName: s.githubRepositoryName,
+    cloudflareAccountId: s.cloudflareAccountId, pagesProjectId: s.pagesProjectId,
+    pagesProjectName: s.pagesProjectName, productionBranch: s.productionBranch,
+    prNumber, deploymentId, approvedBaseSha: c.approvedBaseSha,
+    approvedHeadSha: c.approvedHeadSha, approvedHtmlSha256: c.approvedHtmlSha256,
+    expiresAt: c.expiresAt
+  });
+  async function authorized() {
+    if (!required(input) ||
+        Object.keys(s).some(key => input.site?.[key] !== s[key]) ||
+        Object.keys(c).some(key => input.consent?.[key] !== c[key]) ||
+        input.prNumber !== prNumber || input.deploymentId !== deploymentId)
+      return false;
+    try {
+      // The caller MUST check a live auth epoch/provider grants/account selection.
+      // It gets no tokens or provider preview URLs.
+      const allowed = await assertCurrentAuthorization(snapshot);
+      return allowed === true && required(input) &&
+        Object.keys(s).every(key => input.site?.[key] === s[key]) &&
+        Object.keys(c).every(key => input.consent?.[key] === c[key]) &&
+        input.prNumber === prNumber && input.deploymentId === deploymentId;
+    } catch { return false; }
+  }
+  if (!await authorized()) return denied('authorization-changed-or-expired');
   const ghRoot = `https://api.github.com/repos/${enc(s.githubOwner)}/${enc(s.githubRepositoryName)}`;
   const cfRoot = `https://api.cloudflare.com/client/v4/accounts/${s.cloudflareAccountId}/pages/projects/${enc(s.pagesProjectName)}`;
   const [user, repo, pr, project] = await Promise.all([
@@ -104,6 +139,7 @@ export async function verifyExistingPrPreview(input, {githubToken, cloudflareTok
     getJson(fetchFn, ghRoot + '/pulls/' + prNumber, githubToken),
     getJson(fetchFn, cfRoot, cloudflareToken, {cloudflare: true})
   ]);
+  if (!await authorized()) return denied('authorization-changed-or-expired');
   const slug = s.githubRepositoryName.slice(4);
   if (user?.id !== s.githubUserId || user?.login?.toLowerCase() !== s.githubOwner.toLowerCase() ||
       repo?.id !== s.githubRepositoryId || repo?.owner?.id !== s.githubUserId ||
@@ -135,11 +171,13 @@ export async function verifyExistingPrPreview(input, {githubToken, cloudflareTok
     getJson(fetchFn, ghRoot + '/branches/main', githubToken),
     getJson(fetchFn, ghRoot + '/branches/' + enc(branch), githubToken)
   ]);
+  if (!await authorized()) return denied('authorization-changed-or-expired');
   if (baseBranch?.commit?.sha !== c.approvedBaseSha)
     return denied('blocked-pr-base-moved');
   if (ghBranch?.commit?.sha !== c.approvedHeadSha)
     return denied('blocked-pr-head-moved');
   const deployment = await getJson(fetchFn, cfRoot + '/deployments/' + enc(deploymentId), cloudflareToken, {cloudflare: true});
+  if (!await authorized()) return denied('authorization-changed-or-expired');
   if (deployment?.id !== deploymentId || deployment?.project_id !== s.pagesProjectId ||
       deployment?.project_name !== s.pagesProjectName ||
       deployment?.environment !== 'preview' || deployment?.is_skipped === true ||
@@ -151,6 +189,7 @@ export async function verifyExistingPrPreview(input, {githubToken, cloudflareTok
     return denied('preview-not-verified');
   if (!safeImmutableUrl(deployment.url, s.pagesProjectName, deployment.short_id))
     return denied('blocked-preview-url');
+  if (!await authorized()) return denied('authorization-changed-or-expired');
   // Never access /index.html anonymously. Authenticated canonical '/' review and
   // independently observed Access policy/host protection are not in current scopes.
   return {
