@@ -154,14 +154,20 @@ async function sha256(text) {
  *
  * principal, site and accountEvidence must be collected server-side from current
  * authenticated provider/account evidence. This is NOT an authorization verifier.
- * The live caller must separately fence session epoch and grant revocation before
- * and after it fetches the evidence; no hosted caller exists in this slice.
+ * A mandatory live server callback must recheck session epoch, selected owner/site
+ * and grants before and after async hashing; it receives only an immutable identity
+ * snapshot, never tokens/usage/PII. The hosted caller must also independently fence
+ * provider reads around the evidence collection; no hosted caller exists yet.
  */
 export async function prepareOptionalExtensionReview({
   principal, site, accountEvidence, requests
-} = {}, {now = Math.floor(Date.now()/1000)} = {}) {
+} = {}, {
+  now = Math.floor(Date.now()/1000), assertCurrentAuthorization
+} = {}) {
   if (!Number.isSafeInteger(now) || now < 1 || !safeIdentity(principal, site))
     return denied('trusted_site_identity_required');
+  if (typeof assertCurrentAuthorization !== 'function')
+    return denied('live_authorization_fence_required');
   if (!safeAccountEvidence(principal, accountEvidence, now))
     return denied('fresh_verified_account_plan_and_usage_required');
   if (!Array.isArray(requests) || requests.length === 0 || requests.length > SERVICE_ORDER.length)
@@ -190,6 +196,32 @@ export async function prepareOptionalExtensionReview({
   const identity = Object.freeze({githubUserId:site.githubUserId,
     repositoryId:site.repositoryId,cloudflareAccountId:site.cloudflareAccountId,
     pagesProjectId:site.pagesProjectId,baseCommitSha:site.baseCommitSha});
+  // Reject stale sessions even if all input shapes look valid. This callback
+  // MUST be server-side and validate current grant epochs and selected resources;
+  // simply returning true from a browser-provided function is never sufficient.
+  const authReference = Object.freeze({...identity,
+    checkedAt:snapshot.checkedAt, expiresAt:snapshot.expiresAt});
+  async function authorizationStillCurrent() {
+    if (!safeIdentity(principal,site) ||
+        !safeAccountEvidence(principal,accountEvidence,now) ||
+        principal.githubUserId !== authReference.githubUserId ||
+        principal.cloudflareAccountId !== authReference.cloudflareAccountId ||
+        site.repositoryId !== authReference.repositoryId ||
+        site.pagesProjectId !== authReference.pagesProjectId ||
+        site.baseCommitSha !== authReference.baseCommitSha)
+      return false;
+    try {
+      if (await assertCurrentAuthorization(authReference) !== true) return false;
+    } catch { return false; }
+    return safeIdentity(principal,site) &&
+      safeAccountEvidence(principal,accountEvidence,now) &&
+      principal.githubUserId === authReference.githubUserId &&
+      principal.cloudflareAccountId === authReference.cloudflareAccountId &&
+      site.repositoryId === authReference.repositoryId &&
+      site.pagesProjectId === authReference.pagesProjectId &&
+      site.baseCommitSha === authReference.baseCommitSha;
+  }
+  if (!await authorizationStillCurrent()) return denied('live_authorization_changed_or_expired');
   const services = Object.freeze(selected.map(item=>projection(item,snapshot)));
   const manifest = Object.freeze({
     kind:'launch-and-own-optional-service-review-v1', identity, checkedAt:snapshot.checkedAt,
@@ -197,6 +229,7 @@ export async function prepareOptionalExtensionReview({
     selected, services
   });
   const digest = await sha256(JSON.stringify(manifest));
+  if (!await authorizationStillCurrent()) return denied('live_authorization_changed_or_expired');
   // Reject in-flight mutation of any trust-bearing input. A digest alone is
   // never consent; future write adapters must re-read provider evidence again.
   if (!safeIdentity(principal,site) || !safeAccountEvidence(principal,accountEvidence,now) ||
