@@ -1,6 +1,6 @@
 # Read-only SHA-pinned managed-site sidecar evidence (#39)
 
-**Implementation model: GPT-6 (OpenAI). Code-only, not hosted, not merged, not deployed.**
+**Merged in [PR #112](https://github.com/mitchelldawkinsjr/launch-and-own/pull/112). Hosted integration is pending.**
 
 The approved-on-review #39 structured editor planner in [PR #103](https://github.com/mitchelldawkinsjr/launch-and-own/pull/103) deliberately refuses unverified sidecar proof. The existing merged [#98](https://github.com/mitchelldawkinsjr/launch-and-own/pull/98) can verify a current managed GitHub repository/Pages linkage and read the current `public/index.html` at a SHA-pinned `main` commit; it does **not** read the private structured config. This separate GET-only adapter supplies the missing backend proof without enabling the editor.
 
@@ -17,7 +17,7 @@ The approved-on-review #39 structured editor planner in [PR #103](https://github
 
 The result contains `{status:'pinned_sidecar_evidence_verified',currentSource,sidecarEvidence,sidecarRaw,historicalContinuityVerified:false,editorEligible:false,providerWriteAuthorized:false}`. Raw homepage HTML and sidecar text are **PRIVATE untrusted customer content**. Never return them from `/toolkit/source`, render them within the trusted onboarding origin, put them in telemetry, logs or public GitHub comments, or persist them past the current consent-bound review.
 
-The adapter uses **12 external provider GETs** (eight for #98's current-source proof, one sidecar read, three final revalidation reads) and a **separate 40 D1 authorization-fence callback invocations on the present-file path** (the absent 404 path has fewer checks). These are distinct budgets. If each callback is a D1 subrequest, **12 + 40 = 52** subrequests before token refresh, encryption or route overhead: **this design is NOT safe to enable as a single Workers Free request under the 50-subrequest limit.** Domain must either split the source and sidecar evidence into separately authorized requests with a short-lived server-bound proof or restructure the provider/session checks with a measured safe cap before hosted integration. Pure library CI does not demonstrate Free-tier deployability. Neither this helper nor a 404 is a promise of complete owner-site inventory.
+The present-file path makes **12 external provider GETs** (eight for #98's current-source proof, one sidecar read, and three final revalidation reads) and invokes the **authorization callback 40 times**. Workers Free allows 50 external subrequests and 1,000 subrequests to internal services per invocation. D1 binding calls made by the authorization callback count toward the internal-services limit. Domain must measure the full route before enabling hosted integration, including token refresh, D1 usage from the actual callback, CPU time for parsing and hashing, and account quotas. Both limits apply to the full invocation. [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/#subrequests)
 
 ## What this does not authorize
 
@@ -29,7 +29,7 @@ The adapter uses **12 external provider GETs** (eight for #98's current-source p
 ## Remaining dependencies and QA
 
 - #2 / Domain and merged #109 own live session/epoch-bound site-reference handoff, a separately authenticated expected SHA, token refresh, subrequest-budgeted execution, no-store routes and browser privacy. This code deliberately adds **no Worker/UI files** or shared route.
-- #83 / Sol reviews this code-only sidecar proof contract relative to #98 and #103 before integration.
+- #117 supplies a separate pinned Git tree preflight for any approved edit or adoption. Require its regular-file and exact tree checks before writing.
 - #30 and #39 own the later exact approved source migration/PR editor; #21 independent owner/customer acceptance and hosted go-live authorization remain open.
 - Tests cover valid sidecar with #109's actual no-SHA sealed-reference shape plus explicit trusted SHA, same-commit 404, BOM-byte digest, malformed file/base64/UTF-8, wrong site/account or immutable resource IDs, moving `main`, session revocation and account/token/callback/selector/expected-SHA mutation during I/O, token-safe errors, strict GET-only transport, **12 provider GETs and 40 separate D1 authorization calls**, and absent-SHA refusal before any provider read. Run `npm test`, distribution QA, preflight, Worker syntax, and local Worker/D1 recovery.
 
