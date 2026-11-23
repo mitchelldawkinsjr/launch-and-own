@@ -137,8 +137,9 @@ export async function verifyExistingPrPreview(input, {githubToken, cloudflareTok
   if (cfg.preview_deployment_setting !== 'custom' ||
       !Array.isArray(cfg.preview_branch_includes) ||
       cfg.preview_branch_includes.length !== 1 || cfg.preview_branch_includes[0] !== approvedInclude ||
-      (cfg.preview_branch_excludes != null &&
-        (!Array.isArray(cfg.preview_branch_excludes) || cfg.preview_branch_excludes.length !== 0)) ||
+      !Array.isArray(cfg.preview_branch_excludes) ||
+      cfg.preview_branch_excludes.length !== 1 ||
+      cfg.preview_branch_excludes[0] !== 'main' ||
       cfg.pr_comments_enabled === true)
     return denied('blocked-unsafe-preview-policy');
   const branch = pr?.head?.ref;
