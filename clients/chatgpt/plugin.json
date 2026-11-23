@@ -1,0 +1,37 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "launch-and-own",
+  "version": "0.1.0",
+  "description": "Build customer-owned static websites with secure GitHub and Cloudflare linking, exact preview, separate human approval and verified publication via Launch & Own.",
+  "homepage": "https://onboard.360web.cloud",
+  "repository": "https://github.com/mitchelldawkinsjr/launch-and-own",
+  "author": {
+    "name": "360Web"
+  },
+  "keywords": [
+    "website",
+    "GitHub",
+    "Cloudflare",
+    "static hosting",
+    "Launch & Own"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Launch & Own",
+        "shortDescription": "Build and own a website",
+        "longDescription": "Prepare a customer-owned website in ChatGPT, connect GitHub and Cloudflare through a secure browser flow, review the exact site and separately approve publication. A verified live release is required before it is called published.",
+        "developerName": "360Web",
+        "category": "Productivity",
+        "capabilities": [
+          "Interactive"
+        ],
+        "defaultPrompt": [
+          "Help me plan and build a website I own.",
+          "Prepare a simple website and show me the approval steps.",
+          "Check the publication status of my Launch & Own website."
+        ]
+      }
+    }
+  }
+}
