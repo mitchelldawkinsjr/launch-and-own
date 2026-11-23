@@ -112,9 +112,10 @@ function matchesReference(repo, project, current, reference, principal, expected
  * as the trusted expected commit. This module does not issue sealed tickets.
  *
  * Combines #98's eight GETs with a pinned sidecar GET and three final provider
- * GETs = at most 12 external reads and up to 40 D1 epoch callback invocations.
- * These budgets are SEPARATE and can exceed Workers Free subrequest allowance
- * when combined; no hosted Free route is authorized without Domain budgeting.
+ * GETs = at most 12 external reads and up to 40 authorization callback calls.
+ * Workers Free accounts for external fetches and internal binding calls
+ * separately. Measure the complete route, including D1 usage and CPU time,
+ * before hosted integration.
  * An honest 404 after verified private-repo access records absence at that SHA.
  * A 200 returns the SHA-256 of the EXACT fetched sidecar bytes, plus its GitHub
  * blob ID. Never auto-creates the file or claims generated-one-page eligibility.
