@@ -73,7 +73,7 @@ test('protected resource metadata advertises provisional bridge markers', async 
   const meta = protectedResourceMetadata();
   assert.equal(meta.resource, RESOURCE_URI);
   assert.equal(meta.launch_and_own.bridge_audience, BRIDGE_AUDIENCE);
-  assert.equal(meta.launch_and_own.status, 'not_deployed');
+  assert.equal(meta.launch_and_own.status, 'deployed_gated');
   const h = host();
   const res = await handleBridgeRequest(h, {
     method: 'GET', url: 'https://onboard.360web.cloud' + RESOURCE_METADATA_PATH

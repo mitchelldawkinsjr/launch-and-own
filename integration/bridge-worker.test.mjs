@@ -28,7 +28,7 @@ test('approved Fetch adapter serves metadata and authenticated tool calls', asyn
   const fetch = createBridgeFetch(host);
   const meta = await fetch(new Request(ORIGIN + RESOURCE_METADATA_PATH));
   assert.equal(meta.status, 200);
-  assert.equal((await meta.json()).launch_and_own.status, 'not_deployed');
+  assert.equal((await meta.json()).launch_and_own.status, 'deployed_gated');
 
   const token = host.tokens.issue({
     subject: 'owner_user_1234', clientId: 'chatgpt_client_1', nowSeconds: now,

@@ -5,14 +5,16 @@
  */
 import {BRIDGE_AUDIENCE, BROWSER_ORIGIN, CONTRACT_VERSION} from './tool-contract.mjs';
 
-export const RESOURCE_URI = 'https://onboard.360web.cloud/mcp';
+export const RESOURCE_URI = 'https://mcp.360web.cloud/mcp';
 export const RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource';
 
 /** RFC 9728-shaped document for discovery; audience must match transport checks. */
 export function protectedResourceMetadata({
   resource = RESOURCE_URI,
   authorizationServers = [BROWSER_ORIGIN],
-  scopesSupported = ['launch_and_own.bridge']
+  scopesSupported = ['launch_and_own.bridge'],
+  // Worker may be approved while customer access stays gated by the release matrix.
+  status = 'deployed_gated'
 } = {}) {
   if (typeof resource !== 'string' || !resource.startsWith('https://'))
     throw new Error('invalid_resource');
@@ -27,7 +29,7 @@ export function protectedResourceMetadata({
       contract_version: CONTRACT_VERSION,
       bridge_audience: BRIDGE_AUDIENCE,
       browser_origin: BROWSER_ORIGIN,
-      status: 'not_deployed'
+      status
     })
   });
 }

@@ -66,18 +66,19 @@
     },
     "shared_mcp_api": {
       "label": "Shared authenticated MCP/API",
-      "implementation": "merged",
+      "implementation": "deployed",
       "access": "not_available",
       "verification": "ci_only",
       "evidence": [
-        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/74",
-        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/71"
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/43",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/79",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/77",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/76"
       ],
       "blockers": [
-        "Undeployed prototype only (Worker returns 503 unless Domain sets BRIDGE_DEPLOYMENT=approved)",
-        "Domain must create dedicated bridge D1, apply migrations, set matching BRIDGE_TICKET_KEY on bridge+onboarding, set BRIDGE_ORIGIN, smoke-deploy (docs/DOMAIN_MCP_BRIDGE_HANDOFF.md)",
-        "Hosted /agent-link E2E against an approved bridge host still outstanding",
-        "Create-draft digests use exact renderSite HTML; update-draft re-render and independent consenting-user QA still required (#43)"
+        "Hosted Worker at https://mcp.360web.cloud is BRIDGE_DEPLOYMENT=approved (metadata deployed_gated) but customer access stays not_available",
+        "Consenting-user /agent-link E2E and MCP OAuth client registration still outstanding",
+        "Update-draft re-render and independent consenting-user QA still required (#43/#21)"
       ]
     },
     "claude_plugin": {

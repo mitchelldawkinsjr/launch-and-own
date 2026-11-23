@@ -13,6 +13,7 @@
   ],
   "vars": {
     "ONBOARDING_ORIGIN": "https://onboard.360web.cloud",
+    "BRIDGE_ORIGIN": "https://mcp.360web.cloud",
     "CF_SCOPES": "account-settings.read page.read page.write offline_access",
     "GH_CLIENT_ID": "Iv23li8rVTNtZrfTctqJ",
     "GH_APP_SLUG": "launch-and-own",
