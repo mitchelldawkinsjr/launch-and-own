@@ -32,8 +32,7 @@ const fixtures = () => ({
     githubUserId: userId, githubOwner: owner, cloudflareAccountId: account,
     repositoryId: repoId, repositoryName: repoName,
     pagesProjectId: projectId, pagesProjectName: projectName,
-    branch: 'main', productionBranch: 'main', sourceKind: 'managed-existing',
-    baseCommitSha: head
+    branch: 'main', productionBranch: 'main', sourceKind: 'managed-existing'
   },
   user: {id: userId, login: owner, email: 'hidden@secret.test'},
   repo: {id: repoId, name: repoName, private: true, default_branch: 'main',
@@ -82,6 +81,7 @@ function harness() {
   }
   const data = {
     principal: f.principal, reference: f.reference, siteId: f.reference.siteId,
+    expectedBaseCommitSha: head,
     githubAccessToken: 'gh-private-secret', cloudflareAccessToken: 'cf-private-secret',
     assertCurrentAuthorization, fetchFn
   };
@@ -120,7 +120,8 @@ test('current managed source + exact sidecar bytes are returned backend-internal
   assert(h.calls.every(c => c.url.startsWith('https://api.github.com/') ||
     c.url.startsWith('https://api.cloudflare.com/client/v4/')));
   assert(h.calls.some(c => c.url.includes('/site-config.json?ref=' + head)));
-  assert(h.checks.length >= 3 * h.calls.length);
+  assert.equal(h.checks.length, 40,
+    '12 external GETs and 40 independent D1 authorization callbacks');
   assert(h.checks.every(x => Object.isFrozen(x)));
   for (const secret of ['gh-private-secret', 'cf-private-secret',
     'hidden@secret.test', 'authorization'])
@@ -177,7 +178,7 @@ test('changed selected principal or server-held ref during sidecar GET is reject
   for (const change of [
     h => {h.f.principal.cloudflareAccountId='f'.repeat(32);},
     h => {h.f.reference.repositoryId=999;},
-    h => {h.f.reference.baseCommitSha=moved;}
+    h => {h.data.expectedBaseCommitSha=moved;}
   ]) {
     const h=harness();
     h.custom.set(sidecarPath, async () => {
@@ -222,7 +223,7 @@ test('a stale or wrong owner reference is denied before sidecar GET', async () =
     [{principal: {...fixtures().principal, githubUserId: 99}}, 'current_source_unavailable'],
     [{reference: {...fixtures().reference, cloudflareAccountId:'f'.repeat(32)}},
       'current_source_unavailable'],
-    [{reference: {...fixtures().reference, baseCommitSha:moved}}, 'current_source_changed']
+    [{expectedBaseCommitSha:moved}, 'current_source_changed']
   ]) {
     const h=harness();
     await assert.rejects(h.read(override),code(expected));
@@ -257,6 +258,44 @@ test('redirect and token-bearing transport errors are safe and produce no sideca
   const n=harness();
   n.custom.set(sidecarPath, async () => {throw Error('Bearer gh-private-secret');});
   await assert.rejects(n.read(),code('github_temporarily_unavailable'));
+});
+
+test('#109 sealed reference shape has no embedded base SHA; trusted expected SHA permits proof', async () => {
+  const h=harness();
+  assert(!Object.hasOwn(h.f.reference, 'baseCommitSha'));
+  const result=await h.read();
+  assert.equal(result.currentSource.baseCommitSha, head);
+  assert.equal(result.sidecarEvidence.refCommitSha, head);
+  assert.equal(result.sidecarEvidence.siteId, h.f.reference.siteId);
+  assert.equal(h.calls.length, 12);
+});
+
+test('a trusted expected SHA is mandatory and never inferred from client or sealed reference', async () => {
+  for (const expectedBaseCommitSha of [undefined,null,'bad','x'.repeat(40)]) {
+    const h=harness();
+    await assert.rejects(h.read({expectedBaseCommitSha}),
+      code('trusted_expected_base_sha_required'));
+    assert.equal(h.calls.length,0);
+  }
+});
+
+test('mid-read callback, token, selector, SHA or fetch replacement is rejected', async () => {
+  for (const mutate of [
+    h => {h.data.assertCurrentAuthorization=async () => true;},
+    h => {h.data.githubAccessToken='new-gh-token';},
+    h => {h.data.cloudflareAccessToken='new-cf-token';},
+    h => {h.data.siteId='managed_999_other';},
+    h => {h.data.expectedBaseCommitSha=moved;},
+    h => {h.data.fetchFn=async () => response(h.f.sidecar);}
+  ]) {
+    const h=harness();
+    h.custom.set(sidecarPath, async () => {
+      mutate(h);
+      return response(h.f.sidecar);
+    });
+    await assert.rejects(readPinnedManagedSidecar(h.data),
+      code('verified_reference_changed'));
+  }
 });
 
 test('rejected/expired authorization before any provider call fails closed', async () => {
