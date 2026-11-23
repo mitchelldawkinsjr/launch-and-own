@@ -15,7 +15,7 @@ const DIGEST = /^[a-f0-9]{64}$/i;
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{3,79}$/;
 const SAFE_STATES = new Set([
   'draft', 'queued', 'pending_deployment', 'needs_reauthorization',
-  'failed', 'live'
+  'failed', 'live', 'last_verified'
 ]);
 const MAX_TEXT = 2000;
 const MAX_BRIEF = 12000;
@@ -335,6 +335,17 @@ export function publicationStatus(record, scope) {
   if (!SAFE_STATES.has(record.status)) deny('invalid_publication_status');
   const basics = {job_id: record.id, state: record.status};
   if (!simpleId(record.id)) deny('invalid_publication_status');
+  if (record.status === 'last_verified') {
+    if (!Number.isSafeInteger(record.lastVerifiedAt) || record.lastVerifiedAt <= 0 ||
+        !hexSha(record.lastVerifiedCommitSha) || !hexDigest(record.lastVerifiedHtmlSha256))
+      deny('invalid_publication_status');
+    return Object.freeze({
+      ...basics,
+      last_verified_at: record.lastVerifiedAt,
+      last_verified_commit_sha: record.lastVerifiedCommitSha.toLowerCase(),
+      last_verified_html_sha256: record.lastVerifiedHtmlSha256.toLowerCase()
+    });
+  }
   if (record.status !== 'live') return Object.freeze(basics);
   if (record.canonicalProductionVerified !== true ||
       record.publicHtmlVerified !== true ||
