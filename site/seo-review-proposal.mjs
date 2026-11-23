@@ -119,7 +119,9 @@ export async function buildSeoReviewProposal({
   if (!Array.isArray(existingPaths) || existingPaths.some(p => typeof p !== 'string'))
     return deny('blocked-file-inventory', 'Exact existing file paths must be reviewed');
   const existingSnapshot = Object.freeze([...existingPaths]);
-  const existing = new Set(existingSnapshot);
+  // Case-fold file inventory before collision checks; provider filesystems may
+  // differ in casing behavior and must not silently shadow existing SEO files.
+  const existing = new Set(existingSnapshot.map(path => path.toLowerCase()));
   if (existingPaths.length !== existing.size ||
       existing.has('public/robots.txt') || existing.has('public/sitemap.xml'))
     return deny('blocked-existing-seo-file',
