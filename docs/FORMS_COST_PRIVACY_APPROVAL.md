@@ -13,8 +13,9 @@ Workstream C code contract for contact-form cost, privacy, retention, abuse limi
 | `onboarding/migrations/0008_forms_cost_privacy_approvals.sql` | Operator-approved gate ledger (no public insert) |
 | `onboarding/forms-cost-privacy-store.mjs` | Session-fenced D1 reader for `verifyFormsCostPrivacyGate` |
 | `onboarding/execute-option.mjs` | Forms path stays OFF unless `OPTION_FORMS_ENABLED=true` **and** a live approved gate row exists |
+| `pipeline/customer-form-worker.mjs` | Customer D1 schema + Siteverify handler + acceptance probe ([docs](CUSTOMER_FORM_WORKER.md)) |
 
-`canActivate` / `canWrite` / `createResources` stay false on reviews. The Cloudflare extension provider still has **no** Turnstile/D1/form-Worker create methods, so even a correctly wired gate cannot provision form resources until Domain adds those adapters under a separate approval.
+`canActivate` / `canWrite` / `createResources` stay false on reviews. The Cloudflare extension provider still has **no** live Turnstile/D1/form-Worker create methods, so even a correctly wired gate cannot provision Cloudflare resources until Domain adds those adapters under a separate approval.
 
 ## Gate shape
 
