@@ -2,7 +2,8 @@
  * Build a bridge host from Worker env. Used when BRIDGE_DEPLOYMENT=approved.
  * Requires D1 binding + BRIDGE_TICKET_KEY. Does not mint tickets (onboarding does).
  */
-import {createBridgeHost, MemoryAgentTokenStore} from './bridge-transport.mjs';
+import {createBridgeHost} from './bridge-transport.mjs';
+import {D1AgentTokenStore} from './d1-agent-token-store.mjs';
 import {D1OwnerLinkStore} from './d1-owner-link-store.mjs';
 import {D1SiteDraftStore} from './d1-site-draft-store.mjs';
 import {D1JobPublicationStore} from './d1-job-publication-store.mjs';
@@ -14,7 +15,7 @@ export function createHostFromEnv(env) {
       !/^[a-f0-9]{64}$/i.test(env.BRIDGE_TICKET_KEY))
     throw new Error('bridge_missing_ticket_key');
   return createBridgeHost({
-    tokens: new MemoryAgentTokenStore(),
+    tokens: new D1AgentTokenStore(env.DB),
     links: new D1OwnerLinkStore(env.DB),
     sites: new D1SiteDraftStore(env.DB),
     jobs: new D1JobPublicationStore(env.DB),

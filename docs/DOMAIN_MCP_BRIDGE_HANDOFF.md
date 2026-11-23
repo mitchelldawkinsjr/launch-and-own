@@ -10,7 +10,7 @@ This document is the **operator checklist** to take the in-repo MCP bridge from 
 | --- | --- | --- |
 | Tool contract + transport | `integration/tool-contract.mjs`, `bridge-transport.mjs` | Merged; CI-tested |
 | Memory adapters | `*-store.mjs` | Test-only |
-| D1 schema + adapters | `integration/migrations/`, `d1-owner-link-store.mjs`, `d1-site-draft-store.mjs`, `d1-job-publication-store.mjs` | Ready in repo; Domain creates DB + applies migrations |
+| D1 schema + adapters | `integration/migrations/`, `d1-agent-token-store.mjs`, `d1-owner-link-store.mjs`, `d1-site-draft-store.mjs`, `d1-job-publication-store.mjs` | Ready in repo; Domain creates DB + applies migrations |
 | Worker entry | `integration/bridge-worker.mjs` | Returns **503** unless `BRIDGE_DEPLOYMENT=approved` |
 | Wrangler | `integration/wrangler.bridge.jsonc` | `workers_dev: false`; D1 binding placeholder |
 | Browser link consume | `POST /mcp/link/browser` | Accepts **sealed onboarding ticket** only |
