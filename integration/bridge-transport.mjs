@@ -118,7 +118,8 @@ function jsonOk(body, status = 200) {
  * Supported routes:
  *   GET  /.well-known/oauth-protected-resource
  *   POST /mcp/tools/call   { name, arguments }  + Authorization: Bearer …
- *   POST /mcp/link/browser { ticket } + Bearer … — sealed onboarding ticket only
+ *   POST /mcp/link/browser { ticket } — sealed onboarding ticket only
+ *     (optional agent Bearer; ticket-only uses challenge subject/client)
  *
  * Agent-supplied `verified` provider maps are never accepted.
  */
@@ -206,7 +207,9 @@ async function dispatchToolCall(host, request) {
       challenge_id: challenge.id,
       expires_at: challenge.expiresAt,
       action: 'open_hosted_onboarding',
-      action_url: assertSafeBrowserHandoff(BROWSER_ORIGIN + '/')
+      action_url: assertSafeBrowserHandoff(
+        `${BROWSER_ORIGIN}/agent-link?challenge_id=${challenge.id}`
+      )
       // No OAuth state, codes, or expected IDs returned to the model.
     });
   }
@@ -260,12 +263,12 @@ async function dispatchToolCall(host, request) {
 /**
  * Consume a sealed browser link ticket minted by onboarding after real OAuth.
  * Rejects raw `verified` maps (agent forgery surface removed in #71).
+ *
+ * Ticket-only (no agent Bearer) is the browser/onboarding path: subject and
+ * client come from the one-time challenge row, never from the request body.
  */
 async function completeBrowserLink(host, request) {
-  const token = bearerFromAuthorization(request.headers?.authorization);
-  if (!token) deny('unauthenticated');
   if (!host.bridgeTicketKey) deny('not_found');
-  const principal = await principalFromToken(host, token);
   const now = host.nowSeconds();
   const payload = readJsonBody(request);
   if (typeof payload.ticket !== 'string' || payload.verified !== undefined)
@@ -273,6 +276,34 @@ async function completeBrowserLink(host, request) {
   const opened = await openBrowserLinkTicket(host.bridgeTicketKey, payload.ticket, {
     nowSeconds: now
   });
+  const challenge = await host.links.peekChallenge(opened.challengeId);
+  if (!challenge || challenge.consumedAt !== null || challenge.expiresAt <= now)
+    deny('invalid_link_challenge');
+
+  const token = bearerFromAuthorization(request.headers?.authorization);
+  let principal;
+  if (token) {
+    principal = await principalFromToken(host, token);
+    if (principal.subject !== challenge.subject ||
+        principal.clientId !== challenge.clientId)
+      deny('invalid_link_challenge');
+  } else {
+    const link = await host.links.getLink(challenge.subject, challenge.clientId);
+    principal = {
+      authenticated: true,
+      audience: BRIDGE_AUDIENCE,
+      subject: challenge.subject,
+      clientId: challenge.clientId,
+      expiresAt: now + 120,
+      linkedOwner: link ? {
+        githubUserId: link.githubUserId,
+        cloudflareAccountId: link.cloudflareAccountId,
+        authorizationEpoch: link.authorizationEpoch,
+        reauthorized: link.reauthorized === true
+      } : null
+    };
+  }
+
   const record = await host.links.consumeLinkChallenge({
     challengeId: opened.challengeId,
     verifiedIdentity: {

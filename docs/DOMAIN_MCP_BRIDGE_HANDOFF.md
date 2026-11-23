@@ -47,19 +47,20 @@ This document is the **operator checklist** to take the in-repo MCP bridge from 
 3. Confirm `POST /mcp/tools/call` without bearer → 401; with forged link body → no link mutation.
 4. Record redacted evidence on #43 (no secrets).
 
-### C. Browser link mint (onboarding follow-up)
+### C. Browser link mint (onboarding)
 
-Until a coordinated onboarding PR ships, agents cannot complete owner linking in production.
-
-Required onboarding behavior (separate PR):
+In-repo: `GET|POST /agent-link` (`onboarding/agent-link.mjs`). Still needs Domain secrets before it works in production.
 
 1. Customer is already signed into `onboard.360web.cloud` with GitHub **and** selected Cloudflare account.
-2. Customer opens an agent-link page with `challenge_id` from `start_connect_accounts`.
-3. Onboarding **mints** a short-lived sealed ticket with `BRIDGE_TICKET_KEY` containing only:
-   - `githubUserId`, `cloudflareAccountId` (from server session — not form fields the model can invent)
-   - `challengeId`, `expiresAt`, `nonce`
-4. Browser `POST`s ticket to bridge `https://<host>/mcp/link/browser` with the **agent** bearer for the same subject/client (or a one-time exchange documented in the PR).
+2. Agent `start_connect_accounts` hands off to `/agent-link?challenge_id=…`.
+3. Customer confirms (CSRF). Onboarding **mints** a short-lived sealed ticket with `BRIDGE_TICKET_KEY` using **session** GitHub user + Cloudflare account only.
+4. Onboarding Worker `POST`s `{ticket}` to `BRIDGE_ORIGIN/mcp/link/browser` (no agent Bearer; challenge row supplies subject/client).
 5. Bridge unseals ticket, runs D1 `consumeLinkChallenge`, returns safe linked projection.
+
+Operator secrets/vars on **onboarding** Worker (in addition to bridge):
+
+- Secret `BRIDGE_TICKET_KEY` — **same** 64-hex value as the bridge Worker
+- Var `BRIDGE_ORIGIN` — exact HTTPS origin of the bridge host (e.g. `https://mcp.360web.cloud`)
 
 ### D. MCP OAuth resource registration
 

@@ -90,9 +90,10 @@ test('sealed browser ticket completes link; raw verified map still 404', async (
     cloudflareAccountId: account,
     nowSeconds: now
   });
+  // Ticket-only (no agent Bearer): onboarding Worker path.
   const linked = await handleBridgeRequest(h, {
     method: 'POST', url: ORIGIN + '/mcp/link/browser',
-    headers: {authorization: 'Bearer ' + token},
+    headers: {},
     body: {ticket}
   });
   assert.equal(linked.status, 200);

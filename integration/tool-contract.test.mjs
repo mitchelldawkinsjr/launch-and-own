@@ -207,7 +207,12 @@ test('exact-approval draft rejects expired, swapped digest, changed repo and sta
 });
 
 test('handoff only uses known non-sensitive browser URLs, never approval tokens', () => {
-  for (const url of ['https://onboard.360web.cloud/', 'https://onboard.360web.cloud/review']) {
+  const agentLink = 'https://onboard.360web.cloud/agent-link?challenge_id=link_' + 'ab'.repeat(12);
+  for (const url of [
+    'https://onboard.360web.cloud/',
+    'https://onboard.360web.cloud/review',
+    agentLink
+  ]) {
     assert.equal(assertSafeBrowserHandoff(url), url);
   }
   for (const url of [
@@ -217,6 +222,9 @@ test('handoff only uses known non-sensitive browser URLs, never approval tokens'
     'https://onboard.360web.cloud/review?state=token',
     'https://onboard.360web.cloud/review#grant',
     'https://onboard.360web.cloud/approve',
+    'https://onboard.360web.cloud/agent-link',
+    'https://onboard.360web.cloud/agent-link?challenge_id=bad',
+    'https://onboard.360web.cloud/agent-link?challenge_id=link_ab&extra=1',
     'javascript:alert(1)'
   ]) fails('unsafe_handoff', () => assertSafeBrowserHandoff(url));
 
