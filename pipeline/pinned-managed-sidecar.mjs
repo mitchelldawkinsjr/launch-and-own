@@ -4,11 +4,13 @@ import {readCurrentManagedHomepage, ManagedSiteInventoryError}
   from './owned-site-inventory.mjs';
 import {matchesApprovedPagesProject} from './approved-pages-project.mjs';
 import {isManagedRepositoryDescription} from './managed-site-repository.mjs';
+import {MANAGED_CONFIG_PATH} from './managed-site-config.mjs';
 
-export const PINNED_MANAGED_SIDECAR_PATH = '.launch-and-own/site-config.json';
+export const PINNED_MANAGED_SIDECAR_PATH = MANAGED_CONFIG_PATH;
 const GIT_SHA = /^[a-f0-9]{40}$/i;
 const MAX_SIDECAR_BYTES = 16 * 1024;
-const SIDECAR_URL_PATH = '/contents/.launch-and-own/site-config.json';
+const SIDECAR_URL_PATH = '/contents/' + MANAGED_CONFIG_PATH.split('/')
+  .map(encodeURIComponent).join('/');
 
 export class PinnedSidecarError extends Error {
   constructor(code) {
@@ -20,28 +22,43 @@ export class PinnedSidecarError extends Error {
 const deny = code => { throw new PinnedSidecarError(code); };
 const encode = encodeURIComponent;
 function copyInputs(options) {
+  const {siteId, expectedBaseCommitSha, githubAccessToken, cloudflareAccessToken,
+    assertCurrentAuthorization, fetchFn = fetch} = options ?? {};
+  if (typeof expectedBaseCommitSha !== 'string' || !GIT_SHA.test(expectedBaseCommitSha))
+    deny('trusted_expected_base_sha_required');
   let principal, reference;
   try {
     principal = structuredClone(options?.principal);
     reference = structuredClone(options?.reference);
   } catch { deny('verified_reference_required'); }
-  if (!principal || !reference || typeof options?.assertCurrentAuthorization !== 'function' ||
-      typeof options.githubAccessToken !== 'string' || !options.githubAccessToken ||
-      typeof options.cloudflareAccessToken !== 'string' || !options.cloudflareAccessToken)
+  if (!principal || !reference || typeof assertCurrentAuthorization !== 'function' ||
+      typeof githubAccessToken !== 'string' || !githubAccessToken ||
+      typeof cloudflareAccessToken !== 'string' || !cloudflareAccessToken ||
+      typeof fetchFn !== 'function')
     deny('verified_reference_required');
-  // #98 revalidates every immutable owner, repo and linked Pages resource.
-  // Keep this copy separate from caller-mutated objects during all awaits.
-  const originals = [options.principal, options.reference], copies = [principal, reference];
+  // #109 sealed references pin owner/repo/project identity but deliberately DO
+  // NOT contain baseCommitSha. Backend authenticates a separate exact expected
+  // SHA (from a server-side current-source proof), never a client query param.
+  const originals = [options.principal, options.reference];
   let initial;
-  try { initial = originals.map(x => JSON.stringify(x)); }
+  try { initial = originals.map(value => JSON.stringify(value)); }
   catch { deny('verified_reference_required'); }
   function unchanged() {
     try {
-      if (originals.some((x, i) => JSON.stringify(x) !== initial[i]))
+      if (originals.some((value, i) => JSON.stringify(value) !== initial[i]) ||
+          options.siteId !== siteId ||
+          options.expectedBaseCommitSha !== expectedBaseCommitSha ||
+          options.githubAccessToken !== githubAccessToken ||
+          options.cloudflareAccessToken !== cloudflareAccessToken ||
+          options.assertCurrentAuthorization !== assertCurrentAuthorization ||
+          (options.fetchFn ?? fetch) !== fetchFn)
         deny('verified_reference_changed');
     } catch { deny('verified_reference_changed'); }
   }
-  return {principal, reference, unchanged};
+  return {principal, reference, siteId,
+    expectedBaseCommitSha: expectedBaseCommitSha.toLowerCase(),
+    githubAccessToken, cloudflareAccessToken, assertCurrentAuthorization,
+    fetchFn, unchanged};
 }
 async function digest(bytes) {
   const raw = await crypto.subtle.digest('SHA-256', bytes);
@@ -65,7 +82,7 @@ function decodedGitHubBlob(file) {
     return {raw, bytes, blobSha: file.sha.toLowerCase()};
   } catch { deny('sidecar_content_unverifiable'); }
 }
-function matchesReference(repo, project, current, reference, principal) {
+function matchesReference(repo, project, current, reference, principal, expectedBaseCommitSha) {
   const name = reference.repositoryName;
   const projectName = name + '-site';
   const source = project?.source?.config;
@@ -82,18 +99,22 @@ function matchesReference(repo, project, current, reference, principal) {
       repositoryName: name, repositoryId: reference.repositoryId, branch: 'main'
     }) &&
     current.siteId === reference.siteId &&
-    current.baseCommitSha === reference.baseCommitSha;
+    current.baseCommitSha === expectedBaseCommitSha;
 }
 
 /**
  * INTERNAL backend-only sidecar proof to accompany one #98 SHA-pinned source.
  *
- * REQUIRES: authenticated server-held/sealed #98 reference, fresh current owner
- * principal, refreshed GitHub/Cloudflare tokens, live D1 authorization-epoch
- * checker. The caller (not this adapter) must authenticate the reference ticket.
+ * REQUIRES: authenticated #109 sealed owner/site reference, a SEPARATELY
+ * authenticated server-proven expectedBaseCommitSha, current principal,
+ * refreshed grants and current D1 authorization-epoch callback.
+ * Never use browser-supplied SHA, arbitrary input JSON or a displayed digest
+ * as the trusted expected commit. This module does not issue sealed tickets.
  *
  * Combines #98's eight GETs with a pinned sidecar GET and three final provider
- * GETs = at most 12 external reads, plus bounded live authorization checks.
+ * GETs = at most 12 external reads and up to 40 D1 epoch callback invocations.
+ * These budgets are SEPARATE and can exceed Workers Free subrequest allowance
+ * when combined; no hosted Free route is authorized without Domain budgeting.
  * An honest 404 after verified private-repo access records absence at that SHA.
  * A 200 returns the SHA-256 of the EXACT fetched sidecar bytes, plus its GitHub
  * blob ID. Never auto-creates the file or claims generated-one-page eligibility.
@@ -103,7 +124,9 @@ function matchesReference(repo, project, current, reference, principal) {
  */
 export async function readPinnedManagedSidecar(options = {}) {
   const frozen = copyInputs(options);
-  const {principal, reference, unchanged} = frozen;
+  const {principal, reference, siteId, expectedBaseCommitSha,
+    githubAccessToken, cloudflareAccessToken,
+    assertCurrentAuthorization, fetchFn, unchanged} = frozen;
   const authSnapshot = Object.freeze({
     githubUserId: principal.githubUserId, githubLogin: principal.githubLogin,
     cloudflareAccountId: principal.cloudflareAccountId
@@ -111,16 +134,14 @@ export async function readPinnedManagedSidecar(options = {}) {
   async function authorized() {
     unchanged();
     let ok;
-    try { ok = await options.assertCurrentAuthorization(authSnapshot); }
+    try { ok = await assertCurrentAuthorization(authSnapshot); }
     catch { deny('authorization_changed'); }
     unchanged();
     if (ok !== true) deny('authorization_changed');
   }
-  const fetchFn = options.fetchFn ?? fetch;
-  const shared = {siteId: options.siteId, reference, principal,
-    githubAccessToken: options.githubAccessToken,
-    cloudflareAccessToken: options.cloudflareAccessToken,
-    assertCurrentAuthorization: options.assertCurrentAuthorization, fetchFn};
+  const shared = {siteId, reference, principal,
+    githubAccessToken, cloudflareAccessToken,
+    assertCurrentAuthorization, fetchFn};
   let currentSource;
   try { currentSource = await readCurrentManagedHomepage(shared); }
   catch (err) {
@@ -131,7 +152,7 @@ export async function readPinnedManagedSidecar(options = {}) {
   }
   unchanged();
   if (currentSource?.siteId !== reference.siteId ||
-      currentSource.baseCommitSha !== reference.baseCommitSha ||
+      currentSource.baseCommitSha !== expectedBaseCommitSha ||
       !GIT_SHA.test(currentSource.baseCommitSha))
     deny('current_source_changed');
 
@@ -149,10 +170,10 @@ export async function readPinnedManagedSidecar(options = {}) {
         'https://api.cloudflare.com/client/v4') + path, {
         method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(10000),
         headers: isGitHub ? {
-          authorization: 'Bearer ' + options.githubAccessToken,
+          authorization: 'Bearer ' + githubAccessToken,
           accept: 'application/vnd.github+json',
           'x-github-api-version': '2022-11-28', 'user-agent': 'launch-and-own'
-        } : {authorization: 'Bearer ' + options.cloudflareAccessToken,
+        } : {authorization: 'Bearer ' + cloudflareAccessToken,
           accept: 'application/json'}
       });
     } catch { deny(provider + '_temporarily_unavailable'); }
@@ -199,7 +220,8 @@ export async function readPinnedManagedSidecar(options = {}) {
   const repo = await get('github', root);
   const project = await get('cloudflare', accountPath);
   if (branch?.commit?.sha?.toLowerCase() !== currentSource.baseCommitSha ||
-      !matchesReference(repo, project, currentSource, reference, principal))
+      !matchesReference(repo, project, currentSource, reference, principal,
+        expectedBaseCommitSha))
     deny('current_source_changed');
   await authorized();
   return {
