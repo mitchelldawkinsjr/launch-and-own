@@ -12,6 +12,7 @@ import {listOwnedReceipts,getOwnedReceipt,purgeExpiredReceipts} from './launch-r
 import {privacyHtml,termsHtml} from './legal-pages.mjs';
 import {LOGO_PNG_BASE64} from './logo.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,hasCurrentOwnerSession,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
+import {createSiteOptionsRoutes} from './post-launch-options.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
@@ -225,7 +226,7 @@ async function home(env,current,notice){
     <label for="website-zip">Website ZIP (up to 6 MiB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
     <button type="submit">Upload and preview</button></form></section>`:'';
   const next=ready?
-    '<section><h2>Create a site</h2><p>Review your generated homepage before approving publication. Forms and custom domains remain a future beta milestone.</p>'+
+    '<section><h2>Create a site</h2><p>Review your generated homepage before approving publication. After the site is live, optional domain, email, and form requests are saved from your toolkit without changing DNS or creating a form.</p>'+
     button('/preview','Generate website preview',current.csrf,siteFields)+'</section>':'';
   const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Launch history</a></p>':'';
   return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}<p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${appInstalled&&!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
@@ -602,6 +603,7 @@ async function logout(request,env,current){
   return result;
 }
 const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
+const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 export default {
   async fetch(request,env,context){
     try{
@@ -637,6 +639,7 @@ export default {
         if(url.pathname==='/site-update-review')return await siteUpdates.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-html')return await siteUpdates.html(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-status')return await siteUpdates.status(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/site-options')return await siteOptions.page(env,current,url.searchParams.get('id'));
       }
       if(request.method==='POST'){
         if(url.pathname==='/agent-link')return await confirmAgentLink(request,env,current,{view,fail,escape},{assertCsrf,formData,now});
@@ -652,6 +655,8 @@ export default {
         if(url.pathname==='/delete-launch-history')return await removeLaunchHistory(request,env,current);
         if(url.pathname==='/site-update-preview')return await siteUpdates.prepare(request,env,current);
         if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
+        if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
+        if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
       }
       return fail('Page not found',404);
     }catch(error){
