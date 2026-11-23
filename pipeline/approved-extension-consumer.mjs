@@ -266,15 +266,19 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
     jobId: row.jobId, githubUserId: owner.githubUserId,
     cloudflareAccountId: owner.cloudflareAccountId, hostname
   }));
-  if (applied?.status !== 'applied' || applied.job_id !== row.jobId ||
+  if (applied?.status !== 'applied' || applied.kind !== 'domain' ||
+      applied.job_id !== row.jobId ||
       applied.github_user_id !== owner.githubUserId ||
       applied.cloudflare_account_id !== owner.cloudflareAccountId ||
       !UUID.test(applied.id || '') || !DIGEST.test(applied.approval_digest || ''))
     deny('applied_domain_row_required');
-  reviewedDomain({
-    digest: lower(applied.approval_digest),
-    payload: JSON.parse(applied.payload_json || '{}')
-  }, owner);
+  let domainPayload;
+  try { domainPayload = JSON.parse(applied.payload_json || '{}'); }
+  catch { deny('applied_domain_row_required'); }
+  const approvedHost = reviewedDomain({
+    digest: lower(applied.approval_digest), payload: domainPayload
+  }, owner).hostname;
+  if (approvedHost !== hostname) deny('matching_applied_domain_required');
   const onProject = await guarded(fence, () => provider.readPagesDomain(site, hostname));
   if (!verifiedPagesDomain(onProject, hostname))
     deny('domain_not_active_on_owned_pages');
