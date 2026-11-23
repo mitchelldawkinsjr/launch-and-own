@@ -2,6 +2,8 @@
 
 Read-only allowance and extension-review helpers for optional **customer-owned** Workers / Pages Functions, D1, KV, and R2. A basic static Pages site must stay usable without these services. This document describes the code contract in [`pipeline/extension-cost-guardrails.mjs`](../pipeline/extension-cost-guardrails.mjs). It does **not** authorize resource creation, R2 billing activation, OAuth scope changes, DNS edits, or hosted rollout.
 
+**Complementary to GPT-6 [#104](https://github.com/mitchelldawkinsjr/launch-and-own/pull/104):** that module owns account-wide plan/usage/permission evidence and Free-overrun forecasts (`prepareOptionalExtensionReview`). This module owns #84 toolkit eligibility/catalog, digest-bound multi-extension review plans, budget-pause projection, and the `advanced_services` capability card projector. Both always return `canActivate:false`, `canWrite:false`, and `costEstimateUsd:null`.
+
 Parent orchestration: [#83](https://github.com/mitchelldawkinsjr/launch-and-own/issues/83). Capability vocabulary: [#84](https://github.com/mitchelldawkinsjr/launch-and-own/issues/84) / [`POST_LAUNCH_TOOLKIT_AUDIT.md`](POST_LAUNCH_TOOLKIT_AUDIT.md).
 
 ## What this slice does

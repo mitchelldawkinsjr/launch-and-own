@@ -63,9 +63,18 @@ export const FREE_ALLOWANCES = Object.freeze({
   })
 });
 
+// Never-activate invariants shared with GPT-6 #104: this module cannot enable
+// billing, invent a dollar cost, or authorize provider writes.
+const NEVER_ACTIVATE = Object.freeze({
+  createResources: false,
+  canActivate: false,
+  canWrite: false,
+  costEstimateUsd: null
+});
+
 function deny(state, reason, extras = {}) {
   if (!TOOLKIT_CAPABILITY_STATES.includes(state)) throw Error('unknown capability state');
-  return Object.freeze({ state, reason, createResources: false, ...extras });
+  return Object.freeze({ state, reason, ...NEVER_ACTIVATE, ...extras });
 }
 
 function snapshotOwner(owner) {
@@ -196,7 +205,7 @@ export function assessExtensionEligibility({ owner, planEvidence, consent } = {}
   return Object.freeze({
     state: 'available_opt_in',
     reason: 'review_exact_extension_plan',
-    createResources: false,
+    ...NEVER_ACTIVATE,
     owner: trusted,
     workersPlan: plan.workersPlan,
     planCheckedAt: plan.checkedAt,
@@ -205,8 +214,54 @@ export function assessExtensionEligibility({ owner, planEvidence, consent } = {}
     usageDashboardUrl: usageDashboardUrl(trusted.cloudflareAccountId),
     r2ActivationUrl: r2ActivationUrl(trusted.cloudflareAccountId),
     staticSiteRemainsAvailable: true,
-    platformZipR2Distinct: true
+    platformZipR2Distinct: true,
+    // Account-wide usage/forecast math lives in GPT-6 optional-service-budget (#104).
+    usageForecastReview: 'separate_optional_service_budget_module'
   });
+}
+
+/**
+ * Map eligibility into the toolkit `advanced_services` capability card for #87.
+ * Does not claim remaining Free quota or authorize activation.
+ */
+export function projectAdvancedServicesCapability(eligibility) {
+  if (!eligibility || typeof eligibility !== 'object')
+    return deny('not_available', 'eligibility_required');
+  const base = {
+    feature: 'advanced_services',
+    usageForecastReview: eligibility.usageForecastReview || 'separate_optional_service_budget_module',
+    staticSiteRemainsAvailable: eligibility.staticSiteRemainsAvailable !== false,
+    ...NEVER_ACTIVATE
+  };
+  if (eligibility.state === 'not_available')
+    return Object.freeze({ ...base, state: 'not_available', reason: eligibility.reason });
+  if (eligibility.state === 'manual_setup')
+    return Object.freeze({
+      ...base,
+      state: 'manual_setup',
+      reason: eligibility.reason,
+      actionLabel: 'Review Workers usage',
+      actionUrl: eligibility.usageDashboardUrl || null
+    });
+  if (eligibility.extensions?.r2?.state === 'blocked_permission_or_plan')
+    return Object.freeze({
+      ...base,
+      state: 'blocked_permission_or_plan',
+      reason: 'r2_or_plan_gates_remain',
+      actionLabel: 'Review R2 activation',
+      actionUrl: eligibility.r2ActivationUrl || null
+    });
+  if (eligibility.state === 'available_opt_in')
+    return Object.freeze({
+      ...base,
+      state: 'available_opt_in',
+      reason: eligibility.reason === 'review_exact_extension_plan'
+        ? 'exact_extension_plan_and_usage_forecast_required'
+        : eligibility.reason,
+      actionLabel: 'Review optional services',
+      actionUrl: eligibility.usageDashboardUrl || null
+    });
+  return Object.freeze({ ...base, state: 'not_available', reason: 'unrecognized_eligibility' });
 }
 
 function stableJson(value) {
@@ -222,52 +277,40 @@ function stableJson(value) {
  * Build a digest-bound, review-only extension approval plan. Does not call Cloudflare.
  * Callers must re-validate owner identity, plan evidence, and consent before any future write path.
  */
+function blockedPlan(reason, extras = {}) {
+  return Object.freeze({
+    status: 'blocked',
+    reason,
+    approvalDigest: null,
+    ...NEVER_ACTIVATE,
+    staticSiteRemainsAvailable: true,
+    ...extras
+  });
+}
+
 export function buildExtensionReviewPlan({
   owner, planEvidence, consent, selectedExtensions, expectedMonthlyUsage, retentionDays
 } = {}, { now = Math.floor(Date.now() / 1000) } = {}) {
-  if (consent !== true)
-    return Object.freeze({
-      status: 'blocked',
-      reason: 'owner_extension_consent_required',
-      approvalDigest: null,
-      createResources: false,
-      staticSiteRemainsAvailable: true
-    });
+  if (consent !== true) return blockedPlan('owner_extension_consent_required');
 
   const eligibility = assessExtensionEligibility({ owner, planEvidence, consent }, { now });
   // Only the consented, plan-verified path may mint a digest. available_opt_in
   // without review_exact_extension_plan still means "ask first," not "plan ready."
-  if (eligibility.reason !== 'review_exact_extension_plan' || eligibility.createResources !== false)
-    return Object.freeze({
-      status: 'blocked',
-      reason: eligibility.reason,
-      approvalDigest: null,
-      createResources: false,
-      staticSiteRemainsAvailable: true
-    });
+  if (eligibility.reason !== 'review_exact_extension_plan'
+      || eligibility.createResources !== false
+      || eligibility.canActivate !== false
+      || eligibility.canWrite !== false)
+    return blockedPlan(eligibility.reason);
 
   if (!Array.isArray(selectedExtensions) || selectedExtensions.length === 0
       || selectedExtensions.some(id => !EXTENSIONS.includes(id))
       || new Set(selectedExtensions).size !== selectedExtensions.length)
-    return Object.freeze({
-      status: 'blocked',
-      reason: 'exact_extension_selection_required',
-      approvalDigest: null,
-      createResources: false,
-      staticSiteRemainsAvailable: true
-    });
+    return blockedPlan('exact_extension_selection_required');
 
   for (const id of selectedExtensions) {
     const item = eligibility.extensions[id];
     if (!item || item.state !== 'available_opt_in')
-      return Object.freeze({
-        status: 'blocked',
-        reason: item?.reason || 'extension_not_eligible',
-        extension: id,
-        approvalDigest: null,
-        createResources: false,
-        staticSiteRemainsAvailable: true
-      });
+      return blockedPlan(item?.reason || 'extension_not_eligible', { extension: id });
   }
 
   if (!expectedMonthlyUsage || typeof expectedMonthlyUsage !== 'object'
@@ -275,22 +318,10 @@ export function buildExtensionReviewPlan({
       || expectedMonthlyUsage.summary.length < 8
       || expectedMonthlyUsage.summary.length > 500
       || expectedMonthlyUsage.summary !== expectedMonthlyUsage.summary.trim())
-    return Object.freeze({
-      status: 'blocked',
-      reason: 'expected_monthly_usage_summary_required',
-      approvalDigest: null,
-      createResources: false,
-      staticSiteRemainsAvailable: true
-    });
+    return blockedPlan('expected_monthly_usage_summary_required');
 
   if (!positiveId(retentionDays) || retentionDays > 365)
-    return Object.freeze({
-      status: 'blocked',
-      reason: 'retention_days_required',
-      approvalDigest: null,
-      createResources: false,
-      staticSiteRemainsAvailable: true
-    });
+    return blockedPlan('retention_days_required');
 
   const selected = [...selectedExtensions].sort();
   const planBody = Object.freeze({
@@ -305,9 +336,10 @@ export function buildExtensionReviewPlan({
     retentionDays,
     deletion: 'owner_deletes_customer_owned_resources',
     rollback: 'disable_extension_keep_static_pages',
-    createResources: false,
+    ...NEVER_ACTIVATE,
     billingActivation: selected.includes('r2') ? 'owner_confirmed_r2_activated' : 'not_required',
     platformZipR2Distinct: true,
+    usageForecastReview: 'separate_optional_service_budget_module',
     issuedAt: now,
     expiresAt: Math.min(eligibility.planExpiresAt, now + MAX_PLAN_TTL_SECONDS)
   });
@@ -318,14 +350,15 @@ export function buildExtensionReviewPlan({
     reason: 'awaiting_owner_digest_approval',
     approvalDigest,
     plan: planBody,
-    createResources: false,
+    ...NEVER_ACTIVATE,
     usageDashboardUrl: eligibility.usageDashboardUrl,
     r2ActivationUrl: eligibility.r2ActivationUrl,
     staticSiteRemainsAvailable: true,
     notices: Object.freeze([
       'Static Pages hosting stays available if an extension hits Free-plan quotas or is paused.',
       'This plan does not create Workers, D1, KV, or R2 resources and does not activate billing.',
-      'Platform ZIP staging R2 is a separate Launch & Own resource from any customer optional bucket.'
+      'Platform ZIP staging R2 is a separate Launch & Own resource from any customer optional bucket.',
+      'Account-wide usage and Free-overrun forecasts require the separate optional-service-budget review.'
     ])
   });
 }
@@ -348,7 +381,7 @@ export function projectBudgetPause({ owner, extension, providerDenial } = {}) {
     reason,
     extension,
     extensionPaused: true,
-    createResources: false,
+    ...NEVER_ACTIVATE,
     staticSiteRemainsAvailable: true,
     siteId: trusted.siteId,
     cloudflareAccountId: trusted.cloudflareAccountId

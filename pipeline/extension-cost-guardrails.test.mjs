@@ -7,6 +7,7 @@ import {
   listExtensionCatalog,
   assessExtensionEligibility,
   buildExtensionReviewPlan,
+  projectAdvancedServicesCapability,
   projectBudgetPause
 } from './extension-cost-guardrails.mjs';
 import { TOOLKIT_CAPABILITY_STATES } from './toolkit-capabilities.mjs';
@@ -210,6 +211,9 @@ test('approval digests are stable canonical SHA-256 over the frozen plan body', 
     retentionDays: 14
   }, { now });
   assert.equal(result.plan.billingActivation, 'owner_confirmed_r2_activated');
+  assert.equal(result.canActivate, false);
+  assert.equal(result.canWrite, false);
+  assert.equal(result.costEstimateUsd, null);
   const recomputed = createHash('sha256').update((() => {
     const value = result.plan;
     const stable = v => {
@@ -223,4 +227,34 @@ test('approval digests are stable canonical SHA-256 over the frozen plan body', 
     return stable(value);
   })(), 'utf8').digest('hex');
   assert.equal(result.approvalDigest, recomputed);
+});
+
+test('advanced_services projector never activates and points usage forecasts elsewhere', () => {
+  const eligible = assessExtensionEligibility({
+    owner: owner(),
+    planEvidence: plan({ r2Activated: true }),
+    consent: true
+  }, { now });
+  assert.equal(eligible.canActivate, false);
+  assert.equal(eligible.canWrite, false);
+  assert.equal(eligible.costEstimateUsd, null);
+  assert.equal(eligible.usageForecastReview, 'separate_optional_service_budget_module');
+
+  const card = projectAdvancedServicesCapability(eligible);
+  assert.equal(card.feature, 'advanced_services');
+  assert.equal(card.state, 'available_opt_in');
+  assert.equal(card.canActivate, false);
+  assert.equal(card.canWrite, false);
+  assert.equal(card.costEstimateUsd, null);
+  assert.match(card.reason, /usage_forecast/);
+
+  const blockedR2 = projectAdvancedServicesCapability(assessExtensionEligibility({
+    owner: owner(),
+    planEvidence: plan({ r2Activated: false }),
+    consent: true
+  }, { now }));
+  assert.equal(blockedR2.state, 'blocked_permission_or_plan');
+  assert.equal(blockedR2.canActivate, false);
+
+  assert.equal(projectAdvancedServicesCapability(null).state, 'not_available');
 });
