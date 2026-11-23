@@ -59,6 +59,7 @@ test('the toolkit displays exact launch evidence only for complete successful re
   const live = projectToolkitCard({...record, display_status: 'live'}, {canEdit: true});
   assert.equal(live.recordedWebsite, 'https://esp-willow-studio-site.pages.dev/');
   assert.equal(live.editPath, '/site-update?id=11111111-1111-4111-8111-111111111111');
+  assert.equal(live.optionsPath, '/site-options?id=11111111-1111-4111-8111-111111111111');
   assert.equal(live.verifiedAt, new Date(record.updated_at * 1000).toISOString());
   assert.equal(live.expiresAt, new Date(record.expires_at * 1000).toISOString());
   assert.equal(live.verifiedCommitSha, record.expected_commit_sha);
@@ -67,6 +68,7 @@ test('the toolkit displays exact launch evidence only for complete successful re
   assert.equal(live.capabilities.static_hosting.state, 'included_verified');
   assert.equal(projectToolkitCard({...record, display_status: 'live', updated_at: null},
     {canEdit: true}).editPath, null);
+  assert.equal(projectToolkitCard(record, {canEdit: true}).optionsPath, null);
 });
 
 test('history capabilities mark ZIP sites without the editor', () => {
