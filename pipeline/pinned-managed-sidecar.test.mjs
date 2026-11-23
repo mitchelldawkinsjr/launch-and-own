@@ -185,7 +185,10 @@ test('changed selected principal or server-held ref during sidecar GET is reject
       change(h);
       return response(h.f.sidecar);
     });
-    await assert.rejects(h.read(),code('verified_reference_changed'));
+    // Use the exact options object being mutated. h.read() spreads a separate
+    // options object, whose primitive SHA cannot observe changes to h.data.
+    await assert.rejects(readPinnedManagedSidecar(h.data),
+      code('verified_reference_changed'));
   }
 });
 
