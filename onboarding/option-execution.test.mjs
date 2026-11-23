@@ -233,6 +233,31 @@ test('applied domain and separate verified mailbox grant create exactly one cont
   assert.equal(providerWrites(h).length,2);
 });
 
+test('ready parent zone cannot create subdomain forwarding without exact-host MX records',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId}=await live(h,t);
+  const domain=await store(h,tenant,jobId,'domain',{hostname:host});
+  operatorGrant(h,domain);
+  assert.equal((await post(h,'/site-options-execute',tenant.cookie,{
+    csrf:tenant.csrf,id
+  })).status,200);
+  h.resourceState.customDomain.status='active';
+  h.resourceState.routingMxRecords=[]; // Existing apex setting can still say ready.
+  const email=await store(h,tenant,jobId,'email',{
+    hostname:host,mailbox:'existing@example.net'
+  });
+  operatorGrant(h,email,otherId);
+  const outcome=await post(h,'/site-options-execute',tenant.cookie,{
+    csrf:tenant.csrf,id:otherId
+  });
+  assert.notEqual(outcome.status,200);
+  assert.equal(h.calls.some(c=>c.method==='POST'&&
+    /\/email\/routing\/rules$/.test(c.url)),false);
+  assert.equal(h.sqlite.prepare(
+    'SELECT status FROM onboarding_option_executions WHERE id=?'
+  ).get(otherId).status,'needs_reconciliation');
+});
+
 test('forms cannot activate even with stored consent and an operator execution row (#89)',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const {tenant,jobId}=await live(h,t);
