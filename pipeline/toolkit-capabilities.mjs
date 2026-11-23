@@ -61,7 +61,7 @@ function previewConfiguration(project) {
 // the session, resolve the site reference on the server, and fence the reads against revocation.
 // An approval-history row or a client-supplied ID is not an ownership proof.
 export function summarizeOwnedToolkitSite({ viewer, reference, repository, pagesAccountId, pagesProject, publication } = {},
-  { now = Math.floor(Date.now() / 1000) } = {}) {
+  { now = Math.floor(Date.now() / 1000), editorEligible = false } = {}) {
   if (!matchesOwnedSite(viewer, reference, repository, pagesAccountId, pagesProject)) return null;
 
   const projectName = reference.repositoryName + '-site';
@@ -75,6 +75,12 @@ export function summarizeOwnedToolkitSite({ viewer, reference, repository, pages
     && canonical?.id === lastVerified.deploymentId;
   const deploymentState = matchesCurrent ? 'verified_deployment' : productionCommitSha
     ? 'production_unverified' : 'production_pending';
+  const zipSource = reference.sourceKind === 'uploaded-zip';
+  const websiteUpdates = zipSource
+    ? { state: 'not_available', reason: 'uploaded_source_has_no_supported_editor' }
+    : editorEligible
+      ? { state: 'available_opt_in', reason: 'editor_eligible' }
+      : { state: 'not_available', reason: 'update_acceptance_pending' };
 
   return {
     siteId: reference.siteId,
@@ -87,8 +93,7 @@ export function summarizeOwnedToolkitSite({ viewer, reference, repository, pages
       https: matchesCurrent ? { state: 'included_verified', reason: 'verified_https_publication' }
         : { state: 'not_available', reason: 'awaiting_public_https_verification' },
       deployment_health: { state: 'included_verified', reason: 'verified_pages_project_metadata' },
-      website_updates: { state: 'not_available', reason: reference.sourceKind === 'uploaded-zip'
-        ? 'uploaded_source_has_no_supported_editor' : 'update_acceptance_pending' },
+      website_updates: websiteUpdates,
       web_analytics: { state: 'manual_setup', reason: 'review_provider_settings', activation: 'not_available' },
       pr_previews: { state: 'blocked_permission_or_plan', reason: 'preview_access_and_approval_required',
         configuration: previewConfiguration(pagesProject) },

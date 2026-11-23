@@ -113,3 +113,20 @@ test('configured previews and an analytics tag cannot unlock URLs, metrics or se
   assert.equal(result.capabilities.website_updates.reason, 'uploaded_source_has_no_supported_editor');
   assert.doesNotMatch(JSON.stringify(result), /sensitive-token-fixture|unverified-tag|private-preview-fixture/);
 });
+
+test('optional #30 editor eligibility marks website_updates available_opt_in', () => {
+  const pending = summarize(fixture());
+  assert.equal(pending.capabilities.website_updates.state, 'not_available');
+  assert.equal(pending.capabilities.website_updates.reason, 'update_acceptance_pending');
+
+  const eligible = summarizeOwnedToolkitSite(fixture(), {editorEligible: true});
+  assert.equal(eligible.capabilities.website_updates.state, 'available_opt_in');
+  assert.equal(eligible.capabilities.website_updates.reason, 'editor_eligible');
+
+  const zip = summarizeOwnedToolkitSite({
+    ...fixture(),
+    reference: {...fixture().reference, sourceKind: 'uploaded-zip'}
+  }, {editorEligible: true});
+  assert.equal(zip.capabilities.website_updates.state, 'not_available');
+  assert.equal(zip.capabilities.website_updates.reason, 'uploaded_source_has_no_supported_editor');
+});
