@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   websiteUrlForSlug, updatePublicationLadder,
-  projectToolkitCard, renderUpdateStatusBody, renderToolkitPage
+  projectToolkitCard, renderUpdateStatusBody, renderToolkitPage,
+  historyToolkitCapabilities
 } from './post-launch-toolkit.mjs';
 import {
   accountId, approvePreview, connectTenant, harness, makeDue, newPreview, post
@@ -28,6 +29,10 @@ test('update publication ladder highlights merge until verified live', () => {
   const live = updatePublicationLadder({prStatus: 'merged', verifyStatus: 'live'});
   assert.equal(live.current, 'live');
   assert.equal(live.primaryAction.label, 'View live website');
+
+  const closed = updatePublicationLadder({prStatus: 'closed-unmerged'});
+  assert.equal(closed.current, 'closed');
+  assert.equal(closed.primaryAction, null);
 });
 
 test('the toolkit displays exact launch evidence only for complete successful records', () => {
@@ -47,6 +52,9 @@ test('the toolkit displays exact launch evidence only for complete successful re
   assert.equal(pending.statusLabel, 'Publishing');
   assert.equal(pending.verifiedAt, null);
   assert.equal(pending.editPath, null);
+  assert.equal(pending.capabilities.web_analytics.state, 'manual_setup');
+  assert.equal(pending.capabilities.website_updates.state, 'not_available');
+  assert.equal(pending.capabilities.pr_previews.state, 'blocked_permission_or_plan');
 
   const live = projectToolkitCard({...record, display_status: 'live'}, {canEdit: true});
   assert.equal(live.recordedWebsite, 'https://esp-willow-studio-site.pages.dev/');
@@ -55,8 +63,18 @@ test('the toolkit displays exact launch evidence only for complete successful re
   assert.equal(live.expiresAt, new Date(record.expires_at * 1000).toISOString());
   assert.equal(live.verifiedCommitSha, record.expected_commit_sha);
   assert.equal(live.approvalFingerprint, record.approval_digest);
+  assert.equal(live.capabilities.website_updates.state, 'available_opt_in');
+  assert.equal(live.capabilities.static_hosting.state, 'included_verified');
   assert.equal(projectToolkitCard({...record, display_status: 'live', updated_at: null},
     {canEdit: true}).editPath, null);
+});
+
+test('history capabilities mark ZIP sites without the editor', () => {
+  const caps = historyToolkitCapabilities({
+    verified: true, canEdit: false, uploadedZip: true
+  });
+  assert.equal(caps.website_updates.state, 'not_available');
+  assert.equal(caps.website_updates.reason, 'uploaded_source_has_no_supported_editor');
 });
 
 test('update status HTML leads with Open update to publish for open PRs', () => {
@@ -129,7 +147,8 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   h.sqlite.prepare("UPDATE onboarding_launch_jobs SET plan_json = json_set(plan_json, '$.zip', json('{}'))").run();
   const zip = await (await toolkit()).text();
   assert.doesNotMatch(zip, /Update this website/);
-  assert.match(zip, /Unavailable for this launch/);
+  assert.match(zip, /uploaded ZIP sites keep the GitHub workflow/i);
+  assert.match(zip, /Safe website updates/);
 
   h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_account_id = ?').run('a'.repeat(32));
   assert.doesNotMatch(await (await toolkit()).text(), /Willow Studio/);
