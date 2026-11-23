@@ -1,7 +1,10 @@
 // #88 / Agent 2: backend-only Cloudflare Pages / Email Routing provider adapter.
 // Safe by default: all writes disabled unless caller explicitly wires a separately
-// operator-authorized, single-winner execution lease. NO DNS, MX, NS, mailbox,
-// billing, Turnstile, D1 or Worker mutation endpoints are present.
+// operator-authorized, single-winner execution lease. NO DNS, MX, NS, mailbox or
+// billing endpoints. #89 forms methods (Turnstile widget, customer D1, form Worker)
+// are reachable only through the same per-request operator approval callback.
+import {formsResourceNames, formWorkerUpload, CUSTOMER_FORM_SCHEMA_SQL, FORM_WORKER_CRON}
+  from './forms-provider-plan.mjs';
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const NAME = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*-site$/;
 const ZONE = /^[a-f0-9]{32}$/i;
@@ -81,18 +84,19 @@ export function createCloudflareExtensionProvider({
         principal.cloudflareAccountId !== owner.cloudflareAccountId)
       deny('authorization_changed');
   };
-  async function request(provider, method, path, body, {allow404 = false} = {}) {
+  async function request(provider, method, path, body, {allow404 = false, approvalBody} = {}) {
     authorized();
     if (method === 'GET') {
       if (++getCount > MAX_GETS) deny('provider_request_budget_exceeded');
     } else {
-      if (!['POST'].includes(method)) deny('unsupported_mutation');
+      if (!['POST', 'PUT'].includes(method)) deny('unsupported_mutation');
       if (typeof assertOperatorApprovedExecution !== 'function')
         deny('separate_execution_approval_required');
       let allowed = false;
       try {
         allowed = await assertOperatorApprovedExecution({
-          principal: owner, provider, method, path, requestBody: body
+          // Secrets never reach the approval callback; callers pass a redacted view.
+          principal: owner, provider, method, path, requestBody: approvalBody ?? body
         });
       } catch {}
       if (allowed !== true) deny('separate_execution_approval_required');
@@ -111,9 +115,9 @@ export function createCloudflareExtensionProvider({
           ...(provider === 'github' ? {
             'user-agent': 'launch-and-own', 'x-github-api-version': '2022-11-28'
           } : {}),
-          ...(method !== 'GET' ? {'content-type': 'application/json'} : {})
+          ...(method !== 'GET' && !(body instanceof FormData) ? {'content-type': 'application/json'} : {})
         },
-        ...(method !== 'GET' ? {body: JSON.stringify(body)} : {})
+        ...(method !== 'GET' ? {body: body instanceof FormData ? body : JSON.stringify(body)} : {})
       });
     } catch { deny('provider_temporarily_unavailable'); }
     authorized();
@@ -133,7 +137,16 @@ export function createCloudflareExtensionProvider({
     return provider === 'cloudflare' ? data : data;
   }
   const cfGet = (path, opts) => request('cloudflare', 'GET', path, undefined, opts);
-  const cfPost = (path, body) => request('cloudflare', 'POST', path, body);
+  const cfPost = (path, body, opts) => request('cloudflare', 'POST', path, body, opts);
+  const cfPut = (path, body, opts) => request('cloudflare', 'PUT', path, body, opts);
+  const accountRoot = () => '/accounts/' + owner.cloudflareAccountId;
+  const deployedForms = new Map();
+  function formsTarget(site, hostname) {
+    safeSite(site, owner);
+    if (hostname !== site.pagesProjectName + '.pages.dev') deny('forms_hostname_not_active');
+    return formsResourceNames(site.pagesProjectName);
+  }
+  const exactNamed = (list, name) => list.filter(x => x?.name === name);
 
   function pagesRoot(site) {
     safeSite(site, owner);
@@ -229,6 +242,63 @@ export function createCloudflareExtensionProvider({
       if (matches.some(r => r?.zone?.tag !== zoneId) || matches.length > 1)
         deny('existing_email_rule_conflict');
       return matches[0] || null;
+    },
+    async createTurnstileWidget(site, {hostname} = {}) {
+      const names = formsTarget(site, hostname);
+      const root = accountRoot() + '/challenges/widgets';
+      if (exactNamed(safePage(await cfGet(root + '?page=1&per_page=50')), names.widget).length)
+        deny('turnstile_widget_exists_reconcile');
+      const body = {name: names.widget, domains: [hostname], mode: 'managed'};
+      const w = (await cfPost(root, body))?.result;
+      if (typeof w?.sitekey !== 'string' || typeof w.secret !== 'string' || w.secret.length < 8 ||
+          w.name !== names.widget || w.mode !== 'managed' ||
+          JSON.stringify(w.domains) !== JSON.stringify([hostname]))
+        deny('turnstile_widget_unverified');
+      return {sitekey: w.sitekey, secret: w.secret};
+    },
+    async createCustomerD1(site, {} = {}) {
+      const names = formsTarget(site, site?.pagesProjectName + '.pages.dev');
+      const root = accountRoot() + '/d1/database';
+      if (exactNamed(safePage(await cfGet(root + '?name=' + encodeURIComponent(names.database) +
+          '&page=1&per_page=50')), names.database).length)
+        deny('customer_d1_exists_reconcile');
+      const db = (await cfPost(root, {name: names.database}))?.result;
+      if (!/^[a-f0-9-]{36}$/.test(db?.uuid || '') || db.name !== names.database)
+        deny('customer_d1_unverified');
+      await cfPost(root + '/' + db.uuid + '/query', {sql: CUSTOMER_FORM_SCHEMA_SQL});
+      return {id: db.uuid, name: names.database};
+    },
+    async deployServerVerifiedFormWorker(site, config = {}) {
+      const names = formsTarget(site, config.hostname);
+      const upload = await formWorkerUpload({...config, databaseId: config.databaseId});
+      const scriptPath = accountRoot() + '/workers/scripts/' + names.script;
+      const deployed = (await cfPut(scriptPath, upload.formData,
+        {approvalBody: upload.approvalBody}))?.result;
+      if (deployed?.id !== names.script) deny('form_worker_unverified');
+      await cfPut(scriptPath + '/schedules', [{cron: FORM_WORKER_CRON}]);
+      await cfPost(scriptPath + '/subdomain', {enabled: true, previews_enabled: false});
+      const sub = (await cfGet(accountRoot() + '/workers/subdomain'))?.result?.subdomain;
+      if (!/^[a-z0-9-]{1,63}$/.test(sub || '')) deny('workers_subdomain_required');
+      const base = 'https://' + names.script + '.' + sub + '.workers.dev';
+      deployedForms.set(names.script, base);
+      return {id: names.script, endpoint: base + '/submit'};
+    },
+    async verifyFormAcceptance(site, {hostname, workerId, databaseId} = {}) {
+      const names = formsTarget(site, hostname);
+      const base = deployedForms.get(workerId);
+      if (workerId !== names.script || !base) deny('form_worker_unverified');
+      authorized();
+      let health = null;
+      try {
+        const res = await fetchFn(base + '/health', {redirect: 'manual', signal: AbortSignal.timeout(10000)});
+        health = res.status === 200 ? await res.json() : null;
+      } catch {}
+      authorized();
+      const bound = health?.ok === true && health.hostname === hostname;
+      // A row exists only after a real Siteverify pass, so this is the owner's own test submission.
+      return {serverSiteverify: bound && health.secretBound === true && health.serverSiteverify === true,
+        customerD1Bound: bound && health.d1Bound === true && typeof databaseId === 'string',
+        endToEndAccepted: bound && health.hasAcceptedSubmission === true};
     },
     async createEmailRoutingRule(zoneId, rule) {
       if (!verifiedZoneIds.has(zoneId) || !rule ||

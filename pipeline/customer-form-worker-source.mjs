@@ -1,0 +1,98 @@
+// Deployable, self-contained customer contact-form Worker (#89).
+// Uploaded verbatim to the customer's own Cloudflare account by the forms
+// provider adapter. Mirrors customer-form-worker.mjs rules on the async D1 API:
+// origin-locked, server-side Siteverify with hostname match, single-use tokens,
+// size + daily limits, retention purge on cron. Never logs or returns secrets.
+// shortcut: duplicates customer-form-worker.mjs checks because that module is not Worker-deployable (node:fs); unify when a bundler step exists.
+export const CUSTOMER_FORM_WORKER_MODULE = 'form.mjs';
+
+export const CUSTOMER_FORM_WORKER_SOURCE = String.raw`
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SITEVERIFY = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const json = (body, status, origin) => new Response(JSON.stringify(body), {status, headers: {
+  'content-type': 'application/json', 'cache-control': 'no-store',
+  ...(origin ? {'access-control-allow-origin': origin, vary: 'Origin'} : {})}});
+async function hash(text) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const day = now => now - (now % 86400);
+const num = v => Number.parseInt(v, 10);
+
+async function submit(request, env) {
+  const origin = 'https://' + env.SITE_HOSTNAME;
+  if (request.headers.get('origin') !== origin) return json({ok: false, error: 'origin_forbidden'}, 403);
+  const maxBody = num(env.MAX_BODY_BYTES), maxDay = num(env.MAX_SUBMISSIONS_PER_DAY);
+  if (Number(request.headers.get('content-length') || 0) > maxBody + 4096)
+    return json({ok: false, error: 'body_too_large'}, 413, origin);
+  let form;
+  try { form = await request.formData(); } catch { return json({ok: false, error: 'invalid_form_body'}, 400, origin); }
+  const name = String(form.get('name') || '').trim();
+  const email = String(form.get('email') || '').trim();
+  const message = String(form.get('message') || '').trim();
+  const token = String(form.get('cf-turnstile-response') || '');
+  if (!name || name.length > 120) return json({ok: false, error: 'name_invalid'}, 400, origin);
+  if (!EMAIL.test(email) || email.length > 90) return json({ok: false, error: 'email_invalid'}, 400, origin);
+  if (!message || message.length > 4000) return json({ok: false, error: 'message_invalid'}, 400, origin);
+  if (token.length < 8 || token.length > 2048) return json({ok: false, error: 'turnstile_token_required'}, 400, origin);
+  const bodyBytes = new TextEncoder().encode(JSON.stringify({name, email, message})).length;
+  if (bodyBytes > maxBody) return json({ok: false, error: 'body_too_large'}, 413, origin);
+  const now = Math.floor(Date.now() / 1000);
+  const today = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM contact_submissions WHERE hostname = ? AND created_at >= ?')
+    .bind(env.SITE_HOSTNAME, day(now)).first();
+  if (Number(today?.n || 0) >= maxDay) return json({ok: false, error: 'daily_quota_exhausted'}, 429, origin);
+  // Consume the token before trusting Siteverify (single use).
+  try {
+    await env.DB.prepare('INSERT INTO turnstile_token_uses (token_hash, hostname, used_at) VALUES (?, ?, ?)')
+      .bind(await hash(token), env.SITE_HOSTNAME, now).run();
+  } catch { return json({ok: false, error: 'turnstile_token_reuse'}, 403, origin); }
+  const body = new URLSearchParams({secret: env.TURNSTILE_SECRET, response: token});
+  const ip = request.headers.get('cf-connecting-ip');
+  if (ip && ip.length <= 64) body.set('remoteip', ip);
+  let verdict;
+  try {
+    const res = await fetch(SITEVERIFY, {method: 'POST', body});
+    verdict = res.status === 200 ? await res.json() : null;
+  } catch { verdict = null; }
+  if (verdict?.success !== true || String(verdict.hostname || '').toLowerCase() !== env.SITE_HOSTNAME)
+    return json({ok: false, error: 'turnstile_siteverify_rejected'}, 403, origin);
+  await env.DB.prepare('INSERT INTO contact_submissions (id, hostname, gate_approval_id, name, email, message, ' +
+    'body_bytes, turnstile_hostname, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(crypto.randomUUID(), env.SITE_HOSTNAME, env.GATE_APPROVAL_ID, name, email, message,
+      bodyBytes, env.SITE_HOSTNAME, now).run();
+  return json({ok: true}, 200, origin);
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const origin = 'https://' + env.SITE_HOSTNAME;
+    if (url.pathname === '/submit' && request.method === 'OPTIONS')
+      return request.headers.get('origin') === origin ? new Response(null, {status: 204, headers: {
+        'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST',
+        'access-control-allow-headers': 'content-type', 'access-control-max-age': '600', vary: 'Origin'}})
+        : new Response(null, {status: 403});
+    if (url.pathname === '/submit' && request.method === 'POST') return submit(request, env);
+    if (url.pathname === '/health' && request.method === 'GET') {
+      // Booleans only: binding presence and whether one Siteverify-passed submission exists for this gate.
+      let accepted = false;
+      try {
+        accepted = Boolean(await env.DB.prepare(
+          'SELECT 1 AS ok FROM contact_submissions WHERE gate_approval_id = ? LIMIT 1')
+          .bind(env.GATE_APPROVAL_ID).first());
+      } catch {}
+      return json({ok: true, d1Bound: Boolean(env.DB), secretBound: typeof env.TURNSTILE_SECRET === 'string' &&
+        env.TURNSTILE_SECRET.length >= 8, serverSiteverify: true, gateApprovalId: env.GATE_APPROVAL_ID,
+        hostname: env.SITE_HOSTNAME, hasAcceptedSubmission: accepted}, 200);
+    }
+    return json({ok: false, error: 'not_found'}, 404);
+  },
+  async scheduled(event, env) {
+    const now = Math.floor(Date.now() / 1000);
+    const cutoff = now - num(env.RETENTION_DAYS) * 86400;
+    await env.DB.prepare('DELETE FROM contact_submissions WHERE created_at < ?').bind(cutoff).run();
+    await env.DB.prepare('DELETE FROM turnstile_token_uses WHERE used_at < ?').bind(now - 86400).run();
+  }
+};
+`;

@@ -73,11 +73,13 @@ function fail(promise, code) {
     !error.message.includes('secret-token'));
 }
 
-test('provider exposes no DNS/MX/billing/Turnstile/D1/Worker mutate endpoints', () => {
-  const {provider} = rig();
-  for(const key of ['createDnsRecord','changeMx','changeNameservers','deployServerVerifiedFormWorker',
-    'createCustomerD1','createTurnstileWidget','purchaseDomain','activateBilling'])
+test('provider exposes no DNS/MX/billing mutate endpoints; forms writes need operator approval', async () => {
+  const {provider,calls} = rig();
+  for(const key of ['createDnsRecord','changeMx','changeNameservers','purchaseDomain','activateBilling'])
     assert.equal(provider[key], undefined);
+  // #89 forms methods exist but every write goes through the operator approval callback (absent here).
+  await assert.rejects(provider.createCustomerD1(site(), {}), ExtensionProviderError);
+  assert.equal(calls.some(c => c.method !== 'GET'), false);
 });
 
 test('reads the exact owner repo and Pages project through bounded backend URLs', async () => {

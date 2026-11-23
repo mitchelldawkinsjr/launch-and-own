@@ -2,6 +2,8 @@
 // This module never grants its own approvals. No browser values can create an
 // 'approved' row. An operator must authorize the exact immutable snapshot out
 // of band before this store can claim an action.
+import {isApprovedFormsMutation} from '../pipeline/forms-provider-plan.mjs';
+import {createFormsCostPrivacyGate} from './forms-cost-privacy-store.mjs';
 import { hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 import { readOwnedStoredOptionApproval } from './stored-option-approvals.mjs';
 
@@ -242,10 +244,23 @@ export function createD1OptionExecutionStore(env, current) {
   }
 
   async function assertOperatorApprovedExecution({provider, method, path, requestBody}) {
-    if (provider !== 'cloudflare' || method !== 'POST' ||
+    if (provider !== 'cloudflare' || !['POST', 'PUT'].includes(method) ||
         !pending || !claims.has(pending.raw.id) ||
         !await assertCurrentAuthorization()) return false;
     const x = pending.raw, p = pending.reviewed.normalizedPayload;
+    if (x.kind === 'forms') {
+      const site = pending.reviewed.currentSite;
+      let gate = null;
+      try {
+        gate = await createFormsCostPrivacyGate(env, current)({jobId: x.job_id,
+          owner: {githubUserId: current.github_user_id, githubLogin: current.github_login,
+            cloudflareAccountId: current.cloudflare_account_id},
+          site, formsDigest: x.approval_digest});
+      } catch { return false; }
+      return isApprovedFormsMutation({method, path, requestBody, gate,
+        accountId: x.cloudflare_account_id, pagesProjectName: site.pagesProjectName, hostname: p.hostname});
+    }
+    if (method !== 'POST') return false;
     if (x.kind === 'domain') {
       return path === '/accounts/' + x.cloudflare_account_id +
         '/pages/projects/' + pending.reviewed.currentSite.pagesProjectName + '/domains' &&
