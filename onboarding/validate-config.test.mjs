@@ -12,8 +12,10 @@ const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches
  "idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
  "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry","onboarding_launch_jobs","onboarding_launch_job_sessions",
  "idx_onboarding_jobs_due","idx_onboarding_jobs_owner","idx_onboarding_jobs_expiry",
- "idx_onboarding_job_sessions_session","idx_onboarding_launches_job","onboarding_jobs_delete_previews"];
-const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql","0004_launch_jobs.sql"];
+ "idx_onboarding_job_sessions_session","idx_onboarding_launches_job","onboarding_jobs_delete_previews",
+ "onboarding_option_approvals","idx_onboarding_option_approvals_owner","idx_onboarding_option_approvals_job"];
+const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql","0004_launch_jobs.sql",
+ "0005_option_approvals.sql"];
 const tokenColumns=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
  "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
 const mock=(overrides={})=>{
@@ -58,8 +60,8 @@ test("remote readiness checks exact D1 metadata before read-only schema query",a
  const h=mock();
  const ready=await checkRemoteSchema({accountId,token:"test-secret",databaseId:expectedId,fetchFn:h.fetchFn});
  assert.equal(ready.status,"schema-ready");
- assert.equal(ready.tables,6);assert.equal(ready.indexes,10);assert.equal(ready.triggers,1);
- assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,4);
+ assert.equal(ready.tables,7);assert.equal(ready.indexes,12);assert.equal(ready.triggers,1);
+ assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,5);
  assert.equal(h.calls.length,5);
  assert.equal(h.calls[0].options.method,"GET");
  assert.equal(JSON.parse(h.calls[4].options.body).sql,LAUNCH_SCHEMA_PROBE);
@@ -123,12 +125,14 @@ test("missing job authorization table or preview cleanup trigger stops readiness
 });
 
 test("empty or out-of-sync Wrangler migration registry blocks remote readiness",async()=>{
- const [initial,rotation,receipts,jobs]=migrationNames;
- for(const migrations of [[],[initial],[initial,rotation,receipts],[initial,receipts,rotation,jobs],[...migrationNames,"0005_surprise.sql"]]){
+ const [initial,rotation,receipts,jobs,options]=migrationNames;
+ for(const migrations of [[],[initial],[initial,rotation,receipts],[initial,receipts,rotation,jobs],
+  [initial,rotation,receipts,jobs],[...migrationNames,"0006_surprise.sql"]]){
   const h=mock({migrations});
   await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/migration ledger differs/);
   assert.equal(h.calls.length,4);
  }
+ assert.equal(options,"0005_option_approvals.sql");
 });
 test("missing D1 migration ledger fails closed even if physical schema is correct",async()=>{
  const h=mock({ledgerUnavailable:true});

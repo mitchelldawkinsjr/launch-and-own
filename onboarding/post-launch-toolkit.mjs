@@ -1,5 +1,6 @@
 /** Owner-scoped launch history and update status views (#87). */
 import {hasCurrentOwnerSession, isLaunchId, listOwnedJobs} from './launch-jobs.mjs';
+import {optionsPathForJob} from './post-launch-options.mjs';
 import {TOOLKIT_CAPABILITY_STATES} from '../pipeline/toolkit-capabilities.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
@@ -165,6 +166,7 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} =
       ? job.approval_digest.toLowerCase() : null,
     errorCode: typeof job.error_code === 'string' ? job.error_code : null,
     editPath: editable ? '/site-update?id=' + encodeURIComponent(job.id) : null,
+    optionsPath: optionsPathForJob(job.id, status),
     capabilities: historyToolkitCapabilities({
       verified, canEdit: editable, uploadedZip: zip
     })
@@ -211,6 +213,8 @@ function renderCard(card, escape) {
     ? '<p>Last result code <code>' + escape(card.errorCode) + '</code></p>' : '';
   const edit = card.editPath
     ? '<p><a href="' + escape(card.editPath) + '">Update this website</a></p>' : '';
+  const options = card.optionsPath
+    ? '<p><a href="' + escape(card.optionsPath) + '">Optional domain, email, and form requests</a></p>' : '';
   const caps = Object.entries(card.capabilities || {}).map(([id, item]) => {
     const label = CAP_LABELS[id] || id;
     return '<li><strong>' + escape(label) + '</strong> (' + escape(item.state) + '): ' +
@@ -218,6 +222,7 @@ function renderCard(card, escape) {
   }).join('');
   return '<section><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' +
     '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + digest + error + edit +
+    options +
     '<details><summary>Toolkit capabilities</summary><ul>' + caps + '</ul></details></section>';
 }
 
