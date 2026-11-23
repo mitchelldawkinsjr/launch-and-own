@@ -18,6 +18,12 @@ function page(result) {
   return {success: true, errors: [], messages: [], result,
     result_info: {page: 1, total_pages: 1}};
 }
+function accountList(result) {
+  // Observed on Cloudflare's actual Email Routing APIs: total_count is
+  // present, but total_pages is absent even when the complete list fits.
+  return {success:true, errors:[], messages:[], result,
+    result_info:{page:1,per_page:50,count:result.length,total_count:result.length}};
+}
 function rig({writes = false, override = {}} = {}) {
   const calls = [];
   const fetchFn = async (url, options) => {
@@ -42,9 +48,9 @@ function rig({writes = false, override = {}} = {}) {
     if (path.endsWith('/zones/'+zoneId+'/email/routing'))
       return Response.json(page({enabled:true,status:'ready'}));
     if (path.endsWith('/email/routing/addresses'))
-      return Response.json(page([{email:'existing@example.net', verified:'2026-11-22T00:00:00Z'}]));
-    if (path.endsWith('/accounts/'+zoneId+'/email/routing/rules'))
-      return Response.json(page([]));
+      return Response.json(accountList([{email:'existing@example.net', verified:'2026-11-22T00:00:00Z'}]));
+    if (path.endsWith('/accounts/'+account+'/email/routing/rules'))
+      return Response.json(accountList([]));
     if (path.endsWith('/zones/'+zoneId+'/email/routing/rules'))
       return Response.json(page({id:'route1',enabled:true}));
     throw Error('unexpected URL ' + url);
@@ -109,6 +115,67 @@ test('named owner-approved writes only attach approved Pages domain or create Em
   assert.equal(writes[1].path,
     '/client/v4/zones/'+zoneId+'/email/routing/rules');
   assert.equal(calls.some(c=>/\/dns(?:\/|$)|\/billing\b/.test(c.path)),false);
+  assert.equal(calls.some(c=>c.path==='/client/v4/accounts/'+account+'/email/routing/rules'),true);
+  assert.equal(calls.some(c=>c.path==='/client/v4/accounts/'+zoneId+'/email/routing/rules'),false);
+});
+
+test('Email Routing account list completeness accepts real total_count-only responses', async () => {
+  const {provider} = rig({writes:true});
+  await provider.readOwnedZone(site(),'www.example.com');
+  assert.equal((await provider.readVerifiedDestination(account,'existing@example.net')).email,
+    'existing@example.net');
+  assert.equal(await provider.readEmailRoutingRule(zoneId,'contact@www.example.com'),null);
+});
+
+test('Email Routing lists fail closed on partial pages and missing completeness counters', async () => {
+  const addresses='/client/v4/accounts/'+account+'/email/routing/addresses';
+  for (const resultInfo of [
+    {page:1,per_page:50,count:1,total_count:2},
+    {page:1,per_page:50,count:1,total_count:1,total_pages:2},
+    {page:1,per_page:50,count:1}
+  ]) {
+    const {provider} = rig({override:{
+      [addresses]:()=>Response.json({
+        ...accountList([{email:'existing@example.net',verified:'2026-11-22T00:00:00Z'}]),
+        result_info: resultInfo
+      })
+    }});
+    await fail(provider.readVerifiedDestination(account,'existing@example.net'),
+      'provider_list_incomplete');
+  }
+});
+
+test('account-level routing rules are scoped to the exact verified zone', async () => {
+  const rulesPath='/client/v4/accounts/'+account+'/email/routing/rules';
+  const literal = value => ({type:'literal',field:'to',value});
+  const match = (alias, tag) => ({
+    id:'rule-id',zone:{tag},matchers:[literal(alias)],
+    actions:[{type:'forward',value:['existing@example.net']}],enabled:true
+  });
+  const {provider} = rig({override:{
+    [rulesPath]:()=>Response.json(accountList([
+      match('contact@other.example.net','c'.repeat(32)),
+      match('contact@www.example.com',zoneId)
+    ]))
+  }});
+  await provider.readOwnedZone(site(),'www.example.com');
+  assert.equal((await provider.readEmailRoutingRule(zoneId,'contact@www.example.com')).id,'rule-id');
+  const wrongZone=rig({override:{
+    [rulesPath]:()=>Response.json(accountList([
+      match('contact@www.example.com','c'.repeat(32))
+    ]))
+  }});
+  await wrongZone.provider.readOwnedZone(site(),'www.example.com');
+  await fail(wrongZone.provider.readEmailRoutingRule(zoneId,'contact@www.example.com'),
+    'existing_email_rule_conflict');
+  const missingZone=rig({override:{
+    [rulesPath]:()=>Response.json(accountList([
+      match('contact@www.example.com',undefined)
+    ]))
+  }});
+  await missingZone.provider.readOwnedZone(site(),'www.example.com');
+  await fail(missingZone.provider.readEmailRoutingRule(zoneId,'contact@www.example.com'),
+    'existing_email_rule_conflict');
 });
 
 test('wrong account/tenant resource names and suspicious hostnames are denied before requests', async () => {
