@@ -4,7 +4,8 @@ import {createHash} from 'node:crypto';
 import {normalizeSite, renderSite} from '../site/render-site.mjs';
 import {
   MANAGED_CONFIG_PATH, MANAGED_CONFIG_SCHEMA, ManagedSiteConfigError,
-  planManagedSiteSidecarMigration, planManagedSiteStructuredEdit
+  planManagedSiteSidecarMigration as rawPlanMigration,
+  planManagedSiteStructuredEdit as rawPlanEdit
 } from './managed-site-config.mjs';
 
 const sha = text => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -22,18 +23,39 @@ function source(overrides = {}) {
     homepageHtmlSha256: sha(html), publicationVerified: false,
     editMode: 'approved_migration_required', html, ...overrides};
 }
+const initialSidecar = JSON.stringify({
+  schema: MANAGED_CONFIG_SCHEMA, version: 1, site, htmlSha256: sha(html)
+}, null, 2) + '\n';
 const evidence = (exists, overrides = {}) => ({
-  path: MANAGED_CONFIG_PATH, exists, refCommitSha: mainSha,
-  ...(exists ? {blobSha: sidecarBlobSha} : {}), ...overrides
+  path: MANAGED_CONFIG_PATH, siteId: id, exists, refCommitSha: mainSha,
+  ...(exists ? {blobSha: sidecarBlobSha, contentSha256: sha(initialSidecar)} : {}),
+  ...overrides
 });
+const eligible = src => ({
+  siteId: src.siteId, baseCommitSha: src.baseCommitSha,
+  homepageGitBlobSha: src.homepageGitBlobSha,
+  sourceKind: 'generated', layout: 'one-page', provenance: 'pinned_launch_approval'
+});
+const withEligibility = args => ({
+  ...args,
+  eligibilityEvidence: eligible(args.currentSource),
+  // The standalone planner only accepts this as a callback from a trusted,
+  // live server. Tests supply a deterministic, controlled backend stub.
+  assertGeneratedOnePageEligibility: async snapshot => Object.isFrozen(snapshot)
+});
+const planManagedSiteSidecarMigration = args => rawPlanMigration(withEligibility(args));
+const planManagedSiteStructuredEdit = args => rawPlanEdit(withEligibility(args));
 const migrated = () => planManagedSiteSidecarMigration({
   currentSource: source(), sidecarEvidence: evidence(false), candidateSite: site
 });
 async function currentEdit({patch = {}, raw, src, ev} = {}) {
-  const first = raw ?? (await migrated()).files[0].content;
+  const first = raw ?? initialSidecar;
+  const currentSource = src ?? source();
+  const sidecarEvidence = ev ?? evidence(true, {
+    refCommitSha: currentSource.baseCommitSha, contentSha256: sha(first)
+  });
   return planManagedSiteStructuredEdit({
-    currentSource: src ?? source(), sidecarEvidence: ev ?? evidence(true),
-    sidecarRaw: first, patch
+    currentSource, sidecarEvidence, sidecarRaw: first, patch
   });
 }
 function rejected(code) {
@@ -132,6 +154,7 @@ test('structured edit starts with current canonical config and preserves all une
     {path: MANAGED_CONFIG_PATH, action: 'replace'}
   ]);
   assert.equal(next.existingSidecarGitBlobSha, sidecarBlobSha);
+  assert.equal(next.existingSidecarContentSha256, sha(initialSidecar));
   const nextDoc = JSON.parse(next.files[1].content);
   assert.equal(nextDoc.site.tagline, 'Updated once');
   assert.equal(nextDoc.site.about, site.about);
@@ -154,7 +177,8 @@ test('second edit after merged revision retains first edit rather than original 
   });
   const second = await currentEdit({
     src: afterMerge, raw: first.files[1].content,
-    ev: evidence(true, {refCommitSha: afterMerge.baseCommitSha, blobSha: '1'.repeat(40)}),
+    ev: evidence(true, {refCommitSha: afterMerge.baseCommitSha,
+      blobSha: '1'.repeat(40), contentSha256: sha(first.files[1].content)}),
     patch: {services: ['Photography and design']}
   });
   const secondSite = JSON.parse(second.files[1].content).site;
@@ -236,6 +260,11 @@ test('exact approval review digest is bound to current base and existing sidecar
   const changedBlob = await currentEdit({
     ev: evidence(true, {blobSha: '2'.repeat(40)}), patch: {theme: 'sunset'}
   });
+  const changedOldByteDigest = await currentEdit({
+    // A divergent byte digest must refuse, not return a different plan.
+    ev: evidence(true, {contentSha256: '3'.repeat(64)}), patch: {theme: 'sunset'}
+  }).then(() => {throw Error('should reject');}, error => error);
+  assert.equal(changedOldByteDigest.code, 'sidecar_bytes_do_not_match_evidence');
   const changedBase = await currentEdit({
     src: source({baseCommitSha: 'e'.repeat(40)}),
     ev: evidence(true, {refCommitSha: 'e'.repeat(40)}),
@@ -250,6 +279,129 @@ test('customer copy is escaped by the deterministic renderer, not trusted as HTM
   const change = await currentEdit({patch: {tagline: '<img src=x onerror=alert(1)>'}});
   assert(change.files[0].content.includes('&lt;img src=x onerror=alert(1)&gt;'));
   assert(!change.files[0].content.includes('<img src=x'));
+});
+
+test('sidecar reference is tied to the same site ID and pinned Git commit', async () => {
+  for (const ev of [
+    evidence(false, {siteId: 'managed_43_other-project'}),
+    evidence(true, {siteId: 'managed_43_other-project'}),
+    evidence(true, {contentSha256: undefined}),
+    evidence(true, {contentSha256: 'x'.repeat(64)}),
+    evidence(true, {refCommitSha: 'e'.repeat(40)})
+  ]) {
+    if (ev.exists) {
+      await assert.rejects(currentEdit({ev, patch: {tagline: 'New'}}),
+        rejected('pinned_sidecar_evidence_required'));
+    } else {
+      await assert.rejects(planManagedSiteSidecarMigration({
+        currentSource: source(), sidecarEvidence: ev, candidateSite: site
+      }), rejected('pinned_sidecar_evidence_required'));
+    }
+  }
+});
+
+test('sidecar bytes must match pinned hash evidence, not merely a plausible git blob SHA', async () => {
+  const raw = initialSidecar;
+  const wrong = raw.replace('Original homepage', 'Unapproved config');
+  await assert.rejects(currentEdit({
+    raw: wrong, ev: evidence(true, {contentSha256: sha(raw)}),
+    patch: {theme: 'sunset'}
+  }), rejected('sidecar_bytes_do_not_match_evidence'));
+  await assert.rejects(currentEdit({
+    raw, ev: evidence(true, {contentSha256: '9'.repeat(64)}),
+    patch: {theme: 'sunset'}
+  }), rejected('sidecar_bytes_do_not_match_evidence'));
+});
+
+test('root and nested schema keys must use fixed canonical order', async () => {
+  const data = JSON.parse(initialSidecar);
+  const wrongTopOrder = JSON.stringify({
+    version: data.version, schema: data.schema, site: data.site,
+    htmlSha256: data.htmlSha256
+  }, null, 2) + '\n';
+  const {name,tagline,about,services,theme,contactEmail} = data.site;
+  const wrongSiteOrder = JSON.stringify({
+    schema: data.schema, version: data.version,
+    site: {tagline,name,about,services,theme,contactEmail},
+    htmlSha256: data.htmlSha256
+  }, null, 2) + '\n';
+  for (const raw of [wrongTopOrder, wrongSiteOrder])
+    await assert.rejects(currentEdit({raw, patch: {theme: 'sunset'}}),
+      rejected('sidecar_unverifiable'));
+});
+
+test('a live verified generated one-page eligibility gate is mandatory', async () => {
+  const inputs = {
+    currentSource: source(), sidecarEvidence: evidence(false), candidateSite: site
+  };
+  for (const changed of [
+    {sourceKind: 'uploaded-zip'}, {layout: 'multi-page'},
+    {siteId: 'managed_99_unrelated'}, {baseCommitSha: 'f'.repeat(40)},
+    {homepageGitBlobSha: 'f'.repeat(40)}, {provenance: 'copied_marker'}
+  ]) await assert.rejects(rawPlanMigration({
+    ...withEligibility(inputs),
+    eligibilityEvidence: {...eligible(inputs.currentSource), ...changed}
+  }), rejected('generated_one_page_eligibility_required'));
+  for (const assertGeneratedOnePageEligibility of [undefined, async () => false,
+    async () => {throw Error('secret backend authorization');}])
+    await assert.rejects(rawPlanMigration({
+      ...withEligibility(inputs), assertGeneratedOnePageEligibility
+    }), rejected('generated_one_page_eligibility_required'));
+  const calls = [];
+  const result = await rawPlanMigration({
+    ...withEligibility(inputs), eligibilityEvidence: {
+      ...eligible(inputs.currentSource), provenance: 'explicit_owner_adoption'
+    },
+    assertGeneratedOnePageEligibility: async identity => {
+      calls.push(identity);
+      return true;
+    }
+  });
+  assert.equal(result.status, 'review_required');
+  assert.equal(calls.length, 2);
+  assert(calls.every(Object.isFrozen));
+});
+
+test('mutating source, sidecar evidence and patch during eligibility await fails closed', async () => {
+  const baseMigration = {
+    currentSource: source(), sidecarEvidence: evidence(false),
+    candidateSite: structuredClone(site)
+  };
+  for (const mutate of [
+    x => {x.currentSource.baseCommitSha = 'e'.repeat(40);},
+    x => {x.sidecarEvidence.refCommitSha = 'e'.repeat(40);},
+    x => {x.candidateSite.services.push('In-flight extra service');}
+  ]) {
+    const props = structuredClone(baseMigration);
+    const callback = async () => {mutate(props);return true;};
+    await assert.rejects(rawPlanMigration({
+      ...withEligibility(props), assertGeneratedOnePageEligibility: callback
+    }), rejected('review_input_changed'));
+  }
+  const props = {
+    currentSource: source(), sidecarEvidence: evidence(true),
+    sidecarRaw: initialSidecar, patch: {services: ['New']}
+  };
+  await assert.rejects(rawPlanEdit({
+    ...withEligibility(props),
+    assertGeneratedOnePageEligibility: async () => {
+      props.patch.services[0] = 'Changed during proof await';
+      return true;
+    }
+  }), rejected('review_input_changed'));
+});
+
+test('review digest changes across authoritative provenance even with identical contents', async () => {
+  const input = {
+    currentSource: source(), sidecarEvidence: evidence(false), candidateSite: site
+  };
+  const first = await rawPlanMigration(withEligibility(input));
+  const adopted = await rawPlanMigration({
+    ...withEligibility(input),
+    eligibilityEvidence: {...eligible(input.currentSource),
+      provenance: 'explicit_owner_adoption'}
+  });
+  assert.notEqual(first.approvalReviewDigest, adopted.approvalReviewDigest);
 });
 
 test('no plan claims auto-approved, deployed, live verified or host ready', async () => {
