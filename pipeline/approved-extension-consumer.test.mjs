@@ -311,6 +311,15 @@ test('email never creates routing alias without exact Cloudflare MX records on i
   await rejected(noPermission,'email_permissions_required',{noWrites:true});
 });
 
+test('trailing DNS presentation dot on Cloudflare MX content is accepted', async () => {
+  const r=rig(row('email'));r.state.domain={name:'example.com',status:'active'};
+  r.provider.readRoutingMxRecords=async (_zone, hostname)=>
+    routingMx(hostname).map(mx=>({...mx,content:mx.content+'.'}));
+  const out=await consumeStoredToolkitApproval(r.api);
+  assert.equal(out.status,'routing_rule_recorded');
+  assert.equal(r.calls.filter(c=>c==='provider.createRule').length,1);
+});
+
 test('email does not mark an unverified, wrong-zone, or replaced rule as applied', async () => {
   for (const mutate of [
     rule=>({...rule,zone:{tag:'c'.repeat(32)}}),
