@@ -131,8 +131,10 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   assert.match(html, /Available in history until <time/);
   assert.match(html, /Approval fingerprint/);
   assert.match(html, /30 days/);
-  assert.match(html, /esp-willow-studio-site\.pages\.dev/);
-  assert.doesNotMatch(html, /href="https:\/\/(?:github\.com\/tester|esp-willow-studio-site)/);
+  assert.match(html, /Website address at verification <code>https:\/\/esp-willow-studio-site\.pages\.dev\//);
+  assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
+  assert.match(html, /Current managed sites/);
+  assert.match(html, /href="https:\/\/github\.com\/tester\/esp-willow-studio"/);
   assert.match(html, /Update this website/);
   assert.match(html, /Visitor insights/);
   const writesAfter = h.calls.filter(c =>
