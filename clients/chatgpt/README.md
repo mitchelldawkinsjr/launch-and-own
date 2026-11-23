@@ -2,6 +2,25 @@
 
 **Implementation model: GPT-6 (OpenAI).** This folder is the source-controlled standalone plugin package for the **already deployed** shared MCP endpoint `https://mcp.360web.cloud/mcp`, not a second GitHub/Cloudflare publisher. The existing private `elite-site-pipeline` plugin remains separate and instructions-only; do not silently rename or overwrite it.
 
+## Browser compatibility: uploaded ZIP is **Desktop only**
+
+**Confirmed 2026-11-23:** the private personal ChatGPT plugin created through Plugin Creator from this remote-MCP ZIP is labeled **Desktop only** on ChatGPT web. This is a **client packaging restriction**, not evidence of a defective HTTPS MCP server. OpenAI explicitly notes that imported plugins containing `mcp.json` / `.mcp.json` can receive this label **even when** the MCP server is remote Streamable HTTP. Renaming the file or adding an `.app.json` pointer does not reliably remove the restriction.
+
+**Current supported web alternative (only where the account/workspace offers it):**
+
+1. Open [ChatGPT Plugins](https://chatgpt.com/plugins) in the browser.
+2. Select **Add (+)**, then **Add custom MCP server** (if available).
+3. Name it **Launch & Own** and use **https://mcp.360web.cloud/mcp** as the server URL. This is the existing verified remote endpoint; **do not enter** `https://onboard.360web.cloud` as an MCP URL.
+4. Select **OAuth**. The bridge supports **Dynamic Client Registration (DCR)**, PKCE S256 and public clients with no static client secret; use DCR if the UI exposes that choice. Scope is `launch_and_own.bridge`. Do **not** paste provider tokens, API keys or OAuth codes into ChatGPT.
+5. Review the risk warning and create the private web-compatible connection; install the resulting plugin/app if prompted. Complete the browser OAuth consent and the separate GitHub+Cloudflare owner link via `start_connect_accounts`.
+6. In a new ChatGPT conversation, select the installed custom MCP connection and ask for `get_connection_status`. Verify `tools/list` first; then test owner linking and prepare/preview/approval/status on a disposable owner-controlled site. Keep provider mutations gated behind explicit browser approval.
+
+**Plan limit:** current OpenAI documentation lists full custom remote MCP connections for eligible **Business and Enterprise/Edu** workspaces, with workspace permission restrictions. A personal plan may not show **Add custom MCP server** or may restrict write tools. Do not promise that this workaround is available on Plus or that it grants `prepare_site` write access. If the option is absent, use the ChatGPT desktop app for the existing ZIP plugin **or** continue with `https://onboard.360web.cloud` (browser standalone) until a web-supported hosted app/plugin route is shipped.
+
+For a **branded web-installable** version, register the shared remote MCP connection as a supported **ChatGPT app** using the allowed app creation workflow (or ChatGPT Sites hosting if enabled), then reference that verified app from the branded plugin. A naked ZIP `mcp.json` or an invented `.app.json` app ID is not sufficient. This requires separate testing and account/workspace support; do not claim it is completed.
+
+Official references: [ChatGPT plugin compatibility](https://help.openai.com/en/articles/20001256-plugins-in-chatgpt), [imported plugin Desktop only behavior](https://help.openai.com/en/articles/20001504-importing-and-syncing-plugin-marketplaces-from-github), and [custom MCP server setup](https://developers.openai.com/api/docs/guides/custom-mcp-server).
+
 ## Source layout
 
 - `plugin.json` — portable Agent Plugins 1.0 identity and ChatGPT presentation.
