@@ -34,7 +34,7 @@ function harness(){
     source:{type:'github',config:{owner:'tester',repo_name:repoName,
       repo_id:'101',production_deployments_enabled:true,
       preview_deployment_setting:'custom',preview_branch_includes:['launch-and-own/site-*'],
-      preview_branch_excludes:[],pr_comments_enabled:false}}},
+      preview_branch_excludes:['main'],pr_comments_enabled:false}}},
   deployment:{id:deploymentId,project_id:'pages-p-1',short_id:previewLabel,
     project_name:projectName,environment:'preview',is_skipped:false,
     latest_stage:{name:'deploy',status:'success'},url:previewUrl,
@@ -132,6 +132,10 @@ test('disabled and unsafe preview configurations always fail closed',async()=>{
   [s=>s.project.source.config.preview_deployment_setting='all','blocked-unsafe-preview-policy'],
   [s=>s.project.source.config.preview_branch_includes=['*'],'blocked-unsafe-preview-policy'],
   [s=>s.project.source.config.preview_branch_includes.push('main'),'blocked-unsafe-preview-policy'],
+  [s=>s.project.source.config.preview_branch_excludes=[],'blocked-unsafe-preview-policy'],
+  [s=>s.project.source.config.preview_branch_excludes=['dev'],'blocked-unsafe-preview-policy'],
+  [s=>s.project.source.config.preview_branch_excludes=['main','dev'],'blocked-unsafe-preview-policy'],
+  [s=>{delete s.project.source.config.preview_branch_excludes;},'blocked-unsafe-preview-policy'],
   [s=>s.project.source.config.pr_comments_enabled=true,'blocked-unsafe-preview-policy']
  ]){
   const h=harness();change(h.state);
