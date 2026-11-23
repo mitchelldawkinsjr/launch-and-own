@@ -65,3 +65,15 @@ test('private beta packaging cannot silently promote public ChatGPT release clai
   assert.equal(matrix.ownerConsent.providerCredentialsExposedToAgent,false);
   assert.match(file('./README.md'),/private beta/i);
 });
+
+test('browser install guidance truthfully documents uploaded MCP ZIP Desktop only caveat',()=>{
+  const instructions=file('./README.md');
+  assert.match(instructions,/Desktop only/);
+  assert.match(instructions,/Add custom MCP server/);
+  assert.match(instructions,/https:\/\/mcp\.360web\.cloud\/mcp/);
+  assert.match(instructions,/DCR/);
+  assert.match(instructions,/Business and Enterprise\/Edu/);
+  assert.match(instructions,/do not promise/i);
+  assert.match(instructions,/ChatGPT desktop app/);
+  assert.match(instructions,/https:\/\/onboard\.360web\.cloud/);
+});
