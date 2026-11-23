@@ -5,6 +5,9 @@ import {
   buildEmailRoutingApprovalReview, ToolkitApprovalExecutionError
 } from '../pipeline/approved-extension-consumer.mjs';
 import { planCustomer } from '../pipeline/plan-customer.mjs';
+import {
+  applyStoredDomainOption, blockedOptionApplyReason
+} from './apply-stored-options.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
@@ -181,14 +184,19 @@ export function createSiteOptionsRoutes({
     const byKind = Object.fromEntries(rows.map(row => [row.kind, row]));
     const domainHost = storedDomainHostname(rows);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, or create a contact form.</p>';
+    const notice = '<p>Store each request first. Attaching a custom domain uses your Cloudflare account for that exact stored hostname. Email MX changes and form Workers stay blocked until their separate gates are met.</p>';
     const stored = (row, label) => row
       ? '<p role="status">Stored ' + label + ' request. Fingerprint <code>' +
         escape(row.approval_digest.slice(0, 12)) + '…</code></p>'
       : '';
+    const domainApply = byKind.domain
+      ? button('/site-options-apply', 'Attach stored domain to Pages', current.csrf,
+        hidden(job.id, 'domain') +
+        '<input type="hidden" name="digest" value="' + escape(byKind.domain.approval_digest) + '">')
+      : '';
     const domainSection =
       '<section><h2>Custom domain</h2>' +
-      '<p>Enter the hostname you control. DNS stays unchanged until a later Domain-approved write.</p>' +
+      '<p>Enter the hostname you control. Attach only after the request is stored.</p>' +
       stored(byKind.domain, 'domain') +
       (domainHost ? '<p>Current request: <code>' + escape(domainHost) + '</code></p>' : '') +
       button('/site-options-prepare', 'Review domain request', current.csrf,
@@ -196,24 +204,30 @@ export function createSiteOptionsRoutes({
         '<label for="opt-hostname">Hostname</label>' +
         '<input id="opt-hostname" name="hostname" required maxlength="253" ' +
         'placeholder="www.example.com" value="' + escape(domainHost || '') + '">') +
+      domainApply +
       '</section>';
     const emailSection =
       '<section><h2>Email forwarding</h2>' +
       (domainHost
         ? '<p>Forward to an existing mailbox off <code>' + escape(domainHost) +
-          '</code>. This does not create a mailbox or write MX records.</p>' +
+          '</code>. Rule create never writes MX and stays blocked until Email Routing is already ready.</p>' +
           stored(byKind.email, 'email') +
           button('/site-options-prepare', 'Review email request', current.csrf,
             hidden(job.id, 'email') +
             '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
             '<label for="opt-mailbox">Existing mailbox</label>' +
             '<input id="opt-mailbox" name="mailbox" type="email" required maxlength="254" ' +
-            'placeholder="you@elsewhere.com">')
+            'placeholder="you@elsewhere.com">') +
+          (byKind.email
+            ? button('/site-options-apply', 'Apply stored email request', current.csrf,
+              hidden(job.id, 'email') +
+              '<input type="hidden" name="digest" value="' + escape(byKind.email.approval_digest) + '">')
+            : '')
         : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
       '</section>';
     const formsSection =
       '<section><h2>Contact form</h2>' +
-      '<p>Reviews a Siteverify-bound form plan only. No Turnstile widget, D1 database, or Worker is created.</p>' +
+      '<p>Reviews a Siteverify-bound form plan only. Worker create stays blocked until a #89 cost and privacy approval exists.</p>' +
       stored(byKind.forms, 'form') +
       button('/site-options-prepare', 'Review form request', current.csrf,
         hidden(job.id, 'forms') +
@@ -221,6 +235,11 @@ export function createSiteOptionsRoutes({
         '<input id="opt-owner-email" name="ownerEmail" type="email" required maxlength="254">' +
         '<label><input type="checkbox" name="formsConsent" value="true" required> ' +
         'I want a separate form plan reviewed later. This does not create a working form.</label>') +
+      (byKind.forms
+        ? button('/site-options-apply', 'Apply stored form request', current.csrf,
+          hidden(job.id, 'forms') +
+          '<input type="hidden" name="digest" value="' + escape(byKind.forms.approval_digest) + '">')
+        : '') +
       '</section>';
     return view('Optional features for ' + job.customer_name,
       notice +
@@ -293,7 +312,55 @@ export function createSiteOptionsRoutes({
     return Response.redirect(baseUrl(env) + '/site-options?id=' + encodeURIComponent(job.id), 303);
   }
 
-  return { page, prepare, approve };
+  async function apply(request, env, current) {
+    await limitAttempts(request, env);
+    const blocked = await requireReady(env);
+    if (blocked) return blocked;
+    const form = await formData(request);
+    assertCsrf(request, form, current, baseUrl(env));
+    const time = now();
+    const id = form.get('id');
+    const kind = form.get('kind');
+    const posted = form.get('digest');
+    if (!KINDS.has(kind) || form.getAll('kind').length !== 1 ||
+        form.getAll('id').length !== 1 || form.getAll('digest').length !== 1 ||
+        !DIGEST.test(posted || ''))
+      return fail('This options form is incomplete.');
+    const job = await ownedLiveJob(env, current, id, time);
+    if (!job) return fail('Open an owned, verified live website from your toolkit.', 404);
+    await assertHistoryAccess(env, current);
+    const rows = await listOptionApprovals(env, job.id);
+    const row = rows.find(item => item.kind === kind && item.status === 'stored');
+    if (!row || row.approval_digest.toLowerCase() !== posted.toLowerCase())
+      return fail('Store a matching options request before applying it.');
+
+    if (kind === 'email' || kind === 'forms')
+      return fail(blockedOptionApplyReason(kind));
+
+    // Load the full D1 row for validation (list query is a projection).
+    const full = await env.DB.prepare(
+      `SELECT id, job_id, github_user_id, cloudflare_account_id, kind, approval_digest,
+              payload_json, status FROM onboarding_option_approvals
+       WHERE job_id = ? AND kind = ? AND status = 'stored'`)
+      .bind(job.id, kind).first();
+    if (!full || full.approval_digest.toLowerCase() !== posted.toLowerCase())
+      return fail('Store a matching options request before applying it.');
+
+    try {
+      const result = await applyStoredDomainOption(env, {
+        job, session: current, row: full, assertHistoryAccess, now
+      });
+      return view('Custom domain attach result',
+        '<p role="status">Hostname <code>' + escape(result.hostname) + '</code> is ' +
+        escape(result.status.replaceAll('_', ' ')) + '.</p>' +
+        '<p>Platform DNS and MX were not changed. Cloudflare may create DNS in your own zone.</p>' +
+        '<p><a href="/site-options?id=' + encodeURIComponent(job.id) + '">Back to options</a></p>');
+    } catch (error) {
+      return fail(error?.message || 'Could not attach the stored domain.', 409);
+    }
+  }
+
+  return { page, prepare, approve, apply };
 }
 
 /** Toolkit card link for live owned sites. */
