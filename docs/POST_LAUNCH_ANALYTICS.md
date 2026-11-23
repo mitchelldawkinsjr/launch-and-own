@@ -1,6 +1,6 @@
 # Post-launch Web Analytics: read-only foundation (#85)
 
-**Status (2026-11-22): implemented in code on an unmerged feature branch; not deployed or customer-accepted.** This slice is *not* Analytics enablement, a visit counter, customer-facing UI, or a claim that a site is collecting data. It exists to give the #87 dashboard a conservative server-side adapter after #39 owner inventory is complete.
+**Status (2026-11-23): read-only status adapter is on `main`; review-only enablement planner is a follow-up code slice; neither is hosted-enabled or customer-accepted.** The status adapter is *not* Analytics enablement, a visit counter, or a claim that a site is collecting data. The enablement planner (`pipeline/pages-analytics-enablement-plan.mjs`) only binds a stored opt-in, privacy/beacon disclosure, and trusted configuration evidence into a digest with `readyForProviderWrite: false`. It never PATCHes Pages, creates RUM sites, redeploys, returns tags/tokens, or queries metrics.
 
 ## Cloudflare evidence and limitations
 
@@ -39,7 +39,7 @@ All five metric data fields, including visitors, pageviews and Core Web Vitals, 
 
 1. Sol 6.2 Max's #84 audit in merged PR #95 accepts the `manual_setup` / `blocked_permission_or_plan` / `not_available` states and configuration signal. Its read-only code and audit have merged, but account-specific authorization, durable site inventory and hosted rollout gates remain open. Confirm Pages OAuth scopes, current free-plan constraints and public copy before integration. Keep the adapter standalone; do not bypass #39's authenticated, durable site inventory.
 2. #39 supplies trusted current inventory and #87 integrates a CSRF/session-protected, cache-disabled **read-only** UI. Domain #2 coordinates any edit to `onboarding/worker.mjs`, especially around open drafts #31/#53. Never pass a token through browser HTML.
-3. For future enablement, separately present the exact account/project, disclosure about the injected analytics beacon/privacy notice, current settings and expected deployment behavior; capture explicit human approval. Verify provider authorization before and after any PATCH/write, including idempotence, token revocation, site replacement and rollback. None is implemented in this PR.
+3. Enablement review (`buildPagesAnalyticsEnablementPlan`) requires the exact stored analytics opt-in digest, trusted site binding, read-only configuration evidence (`not_observed` only for this plan), and a **separate** `privacyBeaconConsent` acknowledgment. Tag-reported projects stay `manual-review-required`. Output always has `readyForProviderWrite: false`. A later Domain-owned operator grant + PATCH/redeploy path is still required and is **not** implemented here.
 4. Before displaying real analytics, independently verify enablement/beacon on the canonical production site, metrics access and actual provider responses. Distinguish no data yet from measured zero traffic and measured values. Confirm the real independent customer via #21. Do not update release-matrix/website pricing claims merely because this read-only code merged.
 
 ## Regression evidence
