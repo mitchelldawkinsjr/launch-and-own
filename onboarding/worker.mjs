@@ -17,6 +17,7 @@ import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
 import {readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
 import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
+import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -593,8 +594,10 @@ export default {
         if(url.pathname==='/review')return await review(env,current,url.searchParams.get('id'));
         if(url.pathname==='/history')return await launchHistory(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
       }
       if(request.method==='POST'){
+        if(url.pathname==='/agent-link')return await confirmAgentLink(request,env,current,{view,fail,escape},{assertCsrf,formData,now});
         if(url.pathname==='/account')return await selectAccount(request,env,current);
         if(url.pathname==='/upload')return await uploadZip(request,env,current);
         if(url.pathname==='/preview')return await preview(request,env,current);

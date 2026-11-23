@@ -75,8 +75,8 @@
       ],
       "blockers": [
         "Undeployed prototype only (Worker returns 503 unless Domain sets BRIDGE_DEPLOYMENT=approved)",
-        "Domain must create dedicated bridge D1, apply migrations, set BRIDGE_TICKET_KEY, smoke-deploy (docs/DOMAIN_MCP_BRIDGE_HANDOFF.md)",
-        "Onboarding ticket-mint route + sealed browser link E2E still outstanding (no agent-bearer verified maps)",
+        "Domain must create dedicated bridge D1, apply migrations, set matching BRIDGE_TICKET_KEY on bridge+onboarding, set BRIDGE_ORIGIN, smoke-deploy (docs/DOMAIN_MCP_BRIDGE_HANDOFF.md)",
+        "Hosted /agent-link E2E against an approved bridge host still outstanding",
         "Exact HTML digests and independent consenting-user QA still required (#43)"
       ]
     },

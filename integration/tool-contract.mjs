@@ -273,15 +273,27 @@ export function assertPreparedDraft(draft, scope, {
   });
 }
 
+const SAFE_HANDOFF_PATHS = new Set(['/', '/review', '/history', '/agent-link']);
+const AGENT_LINK_CHALLENGE = /^link_[a-f0-9]{20,64}$/i;
+
 /** Only a known, cookie-authenticated browser page may be handed to the client. */
 export function assertSafeBrowserHandoff(url) {
   if (typeof url !== 'string') deny('unsafe_handoff');
   let parsed;
   try { parsed = new URL(url); } catch { deny('unsafe_handoff'); }
   if (parsed.origin !== BROWSER_ORIGIN || parsed.username || parsed.password ||
-      parsed.search || parsed.hash || !['/', '/review', '/history'].includes(parsed.pathname) ||
-      url !== parsed.href)
+      parsed.hash || !SAFE_HANDOFF_PATHS.has(parsed.pathname))
     deny('unsafe_handoff');
+  if (parsed.pathname === '/agent-link') {
+    const keys = [...parsed.searchParams.keys()];
+    const challengeId = parsed.searchParams.get('challenge_id');
+    if (keys.length !== 1 || keys[0] !== 'challenge_id' ||
+        !AGENT_LINK_CHALLENGE.test(challengeId) ||
+        url !== `${BROWSER_ORIGIN}/agent-link?challenge_id=${challengeId}`)
+      deny('unsafe_handoff');
+    return url;
+  }
+  if (parsed.search || url !== parsed.href) deny('unsafe_handoff');
   return url;
 }
 

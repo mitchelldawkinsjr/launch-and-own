@@ -121,7 +121,8 @@ test('first-time browser link binds providers; reconnect requires pinned IDs', a
   const start = await toolCall(h, token, 'start_connect_accounts');
   assert.equal(start.status, 200);
   assert.equal(start.body.state, 'needs_browser_link');
-  assert.equal(start.body.action_url, 'https://onboard.360web.cloud/');
+  assert.equal(start.body.action_url,
+    `https://onboard.360web.cloud/agent-link?challenge_id=${start.body.challenge_id}`);
   assert.equal(start.body.expectedGithubUserId, undefined);
   assert.equal(start.body.oauth_state, undefined);
 
