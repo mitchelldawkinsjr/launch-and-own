@@ -17,7 +17,7 @@ const account = 'a'.repeat(32);
 const jobId = 'a1111111-1111-4111-8111-111111111111';
 const formsDigest = planCustomer({
   name: 'Fern', accountId: account, githubOwner: 'siteowner',
-  hostname: 'example.com', forms: true, formsConsent: true,
+  hostname: 'esp-fern-site.pages.dev', forms: true, formsConsent: true,
   ownerEmail: 'user@example.net'
 }).formsReview.approvalDigest;
 
@@ -185,7 +185,7 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
     cloudflare_account_id: account,
     approval_digest: formsDigest,
     payload_json: JSON.stringify({
-      hostname: 'example.com', name: 'Fern', ownerEmail: 'user@example.net'
+      hostname: 'esp-fern-site.pages.dev', name: 'Fern', ownerEmail: 'user@example.net'
     })
   };
   const calls = [];
@@ -236,20 +236,11 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
         calls.push('turnstile');
         return {sitekey: 'widgetkey', secret: 'secret-value'};
       },
-      async readTurnstileSecret() { calls.push('secret'); return {sitekey: 'widgetkey', secret: 'secret-value'}; },
       async createCustomerD1() {
         calls.push('d1');
-        return {id: 'd1-db'};
+        return {id: '11111111-2222-3333-4444-555555555555'};
       },
-      async applyCustomerSchema() { calls.push('schema'); return {}; },
-      async deployServerVerifiedFormWorker() {
-        calls.push('worker');
-        return {id: 'worker-1', etag: 'etag1'};
-      },
-      async publishFormWorker() {
-        calls.push('publish');
-        return {endpoint: 'https://esp-fern-site-form.acct.workers.dev/submit'};
-      }
+      async applyCustomerSchema() { calls.push('schema'); return {}; }
     },
     formsReceipts: (() => {
       let receipt = null;
@@ -274,10 +265,10 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
 
   const out = await consumeStoredToolkitApproval(api);
   assert.equal(out.workingForm, false);
-  assert.equal(out.status, 'form_provisioned_awaiting_acceptance');
+  assert.equal(out.status, 'form_resources_staged');
   assert.deepEqual(
-    calls.filter(c => ['turnstile', 'd1', 'schema', 'worker', 'publish'].includes(c)),
-    ['turnstile', 'd1', 'schema', 'worker', 'publish']
+    calls.filter(c => ['turnstile', 'd1', 'schema'].includes(c)),
+    ['turnstile', 'd1', 'schema']
   );
 
   await assert.rejects(

@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {CUSTOMER_FORM_WORKER_SOURCE} from './customer-form-worker-source.mjs';
 import {
-  ACCEPTANCE_SQL, CUSTOMER_FORM_SCHEMA_SQL, FORM_WORKER_CRON, PLATFORM_D1_IDS, SITEVERIFY_URL, formWorkerUpload,
-  formsResourceNames, isApprovedFormsAcceptanceRead, isApprovedFormsMutation
+  buildFormWorkerReview, CUSTOMER_FORM_SCHEMA_SQL, PLATFORM_D1_IDS, formsResourceNames, isApprovedFormsMutation
 } from './forms-provider-plan.mjs';
 import {createCloudflareExtensionProvider} from './cloudflare-extension-provider.mjs';
 
@@ -14,13 +14,14 @@ const PROJECT = 'esp-willow-site';
 const HOST = PROJECT + '.pages.dev';
 const DBID = '11111111-2222-3333-4444-555555555555';
 const SECRET = '0x4AAAAAAA-test-secret';
+const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const gate = {approvalId: 'gate_approval_0001', retentionDays: 30, maxSubmissionsPerDay: 20, maxBodyBytes: 8192};
 const site = {cloudflareAccountId: ACCOUNT, githubUserId: 42, githubLogin: 'owner', pagesProjectName: PROJECT,
   repositoryName: 'esp-willow', productionBranch: 'main'};
 const principal = {githubUserId: 42, githubLogin: 'owner', cloudflareAccountId: ACCOUNT};
-const deployConfig = {hostname: HOST, databaseId: DBID, secret: SECRET, siteverifyUrl: SITEVERIFY_URL,
+const reviewConfig = {pagesProjectName: PROJECT, hostname: HOST, databaseId: DBID,
   maxBodyBytes: gate.maxBodyBytes, maxSubmissionsPerDay: gate.maxSubmissionsPerDay,
-  retentionDays: gate.retentionDays, gateApprovalId: gate.approvalId, ownerEmail: 'owner@example.net'};
+  retentionDays: gate.retentionDays, gateApprovalId: gate.approvalId};
 
 test('schema constant matches the reviewed .sql file; platform D1 ids match wrangler config', () => {
   assert.equal(CUSTOMER_FORM_SCHEMA_SQL,
@@ -38,85 +39,67 @@ test('schema constant matches the reviewed .sql file; platform D1 ids match wran
   db.exec(CUSTOMER_FORM_SCHEMA_SQL);
 });
 
-const R = (o = {}) => ({gateApprovalId: gate.approvalId, widgetSitekey: null, databaseId: null,
-  schemaApplied: false, workerEtag: null, endpoint: null, acceptedAt: null, ...o});
+const receiptFor = (fields = {}) => ({gateApprovalId: gate.approvalId, widgetSitekey: null,
+  databaseId: null, schemaApplied: false, ...fields});
 
-test('approval matcher allows each forms write only at its own step, bound to the recorded customer D1', async () => {
+test('approval permits only the next staged write to the reviewed widget or customer D1', () => {
   const names = formsResourceNames(PROJECT);
   const root = '/accounts/' + ACCOUNT;
   const script = root + '/workers/scripts/' + names.script;
   const base = {accountId: ACCOUNT, pagesProjectName: PROJECT, hostname: HOST, gate};
-  const ok = (receipt, method, path, requestBody) =>
+  const allowed = (receipt, method, path, requestBody) =>
     isApprovedFormsMutation({...base, receipt, method, path, requestBody});
-  const {approvalBody} = await formWorkerUpload(deployConfig);
-  assert.equal(JSON.stringify(approvalBody).includes(SECRET), false);
+  const widgetPath = root + '/challenges/widgets';
   const widgetBody = {name: names.widget, domains: [HOST], mode: 'managed'};
-  const query = id => root + '/d1/database/' + id + '/query';
+  const databasePath = root + '/d1/database';
+  const databaseBody = {name: names.database};
+  const query = id => databasePath + '/' + id + '/query';
+  const schema = {sql: CUSTOMER_FORM_SCHEMA_SQL};
+  const withWidget = receiptFor({widgetSitekey: 'site-key'});
+  const withDb = {...withWidget, databaseId: DBID};
+  const staged = {...withDb, schemaApplied: true};
 
-  // Happy path, step by step.
-  assert.equal(await ok(R(), 'POST', root + '/challenges/widgets', widgetBody), true);
-  assert.equal(await ok(R({widgetSitekey: 'site'}), 'POST', root + '/d1/database', {name: names.database}), true);
-  const withDb = R({widgetSitekey: 'site', databaseId: DBID});
-  assert.equal(await ok(withDb, 'POST', query(DBID), {sql: CUSTOMER_FORM_SCHEMA_SQL}), true);
-  const schemaDone = {...withDb, schemaApplied: true};
-  assert.equal(await ok(schemaDone, 'PUT', script, approvalBody), true);
-  const deployed = {...schemaDone, workerEtag: 'etag1'};
-  assert.equal(await ok(deployed, 'PUT', script + '/schedules', [{cron: FORM_WORKER_CRON}]), true);
-  assert.equal(await ok(deployed, 'POST', script + '/subdomain', {enabled: true, previews_enabled: false}), true);
+  assert.equal(allowed(receiptFor(), 'POST', widgetPath, widgetBody), true);
+  assert.equal(allowed(withWidget, 'POST', databasePath, databaseBody), true);
+  assert.equal(allowed(withDb, 'POST', query(DBID), schema), true);
 
-  // No receipt, another gate, or a step already done: refused.
-  assert.equal(await ok(null, 'POST', root + '/challenges/widgets', widgetBody), false);
-  assert.equal(await ok(R({gateApprovalId: 'other_gate_0001'}), 'POST', root + '/challenges/widgets', widgetBody), false);
-  assert.equal(await ok(R({widgetSitekey: 'site'}), 'POST', root + '/challenges/widgets', widgetBody), false);
-  assert.equal(await ok(R(), 'POST', root + '/d1/database', {name: names.database}), false, 'D1 before widget');
-  assert.equal(await ok(withDb, 'POST', root + '/d1/database', {name: names.database}), false, 'second D1');
-  assert.equal(await ok(schemaDone, 'POST', query(DBID), {sql: CUSTOMER_FORM_SCHEMA_SQL}), false, 'schema twice');
-  assert.equal(await ok(withDb, 'PUT', script, approvalBody), false, 'worker before schema');
-  assert.equal(await ok(deployed, 'PUT', script, approvalBody), false, 'worker replaced');
-  assert.equal(await ok(schemaDone, 'PUT', script + '/schedules', [{cron: FORM_WORKER_CRON}]), false);
-  assert.equal(await ok({...deployed, endpoint: 'https://x/submit'}, 'POST', script + '/subdomain',
-    {enabled: true, previews_enabled: false}), false);
+  assert.equal(allowed(null, 'POST', widgetPath, widgetBody), false);
+  assert.equal(allowed(receiptFor({gateApprovalId: 'wrong_gate_0001'}), 'POST', widgetPath, widgetBody), false);
+  assert.equal(allowed(withWidget, 'POST', widgetPath, widgetBody), false);
+  assert.equal(allowed(receiptFor(), 'POST', databasePath, databaseBody), false);
+  assert.equal(allowed(withDb, 'POST', databasePath, databaseBody), false);
+  assert.equal(allowed(staged, 'POST', query(DBID), schema), false);
+  assert.equal(allowed(withDb, 'POST', query('99999999-2222-3333-4444-555555555555'), schema), false);
+  for (const platform of PLATFORM_D1_IDS)
+    assert.equal(allowed({...withWidget, databaseId: platform}, 'POST', query(platform), schema), false);
 
-  // Wrong or platform databases: refused for the schema query and the Worker binding.
-  const other = '99999999-2222-3333-4444-555555555555';
-  assert.equal(await ok(withDb, 'POST', query(other), {sql: CUSTOMER_FORM_SCHEMA_SQL}), false);
-  for (const platform of PLATFORM_D1_IDS) {
-    const r = R({widgetSitekey: 'site', databaseId: platform});
-    assert.equal(await ok(r, 'POST', query(platform), {sql: CUSTOMER_FORM_SCHEMA_SQL}), false);
-    const {approvalBody: onPlatform} = await formWorkerUpload({...deployConfig, databaseId: platform});
-    assert.equal(await ok({...r, schemaApplied: true}, 'PUT', script, onPlatform), false);
-  }
-  const {approvalBody: otherDb} = await formWorkerUpload({...deployConfig, databaseId: other});
-  assert.equal(await ok(schemaDone, 'PUT', script, otherDb), false, 'binding to another D1');
+  assert.equal(allowed(receiptFor(), 'POST', widgetPath, {...widgetBody, domains: ['elsewhere.example']}), false);
+  assert.equal(allowed(receiptFor(), 'POST', widgetPath, {...widgetBody, mode: 'invisible'}), false);
+  assert.equal(allowed(withWidget, 'POST', databasePath, {name: 'launch-and-own-onboarding-beta'}), false);
+  assert.equal(allowed(withDb, 'POST', query(DBID), {sql: 'SELECT COUNT(*) FROM contact_submissions'}), false);
+  assert.equal(isApprovedFormsMutation({...base, hostname: 'example.com', receipt: withWidget,
+    method: 'POST', path: databasePath, requestBody: databaseBody}), false);
+  assert.equal(allowed(withDb, 'DELETE', databasePath + '/' + DBID), false);
+  assert.equal(allowed(staged, 'PUT', script, {}), false);
+  assert.equal(allowed(staged, 'PUT', script + '/schedules', [{cron: '17 3 * * *'}]), false);
+  assert.equal(allowed(staged, 'POST', script + '/subdomain', {enabled: true, previews_enabled: false}), false);
+});
 
-  // Body variations are refused.
-  assert.equal(await ok(R(), 'POST', root + '/challenges/widgets', {...widgetBody, domains: [HOST, 'evil.example']}), false);
-  assert.equal(await ok(R(), 'POST', root + '/challenges/widgets', {...widgetBody, mode: 'invisible'}), false);
-  assert.equal(await ok(R({widgetSitekey: 'site'}), 'POST', root + '/d1/database', {name: 'launch-and-own-onboarding-beta'}), false);
-  assert.equal(await ok(withDb, 'POST', query(DBID), {sql: 'DROP TABLE contact_submissions'}), false);
-  assert.equal(await ok(schemaDone, 'PUT', root + '/workers/scripts/launch-and-own-onboarding-beta', approvalBody), false);
-  assert.equal(await ok(schemaDone, 'PUT', script, {...approvalBody, moduleSha256: 'f'.repeat(64)}), false);
-  const looser = structuredClone(approvalBody);
-  looser.metadata.bindings.find(b => b.name === 'RETENTION_DAYS').text = '365';
-  assert.equal(await ok(schemaDone, 'PUT', script, looser), false);
-  const extra = structuredClone(approvalBody);
-  extra.metadata.bindings.push({type: 'plain_text', name: 'DEBUG', text: '1'});
-  assert.equal(await ok(schemaDone, 'PUT', script, extra), false);
-  assert.equal(await isApprovedFormsMutation({...base, gate: null, receipt: schemaDone, method: 'PUT',
-    path: script, requestBody: approvalBody}), false);
-  assert.equal(await isApprovedFormsMutation({...base, hostname: 'example.com', receipt: R({widgetSitekey: 's'}),
-    method: 'POST', path: root + '/d1/database', requestBody: {name: names.database}}), false);
-  assert.equal(await ok(withDb, 'DELETE', root + '/d1/database/' + DBID, undefined), false);
-  assert.equal(await ok(deployed, 'POST', script + '/subdomain', {enabled: true, previews_enabled: true}), false);
-
-  // Acceptance read: exactly one SELECT on the recorded customer D1.
-  const read = {method: 'POST', accountId: ACCOUNT, databaseId: DBID, gateApprovalId: gate.approvalId, hostname: HOST,
-    path: query(DBID), requestBody: {sql: ACCEPTANCE_SQL, params: [gate.approvalId, HOST]}};
-  assert.equal(isApprovedFormsAcceptanceRead(read), true);
-  assert.equal(isApprovedFormsAcceptanceRead({...read, requestBody: {sql: 'DELETE FROM contact_submissions'}}), false);
-  assert.equal(isApprovedFormsAcceptanceRead({...read, path: query(other)}), false);
-  assert.equal(isApprovedFormsAcceptanceRead({...read, databaseId: PLATFORM_D1_IDS[0],
-    path: query(PLATFORM_D1_IDS[0])}), false);
+test('separate Worker review binds its module, dedicated DB, hostname and consent limits', async () => {
+  const review = await buildFormWorkerReview(reviewConfig);
+  assert.equal(review.scriptName, PROJECT + '-form');
+  assert.equal(review.moduleSha256, createHash('sha256').update(CUSTOMER_FORM_WORKER_SOURCE).digest('hex'));
+  assert.equal(review.readyForProviderWrite, false);
+  const bindings = Object.fromEntries(review.bindings.map(binding => [binding.name, binding]));
+  assert.equal(bindings.DB.id, DBID);
+  assert.equal(bindings.SITE_HOSTNAME.text, HOST);
+  assert.equal(bindings.GATE_APPROVAL_ID.text, gate.approvalId);
+  assert.equal(bindings.RETENTION_DAYS.text, String(gate.retentionDays));
+  assert.equal(bindings.MAX_BODY_BYTES.text, String(gate.maxBodyBytes));
+  assert.equal(bindings.MAX_SUBMISSIONS_PER_DAY.text, String(gate.maxSubmissionsPerDay));
+  assert.deepEqual(bindings.TURNSTILE_SECRET, {type: 'secret_text', name: 'TURNSTILE_SECRET'});
+  for (const invalid of [{databaseId: PLATFORM_D1_IDS[0]}, {hostname: 'other.pages.dev'}, {retentionDays: 0}])
+    await assert.rejects(buildFormWorkerReview({...reviewConfig, ...invalid}), /form_worker_config_invalid/);
 });
 
 function fakeD1() {
@@ -247,12 +230,12 @@ test('form Worker: Siteverify outage or malformed reply fails closed without rep
   assert.equal(count(DB, 'contact_submissions') + count(DB, 'turnstile_token_uses'), 0);
 });
 
-function providerHarness({approve = true, widgetsExisting = [], scriptExists = false, settings, acceptedRows = 0,
-  receipt: start = R()} = {}) {
+function providerHarness({approve = true, widgetsExisting = [], schemaResult = [{success: true}],
+  receipt: initialReceipt = receiptFor()} = {}) {
   const calls = [];
   const approvals = [];
   const names = formsResourceNames(PROJECT);
-  let receipt = start;
+  let receipt = initialReceipt;
   const fetchFn = async (url, init) => {
     const u = new URL(url);
     const method = init?.method || 'GET';
@@ -260,95 +243,47 @@ function providerHarness({approve = true, widgetsExisting = [], scriptExists = f
     const ok = result => Response.json({success: true, result,
       result_info: {page: 1, total_pages: 1, count: Array.isArray(result) ? result.length : 1,
         total_count: Array.isArray(result) ? result.length : 1}});
-    if (u.pathname.endsWith('/challenges/widgets') && method !== 'POST') return ok(widgetsExisting);
+    if (u.pathname.endsWith('/challenges/widgets') && method === 'GET') return ok(widgetsExisting);
     if (u.pathname.endsWith('/challenges/widgets'))
       return ok({...JSON.parse(init.body), sitekey: '0x4AAAA-site', secret: SECRET});
-    if (u.pathname.endsWith('/challenges/widgets/0x4AAAA-site'))
-      return ok({sitekey: '0x4AAAA-site', secret: SECRET, name: names.widget, domains: [HOST], mode: 'managed'});
-    if (u.pathname.endsWith('/d1/database') && method !== 'POST') return ok([]);
+    if (u.pathname.endsWith('/d1/database') && method === 'GET') return ok([]);
     if (u.pathname.endsWith('/d1/database')) return ok({uuid: DBID, name: names.database});
-    if (u.pathname.endsWith('/query') && JSON.parse(init.body).sql === ACCEPTANCE_SQL)
-      return ok([{success: true, results: [{n: acceptedRows}]}]);
-    if (u.pathname.endsWith('/query')) return ok([{success: true}]);
-    if (u.pathname.endsWith('/settings'))
-      return scriptExists || settings ? ok(settings || {bindings: []}) : new Response('{}', {status: 404});
-    if (u.pathname.endsWith('/schedules')) return ok({schedules: [{cron: FORM_WORKER_CRON}]});
-    if (u.pathname.endsWith('/subdomain') && u.pathname.includes('/scripts/')) return ok({enabled: true});
-    if (u.pathname.endsWith('/workers/subdomain')) return ok({subdomain: 'acct'});
-    if (u.pathname.endsWith('/workers/scripts/' + names.script)) return ok({id: names.script, etag: 'etag1'});
-    return new Response('{}', {status: 404});
+    if (u.pathname.endsWith('/query')) return ok(schemaResult);
+    throw new Error('Unexpected fixture request');
   };
   const provider = createCloudflareExtensionProvider({principal, githubAccessToken: 'gh', cloudflareAccessToken: 'cf',
     fetchFn, assertOperatorApprovedExecution: async args => {
       approvals.push(args);
-      if (args.requestBody?.sql === ACCEPTANCE_SQL)
-        return approve && isApprovedFormsAcceptanceRead({...args, accountId: ACCOUNT, databaseId: DBID,
-          gateApprovalId: gate.approvalId, hostname: HOST});
       return approve && isApprovedFormsMutation({...args, accountId: ACCOUNT, pagesProjectName: PROJECT,
         hostname: HOST, gate, receipt});
     }});
-  return {provider, calls, approvals, setReceipt: r => { receipt = r; }};
+  return {provider, calls, approvals, setReceipt: value => { receipt = value; }};
 }
 
-test('provider adapter: each step under exact approval, secrets never reach the approver', async () => {
+test('provider stages only the exact widget and customer D1 under approval', async () => {
   const h = providerHarness();
   const widget = await h.provider.createTurnstileWidget(site, {hostname: HOST});
-  assert.equal(widget.secret, SECRET);
-  h.setReceipt(R({widgetSitekey: widget.sitekey}));
-  const db = await h.provider.createCustomerD1(site, {hostname: HOST});
-  assert.equal(db.id, DBID);
-  h.setReceipt(R({widgetSitekey: widget.sitekey, databaseId: DBID}));
+  assert.deepEqual(widget, {sitekey: '0x4AAAA-site'});
+  h.setReceipt(receiptFor({widgetSitekey: widget.sitekey}));
+  const database = await h.provider.createCustomerD1(site, {hostname: HOST});
+  assert.equal(database.id, DBID);
+  h.setReceipt(receiptFor({widgetSitekey: widget.sitekey, databaseId: DBID}));
   await h.provider.applyCustomerSchema(site, {hostname: HOST, databaseId: DBID});
-  h.setReceipt(R({widgetSitekey: widget.sitekey, databaseId: DBID, schemaApplied: true}));
-  const resumed = await h.provider.readTurnstileSecret(site, {hostname: HOST, sitekey: widget.sitekey});
-  assert.equal(resumed.secret, SECRET);
-  const worker = await h.provider.deployServerVerifiedFormWorker(site, {...deployConfig, sitekey: widget.sitekey});
-  assert.deepEqual(worker, {id: PROJECT + '-form', etag: 'etag1'});
-  h.setReceipt(R({widgetSitekey: widget.sitekey, databaseId: DBID, schemaApplied: true, workerEtag: 'etag1'}));
-  const published = await h.provider.publishFormWorker(site, {hostname: HOST});
-  assert.equal(published.endpoint, 'https://' + PROJECT + '-form.acct.workers.dev/submit');
-
-  assert.equal(h.approvals.length, 6);
+  assert.equal(h.approvals.length, 3);
   assert.equal(JSON.stringify(h.approvals).includes(SECRET), false);
-  const upload = h.calls.find(c => c.method === 'PUT' && c.path.endsWith('-form'));
-  assert.ok(upload.body instanceof FormData);
-  assert.equal(JSON.parse(await upload.body.get('metadata').text()).bindings
-    .find(b => b.name === 'TURNSTILE_SECRET').text, SECRET);
+  assert.equal(h.calls.some(call => call.path.includes('/workers/')), false);
 });
 
-test('provider adapter: never replaces an existing same-name Worker', async () => {
-  const h = providerHarness({scriptExists: true,
-    receipt: R({widgetSitekey: 's', databaseId: DBID, schemaApplied: true})});
-  await assert.rejects(h.provider.deployServerVerifiedFormWorker(site, deployConfig), /form_worker_exists_reconcile/);
-  assert.equal(h.calls.filter(c => c.method !== 'GET').length, 0);
-});
-
-test('provider adapter: acceptance reads the deployed bindings and the customer D1, not a public endpoint', async () => {
-  const bindings = [{type: 'd1', name: 'DB', id: DBID}, {type: 'plain_text', name: 'SITE_HOSTNAME', text: HOST},
-    {type: 'plain_text', name: 'GATE_APPROVAL_ID', text: gate.approvalId}, {type: 'secret_text', name: 'TURNSTILE_SECRET'}];
-  const args = {hostname: HOST, databaseId: DBID, gateApprovalId: gate.approvalId};
-  const none = providerHarness({settings: {bindings}, acceptedRows: 0});
-  assert.deepEqual(await none.provider.verifyFormAcceptance(site, args), {workerBound: true, accepted: false});
-  const yes = providerHarness({settings: {bindings}, acceptedRows: 1});
-  assert.deepEqual(await yes.provider.verifyFormAcceptance(site, args), {workerBound: true, accepted: true});
-  assert.equal(yes.calls.some(c => c.path.includes('workers.dev')), false);
-  const swapped = providerHarness({settings: {bindings: bindings.map(b => b.name === 'DB'
-    ? {...b, id: '99999999-2222-3333-4444-555555555555'} : b)}, acceptedRows: 1});
-  assert.deepEqual(await swapped.provider.verifyFormAcceptance(site, args), {workerBound: false, accepted: false});
-  assert.equal(swapped.calls.filter(c => c.method !== 'GET').length, 0);
-  await assert.rejects(yes.provider.verifyFormAcceptance(site, {...args, databaseId: PLATFORM_D1_IDS[0]}),
-    /customer_d1_unverified/);
-});
-
-test('provider adapter refuses without approval, on name collisions and on other hosts', async () => {
+test('provider refuses staging with a missing grant, resource collision or unsupported host or database', async () => {
   const denied = providerHarness({approve: false});
   await assert.rejects(denied.provider.createTurnstileWidget(site, {hostname: HOST}), /separate_execution_approval_required/);
   assert.equal(denied.calls.filter(c => c.method !== 'GET').length, 0);
   const taken = providerHarness({widgetsExisting: [{name: 'launch-and-own-form-' + PROJECT}]});
   await assert.rejects(taken.provider.createTurnstileWidget(site, {hostname: HOST}), /turnstile_widget_exists_reconcile/);
   await assert.rejects(taken.provider.createTurnstileWidget(site, {hostname: 'example.com'}), /forms_hostname_not_active/);
-  await assert.rejects(taken.provider.deployServerVerifiedFormWorker(site, {...deployConfig, retentionDays: 0}),
-    /form_worker_config_invalid/);
   await assert.rejects(taken.provider.applyCustomerSchema(site, {hostname: HOST, databaseId: PLATFORM_D1_IDS[0]}),
     /customer_d1_unverified/);
+  const noSchemaProof = providerHarness({schemaResult: [], receipt: receiptFor({widgetSitekey: 'site', databaseId: DBID})});
+  await assert.rejects(noSchemaProof.provider.applyCustomerSchema(site, {hostname: HOST, databaseId: DBID}),
+    /customer_d1_schema_unverified/);
 });

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { buildDomainApprovalReview } from './domain-approval-review.mjs';
 import { planCustomer, TURNSTILE_FREE_LIMITS } from './plan-customer.mjs';
 import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
+import { buildFormWorkerReview } from './forms-provider-plan.mjs';
 
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
@@ -169,7 +170,7 @@ function reviewedForms(row, site, owner) {
     deny('approval_digest_mismatch');
   if (row.payload.pagesProjectId && row.payload.pagesProjectId !== site.pagesProjectId)
     deny('forms_site_mismatch');
-  return {hostname: host, ownerEmail: row.payload.ownerEmail, review};
+  return host;
 }
 
 async function authorized(assertCurrentAuthorization, principal, owner, site) {
@@ -377,12 +378,11 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
   };
 }
 
-const FORMS_STEPS = ['createTurnstileWidget', 'readTurnstileSecret', 'createCustomerD1',
-  'applyCustomerSchema', 'deployServerVerifiedFormWorker', 'publishFormWorker'];
+const FORMS_STEPS = ['createTurnstileWidget', 'createCustomerD1', 'applyCustomerSchema'];
 
 async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate, fence, preflightGate,
   formsReceipts}) {
-  const {hostname, ownerEmail, review} = reviewedForms(row, site, owner);
+  const hostname = reviewedForms(row, site, owner);
   if (typeof verifyFormsCostPrivacyGate !== 'function')
     deny('cost_privacy_gate_required');
   const gate = await guarded(fence, () => verifyFormsCostPrivacyGate({
@@ -394,14 +394,6 @@ async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate
       gate.maxSubmissionsPerDay !== preflightGate.maxSubmissionsPerDay ||
       gate.maxBodyBytes !== preflightGate.maxBodyBytes)
     deny('cost_privacy_gate_changed');
-  const onProject = await guarded(fence, () => provider.readPagesDomain(site, hostname));
-  if (hostname !== site.pagesProjectName + '.pages.dev' &&
-      !verifiedPagesDomain(onProject, hostname))
-    deny('forms_hostname_not_active');
-  if (FORMS_STEPS.some(step => typeof provider[step] !== 'function'))
-    deny('forms_provider_permissions_required');
-  if (typeof formsReceipts?.read !== 'function' || typeof formsReceipts.record !== 'function')
-    deny('forms_receipts_required');
   // Each completed provider step is recorded before the next one, so a failed run
   // resumes from its receipts. Never return or log secrets.
   let receipt = await guarded(fence, () => formsReceipts.read());
@@ -411,10 +403,9 @@ async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate
     if (!receipt) deny('forms_receipt_not_saved');
   };
   if (!receipt) await save({});
-  let widget;
   if (!receipt.widgetSitekey) {
-    widget = await guarded(fence, () => provider.createTurnstileWidget(site, {hostname}));
-    if (!widget?.sitekey || !widget.secret) deny('turnstile_secret_required');
+    const widget = await guarded(fence, () => provider.createTurnstileWidget(site, {hostname}));
+    if (!widget?.sitekey) deny('turnstile_widget_unverified');
     await save({widgetSitekey: widget.sitekey});
   }
   if (!receipt.databaseId) {
@@ -426,62 +417,16 @@ async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate
     await guarded(fence, () => provider.applyCustomerSchema(site, {hostname, databaseId: receipt.databaseId}));
     await save({schemaApplied: true});
   }
-  if (!receipt.workerEtag) {
-    widget ??= await guarded(fence, () => provider.readTurnstileSecret(site,
-      {hostname, sitekey: receipt.widgetSitekey}));
-    if (widget?.sitekey !== receipt.widgetSitekey || !widget.secret) deny('turnstile_secret_required');
-    const worker = await guarded(fence, () => provider.deployServerVerifiedFormWorker(site, {
-      hostname, ownerEmail, sitekey: widget.sitekey, secret: widget.secret,
-      databaseId: receipt.databaseId, siteverifyUrl: review.siteverify.url,
-      maxBodyBytes: gate.maxBodyBytes, maxSubmissionsPerDay: gate.maxSubmissionsPerDay,
-      retentionDays: gate.retentionDays, gateApprovalId: gate.approvalId
-    }));
-    if (!worker?.etag) deny('server_verified_worker_required');
-    await save({workerEtag: worker.etag});
-  }
-  if (!receipt.endpoint) {
-    const published = await guarded(fence, () => provider.publishFormWorker(site, {hostname}));
-    if (!published?.endpoint) deny('server_verified_worker_required');
-    await save({endpoint: published.endpoint});
-  }
-  // Provisioned is not working: the owner's own Siteverify-passed submission is checked
-  // separately by verifyProvisionedFormAcceptance.
+  const workerReview = await guarded(fence, () => buildFormWorkerReview({
+    pagesProjectName: site.pagesProjectName, hostname, databaseId: receipt.databaseId,
+    gateApprovalId: gate.approvalId, maxBodyBytes: gate.maxBodyBytes,
+    maxSubmissionsPerDay: gate.maxSubmissionsPerDay, retentionDays: gate.retentionDays
+  }));
   return {
-    kind: 'forms', hostname, status: 'form_provisioned_awaiting_acceptance',
-    workingForm: false, widgetAloneInsufficient: true,
-    sitekey: receipt.widgetSitekey, endpoint: receipt.endpoint,
-    customerDatabaseId: receipt.databaseId, workerEtag: receipt.workerEtag,
-    gateApprovalId: gate.approvalId
+    kind: 'forms', hostname, status: 'form_resources_staged', workingForm: false,
+    sitekey: receipt.widgetSitekey, customerDatabaseId: receipt.databaseId,
+    gateApprovalId: gate.approvalId, workerReview
   };
-}
-
-/**
- * Owner-authorized acceptance for a provisioned form. Reads the deployed Worker's
- * bindings and the customer's own D1 (never a public endpoint), then records
- * acceptance on the receipt. The provider must be built with an approval callback
- * that allows only isApprovedFormsAcceptanceRead for this receipt.
- */
-export async function verifyProvisionedFormAcceptance({principal, site, hostname, provider, formsReceipts,
-  assertCurrentAuthorization} = {}) {
-  const owner = ownerSnapshot(principal);
-  if (typeof formsReceipts?.read !== 'function' || typeof formsReceipts.record !== 'function' ||
-      typeof provider?.verifyFormAcceptance !== 'function')
-    deny('trusted_store_required');
-  const fence = () => authorized(assertCurrentAuthorization, principal, owner, site);
-  const receipt = await guarded(fence, () => formsReceipts.read());
-  if (!receipt?.endpoint || !receipt.databaseId || !receipt.workerEtag) deny('form_not_provisioned');
-  if (typeof hostname !== 'string' || !HOST.test(hostname)) deny('forms_hostname_not_active');
-  if (!receipt.acceptedAt) {
-    const check = await guarded(fence, () => provider.verifyFormAcceptance(site, {
-      hostname, databaseId: receipt.databaseId, gateApprovalId: receipt.gateApprovalId}));
-    if (check?.workerBound !== true) deny('form_worker_binding_mismatch');
-    if (check.accepted !== true) deny('form_not_working_until_acceptance');
-    const saved = await guarded(fence, () => formsReceipts.record({
-      gateApprovalId: receipt.gateApprovalId, acceptedAt: Math.floor(Date.now() / 1000)}));
-    if (!saved?.acceptedAt) deny('forms_receipt_not_saved');
-  }
-  return Object.freeze({kind: 'forms', hostname, status: 'form_verified', workingForm: true,
-    customerDatabaseId: receipt.databaseId, gateApprovalId: receipt.gateApprovalId});
 }
 
 /**
@@ -522,7 +467,14 @@ export async function consumeStoredToolkitApproval({
   // Recompute exact approval BEFORE any claim or provider call.
   if (row.kind === 'domain') reviewedDomain(row, owner);
   if (row.kind === 'email') reviewedDomain(row, owner, {withMailbox: true});
-  if (row.kind === 'forms') reviewedForms(row, site, owner);
+  if (row.kind === 'forms') {
+    const hostname = reviewedForms(row, site, owner);
+    if (hostname !== site.pagesProjectName + '.pages.dev') deny('forms_hostname_not_active');
+    if (FORMS_STEPS.some(step => typeof provider?.[step] !== 'function'))
+      deny('forms_provider_permissions_required');
+    if (typeof formsReceipts?.read !== 'function' || typeof formsReceipts.record !== 'function')
+      deny('forms_receipts_required');
+  }
   // Independent cost/privacy store gate; forms can never claim resources with
   // the current review-only #89 plan alone.
   let preflightGate = null;

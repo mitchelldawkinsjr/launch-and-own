@@ -232,13 +232,14 @@ export function createD1OptionExecutionStore(env, current) {
         "JOIN onboarding_launch_jobs j ON j.id = x.job_id " +
         "WHERE x.id = ? AND x.lease_id = ? AND x.status = 'applying' " +
         "AND x.authorization_epoch = ? AND o.status = 'stored' " +
+        "AND (x.kind != 'forms' OR x.expires_at > ?) " +
         "AND o.job_id = x.job_id AND o.github_user_id = x.github_user_id " +
         "AND o.cloudflare_account_id = x.cloudflare_account_id AND o.kind = x.kind " +
         "AND o.approval_digest = x.approval_digest " +
         "AND j.status = 'live' AND j.expires_at > ? " +
         "AND j.repository_id = x.repository_id AND j.pages_project_id = x.pages_project_id " +
         "AND j.expected_commit_sha = x.expected_commit_sha"
-      ).bind(id, lease, current.authorization_epoch, stamp()).first();
+      ).bind(id, lease, current.authorization_epoch, stamp(), stamp()).first();
       if (!row) return false;
     }
     return true;
@@ -259,7 +260,7 @@ export function createD1OptionExecutionStore(env, current) {
   });
 
   async function assertOperatorApprovedExecution({provider, method, path, requestBody}) {
-    if (provider !== 'cloudflare' || !['POST', 'PUT'].includes(method) ||
+    if (provider !== 'cloudflare' || method !== 'POST' ||
         !pending || !claims.has(pending.raw.id) ||
         !await assertCurrentAuthorization()) return false;
     const x = pending.raw, p = pending.reviewed.normalizedPayload;
@@ -275,9 +276,9 @@ export function createD1OptionExecutionStore(env, current) {
       // Read the receipt fresh: each write is bound to its own step and the recorded D1.
       const receipt = await provisioning()?.read();
       return isApprovedFormsMutation({method, path, requestBody, gate, receipt,
-        accountId: x.cloudflare_account_id, pagesProjectName: site.pagesProjectName, hostname: p.hostname});
+        accountId: x.cloudflare_account_id, pagesProjectName: site.pagesProjectName, hostname: p.hostname}) &&
+        await assertCurrentAuthorization();
     }
-    if (method !== 'POST') return false;
     if (x.kind === 'domain') {
       return path === '/accounts/' + x.cloudflare_account_id +
         '/pages/projects/' + pending.reviewed.currentSite.pagesProjectName + '/domains' &&

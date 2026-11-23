@@ -5,6 +5,8 @@ import {
   newPreview, post
 } from './worker-test-support.mjs';
 import { createD1OptionExecutionStore } from './option-execution-store.mjs';
+import { buildFormsCostPrivacyReview, materializeApprovedFormsCostPrivacyRow } from '../pipeline/forms-cost-privacy-approval.mjs';
+import { CUSTOMER_FORM_SCHEMA_SQL } from '../pipeline/forms-provider-plan.mjs';
 
 const host='www.example.com';
 const id='22222222-2222-4222-8222-222222222222';
@@ -270,6 +272,67 @@ test('forms cannot activate even with stored consent and an operator execution r
   h.env.OPTION_FORMS_ENABLED='true';
   assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id})).status,403);
   assert.equal(providerWrites(h).length,0);
+});
+
+test('approved forms execution stages only the widget and D1, and reapproval keeps the old receipt',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const fetchLaunch=h.fetchFn;
+  const databaseId='11111111-2222-3333-4444-555555555555';
+  const writes=[];
+  h.fetchFn=async (url, init={})=>{
+    const path=new URL(url).pathname;
+    if(/\/challenges\/widgets$|\/d1\/database(?:\/[^/]+\/query)?$/.test(path)){
+      const data=init.body?JSON.parse(init.body):null;
+      if(init.method==='POST')writes.push({path,data});
+      const result=init.method!=='POST'?[]:
+        path.endsWith('/widgets')?{...data,sitekey:'test-sitekey',secret:'test-secret'}:
+        path.endsWith('/database')?{name:data.name,uuid:databaseId}:[{success:true}];
+      return Response.json({success:true,result,result_info:{page:1,total_pages:1,total_count:0}});
+    }
+    return fetchLaunch(url,init);
+  };
+  const {tenant,jobId}=await live(h,t);
+  const form={ownerEmail:'owner@example.net',formsConsent:'true'};
+  const row=await store(h,tenant,jobId,'forms',form);
+  const job=jobRow(h);
+  const account=job.cloudflare_account_id;
+  const limits={retentionDays:30,maxSubmissionsPerDay:50,maxBodyBytes:4096};
+  const review=buildFormsCostPrivacyReview({jobId,githubUserId:job.github_user_id,cloudflareAccountId:account,
+    pagesProjectId:job.pages_project_id,formsDigest:row.approval_digest,costApproved:true,privacyApproved:true,...limits});
+  const approved=materializeApprovedFormsCostPrivacyRow(review,{approvalId:'f2345678-1234-4234-8234-123456789abc'});
+  const time=Math.floor(Date.now()/1000);
+  h.sqlite.prepare(`INSERT INTO onboarding_forms_cost_privacy_approvals(id,forms_option_approval_id,job_id,
+    github_user_id,cloudflare_account_id,pages_project_id,forms_digest,approval_digest,payload_json,
+    retention_days,max_submissions_per_day,max_body_bytes,operator_grant_id,approved_at,expires_at,status,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'approved',?)`).run(approved.id,row.id,jobId,job.github_user_id,account,
+      job.pages_project_id,row.approval_digest,approved.approval_digest,approved.payload_json,
+      limits.retentionDays,limits.maxSubmissionsPerDay,limits.maxBodyBytes,'forms-cost-test',time,time+600,time);
+  operatorGrant(h,row);
+  h.env.OPTION_FORMS_ENABLED='true';
+  const staged=await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id});
+  const html=await staged.text();
+  assert.equal(staged.status,200,html);
+  assert.match(html,/ready for Worker review/);
+  assert.doesNotMatch(html,/Email Routing alias|test-secret/);
+  assert.equal(writes.length,3);
+  assert.deepEqual(writes[2],{path:'/client/v4/accounts/'+account+'/d1/database/'+databaseId+'/query',
+    data:{sql:CUSTOMER_FORM_SCHEMA_SQL}});
+  const execution=h.sqlite.prepare('SELECT status,result_json FROM onboarding_option_executions WHERE id=?').get(id);
+  assert.equal(execution.status,'applied');
+  const result=JSON.parse(execution.result_json);
+  assert.equal(result.status,'form_resources_staged');
+  assert.equal(result.workerReview.readyForProviderWrite,false);
+  assert.equal(result.workingForm,false);
+
+  const replacement=await store(h,tenant,jobId,'forms',{...form,ownerEmail:'revised@example.net'});
+  assert.notEqual(replacement.id,row.id);
+  const receipts=h.sqlite.prepare('SELECT forms_option_approval_id,database_id,schema_applied FROM onboarding_forms_provisioning').all();
+  assert.deepEqual(receipts.map(receipt=>({...receipt})),[
+    {forms_option_approval_id:row.id,database_id:databaseId,schema_applied:1}
+  ]);
+  operatorGrant(h,replacement,otherId);
+  assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id:otherId})).status,403);
+  assert.equal(writes.length,3);
 });
 
 test('missing CSRF and altered request data never trigger provider calls',async t=>{
