@@ -156,10 +156,16 @@ function harness({withJobs=true}={}){
       :new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});
-  if(url===pages+'/esp-willow-studio-site/domains/www.example.com' && opts.method!=='POST')
+  if(url===pages+'/esp-willow-studio-site/domains/www.example.com' && opts.method!=='POST'){
+    if(resourceState.replaceOptionWhileReadingDomain){
+      resourceState.replaceOptionWhileReadingDomain=false;
+      sqlite.prepare("UPDATE onboarding_option_approvals SET id = ? WHERE kind = 'domain'")
+        .run('99999999-9999-4999-8999-999999999999');
+    }
     return resourceState.customDomain
       ?Response.json({success:true,result:resourceState.customDomain})
       :new Response('{}',{status:404});
+  }
   if(url===pages+'/esp-willow-studio-site/domains' && opts.method==='POST'){
     const body=JSON.parse(opts.body);
     if(body.name!=='www.example.com')throw Error('Unexpected domain attachment');
