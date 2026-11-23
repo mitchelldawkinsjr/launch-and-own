@@ -261,6 +261,9 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
   const alias = 'contact@' + hostname;
   const rule = await guarded(fence, () => provider.readEmailRoutingRule(zone.id, alias));
   if (rule && (!rule.enabled ||
+      !Array.isArray(rule.matchers) || rule.matchers.length !== 1 ||
+      rule.matchers[0].type !== 'literal' || rule.matchers[0].field !== 'to' ||
+      lower(rule.matchers[0].value) !== alias ||
       !Array.isArray(rule.actions) || rule.actions.length !== 1 ||
       rule.actions[0].type !== 'forward' ||
       !Array.isArray(rule.actions[0].value) || rule.actions[0].value.length !== 1 ||
