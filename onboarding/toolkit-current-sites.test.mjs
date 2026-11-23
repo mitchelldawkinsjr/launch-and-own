@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {
-  ownerPrincipalFromSession, renderCurrentSitesSection, loadCurrentManagedSitesPage,
-  sealManagedSiteReference, openManagedSiteReference, inspectSealedManagedSource,
-  renderCurrentSourcePage
+  createOwnerAuthorizationFence, ownerPrincipalFromSession, renderCurrentSitesSection,
+  loadCurrentManagedSitesPage, sealManagedSiteReference, openManagedSiteReference,
+  inspectSealedManagedSource, renderCurrentSourcePage
 } from './toolkit-current-sites.mjs';
 import {
   accountId, approvePreview, connectTenant, harness, makeDue, newPreview, post
@@ -20,6 +20,26 @@ test('owner principal requires both providers and a selected Cloudflare account'
   }), {
     githubUserId: 17, githubLogin: 'tester', cloudflareAccountId: accountId
   });
+});
+
+test('inventory fences retain the selected epoch and use the current time on each check', async () => {
+  const session = {hash: 'session-hash', authorization_epoch: 8,
+    github_user_id: 17, github_login: 'tester', cloudflare_account_id: accountId};
+  const observed = [];
+  const env = {DB: {prepare: () => ({bind: (...values) => ({first: async () => {
+    observed.push(values);
+    return {present:1};
+  }})})}};
+  let now = 100;
+  const principal = ownerPrincipalFromSession(session);
+  const authorize = createOwnerAuthorizationFence(env, session, () => now);
+  assert.equal(await authorize(principal), true);
+  now += 10;
+  session.authorization_epoch = 9;
+  assert.equal(await authorize(principal), true);
+  assert.deepEqual(observed, [
+    ['session-hash', 8, 17, accountId, 100], ['session-hash', 8, 17, accountId, 110]
+  ]);
 });
 
 test('current sites HTML never invents a live website link', () => {
@@ -95,6 +115,7 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   const h = harness();
   t.after(() => h.sqlite.close());
   t.mock.method(globalThis, 'fetch', h.fetchFn);
+  h.resourceState.issueExpiringGrants = true;
   const tenant = await connectTenant(h);
   const id = await newPreview(h, tenant);
   assert.equal((await approvePreview(h, tenant.cookie, tenant.csrf, id)).status, 303);
@@ -122,6 +143,12 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   ).length;
   assert.equal(writesAfter, writesBefore);
 
+  const inventoryGets = h.calls.filter(c =>
+    c.method === 'GET' &&
+    (c.url.includes('/pages/projects') || c.url.includes('api.github.com'))
+  );
+  assert.ok(inventoryGets.length >= 1);
+
   const ticket = new URL('https://onboard.example.com' +
     html.match(/href="(\/toolkit\/source\?ticket=[^"]+)"/)[1]).searchParams.get('ticket');
   const source = await h.request('/toolkit/source?ticket=' + encodeURIComponent(ticket), {
@@ -148,6 +175,20 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   });
   assert.equal(forged.status, 200);
   assert.match(await forged.text(), /unavailable or expired/);
+
+  h.sqlite.prepare('UPDATE onboarding_sessions SET github_token_expires_at = 0').run();
+  const refreshCount = () => h.calls.filter(call => call.method === 'POST' &&
+    call.url === 'https://github.com/login/oauth/access_token').length;
+  const beforeRefresh = refreshCount();
+  const refreshed = await h.request('/toolkit', {cookie: tenant.cookie});
+  assert.equal(refreshed.status, 200);
+  assert.match(await refreshed.text(), /Open GitHub repository/);
+  assert.equal(refreshCount(), beforeRefresh + 1);
+
+  h.resourceState.invalidateSessionOnRepoRead = true;
+  const revoked = await h.request('/toolkit', {cookie: tenant.cookie});
+  assert.equal(revoked.status, 401);
+  assert.doesNotMatch(await revoked.text(), /Willow Studio|Open GitHub repository/);
 });
 
 test('source inspection page never embeds raw homepage HTML', () => {

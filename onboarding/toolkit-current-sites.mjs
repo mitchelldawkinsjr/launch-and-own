@@ -13,12 +13,12 @@ import {hasCurrentOwnerSession} from './launch-jobs.mjs';
 import {getFreshAccessToken} from './token-lifecycle.mjs';
 import {seal, unseal} from './crypto.mjs';
 
+const nowSeconds = () => Math.floor(Date.now() / 1000);
 const REFERENCE_LIFETIME = 15 * 60;
 const SITE_ID = /^managed_[1-9][0-9]*_[a-z0-9_-]{1,128}$/i;
 const OPAQUE = /^[a-z0-9_-]{1,128}$/i;
 const REPO = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const NUMERIC = /^[1-9][0-9]*$/;
-
 export function ownerPrincipalFromSession(session) {
   if (!session || !Number.isSafeInteger(session.github_user_id) || session.github_user_id < 1 ||
       typeof session.github_login !== 'string' ||
@@ -31,17 +31,19 @@ export function ownerPrincipalFromSession(session) {
   });
 }
 
-export function createOwnerAuthorizationFence(env, session, time) {
+export function createOwnerAuthorizationFence(env, session, clock = nowSeconds) {
   const expected = ownerPrincipalFromSession(session);
   if (!expected) {
     return async () => false;
   }
+  const selected = Object.freeze({hash: session.hash, authorization_epoch: session.authorization_epoch,
+    github_user_id: expected.githubUserId, cloudflare_account_id: expected.cloudflareAccountId});
   return async (frozen) => {
     if (!frozen || frozen.githubUserId !== expected.githubUserId ||
         frozen.githubLogin !== expected.githubLogin ||
         frozen.cloudflareAccountId !== expected.cloudflareAccountId)
       return false;
-    return hasCurrentOwnerSession(env, session, time);
+    return hasCurrentOwnerSession(env, selected, clock());
   };
 }
 
@@ -121,9 +123,13 @@ export async function openManagedSiteReference(env, session, raw, time = Math.fl
   return value.reference;
 }
 
-async function providerBundle(env, session, time, fetchFn, tokenFetch) {
+async function providerBundle(env, session, {
+  clock = nowSeconds, fetchFn = fetch, tokenFetch = getFreshAccessToken,
+  githubAccessToken, cloudflareAccessToken
+} = {}) {
+  const authorize = createOwnerAuthorizationFence(env, session, clock);
   const checkSession = async () => {
-    if (!await hasCurrentOwnerSession(env, session, time))
+    if (!await authorize(ownerPrincipalFromSession(session)))
       throw new ManagedSiteInventoryError('authorization_changed');
   };
   const fencedFetch = async (url, options = {}) => {
@@ -133,18 +139,18 @@ async function providerBundle(env, session, time, fetchFn, tokenFetch) {
       signal: options.signal ?? AbortSignal.timeout(10000)
     });
   };
-  const githubAccessToken = await tokenFetch({
+  const github = githubAccessToken || await tokenFetch({
     env, session, provider: 'github', fetchFn: fencedFetch
   });
-  const cloudflareAccessToken = await tokenFetch({
+  const cloudflare = cloudflareAccessToken || await tokenFetch({
     env, session, provider: 'cloudflare', fetchFn: fencedFetch
   });
   return {
     checkSession,
     fencedFetch,
-    githubAccessToken,
-    cloudflareAccessToken,
-    assertCurrentAuthorization: createOwnerAuthorizationFence(env, session, time)
+    githubAccessToken: github,
+    cloudflareAccessToken: cloudflare,
+    assertCurrentAuthorization: authorize
   };
 }
 
@@ -153,33 +159,31 @@ async function providerBundle(env, session, time, fetchFn, tokenFetch) {
  *   {status:'unavailable', code:string}>}
  */
 export async function loadCurrentManagedSitesPage(env, session, {
-  page = 1,
-  time = Math.floor(Date.now() / 1000),
-  fetchFn = fetch,
-  tokenFetch = getFreshAccessToken
+  page = 1, clock = nowSeconds, fetchFn = fetch, githubAccessToken, cloudflareAccessToken
 } = {}) {
   const principal = ownerPrincipalFromSession(session);
   if (!principal)
     return {status: 'unavailable', code: 'verified_owner_required'};
   if (!Number.isSafeInteger(page) || page < 1)
     return {status: 'unavailable', code: 'invalid_inventory_page'};
+  if (typeof githubAccessToken !== 'string' || !githubAccessToken ||
+      typeof cloudflareAccessToken !== 'string' || !cloudflareAccessToken)
+    return {status: 'unavailable', code: 'provider_reauthorization_required'};
 
   try {
-    const bundle = await providerBundle(env, session, time, fetchFn, tokenFetch);
     const inventory = await discoverOwnedManagedSites({
       page,
       principal,
-      githubAccessToken: bundle.githubAccessToken,
-      cloudflareAccessToken: bundle.cloudflareAccessToken,
-      assertCurrentAuthorization: bundle.assertCurrentAuthorization,
-      fetchFn: bundle.fencedFetch
+      githubAccessToken,
+      cloudflareAccessToken,
+      assertCurrentAuthorization: createOwnerAuthorizationFence(env, session, clock),
+      fetchFn
     });
     const sites = [];
     for (const site of inventory.sites) {
-      const ticket = await sealManagedSiteReference(env, session, site, time);
+      const ticket = await sealManagedSiteReference(env, session, site, clock());
       sites.push(Object.freeze({...site, sourceTicket: ticket}));
     }
-    await bundle.checkSession();
     return {
       status: 'ok',
       page: inventory.page,
@@ -200,16 +204,20 @@ export async function loadCurrentManagedSitesPage(env, session, {
  * Returns metadata only — never the raw HTML for browser embedding.
  */
 export async function inspectSealedManagedSource(env, session, ticketRaw, {
-  time = Math.floor(Date.now() / 1000),
+  clock = nowSeconds,
   fetchFn = fetch,
-  tokenFetch = getFreshAccessToken
+  tokenFetch = getFreshAccessToken,
+  githubAccessToken,
+  cloudflareAccessToken
 } = {}) {
   const principal = ownerPrincipalFromSession(session);
   if (!principal)
     return {status: 'unavailable', code: 'verified_owner_required'};
   try {
-    const reference = await openManagedSiteReference(env, session, ticketRaw, time);
-    const bundle = await providerBundle(env, session, time, fetchFn, tokenFetch);
+    const reference = await openManagedSiteReference(env, session, ticketRaw, clock());
+    const bundle = await providerBundle(env, session, {
+      clock, fetchFn, tokenFetch, githubAccessToken, cloudflareAccessToken
+    });
     const source = await readCurrentManagedHomepage({
       siteId: reference.siteId,
       reference,
