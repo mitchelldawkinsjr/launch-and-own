@@ -43,7 +43,7 @@ The owner QA ZIP upload used **95 ms CPU** for a 5.19 MiB archive. Workers Free 
 
 The `state` uses the #84 capability vocabulary. The separate `status` identifies missing measurements or permissions, projected allowance overrun, separate R2 subscription checkout, paid billing review or a provisional estimate. The exact `reviewPlan` and its SHA-256 bind the displayed resource, verified site and account, base SHA, observed/forecast inputs and evidence expiry. `canActivate` and `canWrite` are always false and the cost estimate remains unavailable. A quota overrun pauses the proposed extension only. A forecast within published caps is provisional.
 
-For example, customer-owned KV preferences with personal data require a deletion plan and explicit retention, while a public site with no dynamic API remains entirely static. To add a contact form, the owner must also separately approve recipient/delivery, anti-abuse/Turnstile verification, retention and privacy disclosures (#88); an extra KV/D1 resource by itself is not a working form.
+For example, customer-owned KV preferences with personal data require a deletion plan and explicit retention, while a public site with no dynamic API remains entirely static. To add a contact form, the owner must also separately approve recipient/delivery, anti-abuse/Turnstile verification (#88), **and** a distinct stored `#89` forms cost/privacy approval ([FORMS_COST_PRIVACY_APPROVAL.md](FORMS_COST_PRIVACY_APPROVAL.md)). A budget `planDigest` or KV/D1 forecast by itself is not a working form gate.
 
 ## Required next steps before activation
 

@@ -29,7 +29,7 @@ The email execution grant must be separate from domain. `pipeline/approved-exten
 
 ## Contact forms: blocked by #89
 
-Even when a user stores forms consent, the application rejects forms execution before a provider call. Only #89's separate approved cost/privacy/retention/abuse-limit authorization, owner-owned Turnstile widget and customer D1, server-Siteverify Worker, and independent end-to-end acceptance could permit a future form implementation. This work does not invent those resources. `workingForm` stays false. The customer site's static/free hosting remains independent of those services.
+Even when a user stores forms consent, the application rejects forms execution before a provider call. Only #89's separate approved cost/privacy/retention/abuse-limit authorization, owner-owned Turnstile widget and customer D1, server-Siteverify Worker, and independent end-to-end acceptance could permit a future form implementation. The pure review/gate helpers live in [`forms-cost-privacy-approval.mjs`](../pipeline/forms-cost-privacy-approval.mjs) ([docs](FORMS_COST_PRIVACY_APPROVAL.md)); they still do not invent resources or host a D1 table. `workingForm` stays false until a stored `approved` gate row, provider adapters, and acceptance exist. The customer site's static/free hosting remains independent of those services.
 
 ## QA / operational checklist
 
