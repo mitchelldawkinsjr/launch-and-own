@@ -1,6 +1,6 @@
 # Post-launch stored option requests — #88
 
-The existing `/site-options` toolkit page lets a verified owner review and store a separate hostname, forwarding-email and forms request. Each request recomputes its digest server-side; email fingerprints include the **exact external mailbox and fixed contact@ alias**. The `0005_option_approvals.sql` table is **already applied to hosted onboarding D1**. Its only status is `stored`; the row is a review record, not authority for a Cloudflare or GitHub mutation.
+The existing `/site-options` toolkit page lets a verified owner review and store separate hostname, forwarding-email, forms, visitor-insights (Web Analytics), and scoped PR-preview requests. Each request recomputes its digest server-side; email fingerprints include the **exact external mailbox and fixed contact@ alias**. Analytics and preview rows never enable a beacon or change `preview_deployment_setting` by themselves. Preview opt-in requires acknowledging that draft links can be public. Migration `0007_option_kinds_analytics_previews.sql` expands allowed kinds. Stored rows remain review records, not authority for a Cloudflare or GitHub mutation.
 
 ## Applying the reviewed domain or email
 
@@ -13,6 +13,8 @@ Domain execution attaches only the approved hostname to the matching currently v
 Email execution additionally requires a matching **applied** domain execution, currently active Pages domain, ready Email Routing/DNS on an active owner zone, existing verified forwarding mailbox and nonconflicting `contact@hostname` alias. The app creates only the exact forwarding rule; it never writes MX, offers a sending mailbox, or initiates mailbox verification.
 
 Forms remain review-only until a separate #89 cost/privacy authorization, customer D1 and server-side Siteverify Worker with independent acceptance; a widget is not a working form.
+
+Visitor insights and PR preview requests stay store-only until a later operator-approved enablement. Preview enablement also requires Access review because draft URLs can be public.
 
 ## Hosted status and release
 

@@ -205,3 +205,79 @@ test('forms without consent cannot be stored', async (t) => {
   assert.equal(payload.createResources, false);
   assert.equal(payload.canActivate, false);
 });
+
+test('analytics and preview opt-ins store without enabling provider settings', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const { tenant, id } = await liveSite(h, t);
+
+  const page = await (await h.request('/site-options?id=' + id, { cookie: tenant.cookie })).text();
+  assert.match(page, /Visitor insights/);
+  assert.match(page, /Private update previews/);
+
+  assert.equal((await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'analytics'
+  })).status, 400);
+
+  const analyticsPrep = await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'analytics', analyticsConsent: 'true'
+  });
+  assert.equal(analyticsPrep.status, 200);
+  const analyticsDigest = (await analyticsPrep.text())
+    .match(/name="digest" value="([a-f0-9]{64})"/)?.[1];
+  assert.ok(analyticsDigest);
+  assert.equal((await post(h, '/site-options-approve', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'analytics', analyticsConsent: 'true', digest: analyticsDigest
+  })).status, 303);
+
+  assert.equal((await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'pr_previews', previewConsent: 'true'
+  })).status, 400);
+
+  const previewPrep = await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'pr_previews',
+    previewConsent: 'true', acknowledgePublicPreviews: 'true'
+  });
+  assert.equal(previewPrep.status, 200);
+  const previewHtml = await previewPrep.text();
+  assert.match(previewHtml, /Access is reviewed|preview builds stay off/i);
+  const previewDigest = previewHtml.match(/name="digest" value="([a-f0-9]{64})"/)?.[1];
+  assert.ok(previewDigest);
+  assert.equal((await post(h, '/site-options-approve', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'pr_previews',
+    previewConsent: 'true', acknowledgePublicPreviews: 'true', digest: previewDigest
+  })).status, 303);
+
+  const job = jobRow(h);
+  const analyticsRow = h.sqlite.prepare(
+    'SELECT * FROM onboarding_option_approvals WHERE job_id = ? AND kind = ?'
+  ).get(id, 'analytics');
+  const previewRow = h.sqlite.prepare(
+    'SELECT * FROM onboarding_option_approvals WHERE job_id = ? AND kind = ?'
+  ).get(id, 'pr_previews');
+  const analytics = validateStoredOptionApproval(analyticsRow, {
+    jobId: id,
+    githubUserId: job.github_user_id,
+    githubLogin: job.github_login,
+    cloudflareAccountId: job.cloudflare_account_id,
+    customerName: job.customer_name,
+    pagesProjectName: 'esp-' + job.site_slug + '-site'
+  });
+  const preview = validateStoredOptionApproval(previewRow, {
+    jobId: id,
+    githubUserId: job.github_user_id,
+    githubLogin: job.github_login,
+    cloudflareAccountId: job.cloudflare_account_id,
+    customerName: job.customer_name,
+    pagesProjectName: 'esp-' + job.site_slug + '-site'
+  });
+  assert.equal(analytics.canActivate, false);
+  assert.equal(preview.normalizedPayload.accessPolicyRequired, true);
+  assert.equal(JSON.parse(analyticsRow.payload_json).canWrite, false);
+  assert.equal(JSON.parse(previewRow.payload_json).plan.accessPolicyRequired, true);
+  // Options storage must not PATCH Pages settings or touch analytics/preview APIs.
+  assert.equal(h.calls.filter(c =>
+    (c.method === 'PATCH' || c.method === 'PUT') &&
+    /pages\/projects|analytics|preview_deployment/i.test(c.url)
+  ).length, 0);
+});
