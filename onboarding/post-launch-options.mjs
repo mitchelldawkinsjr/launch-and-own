@@ -6,6 +6,7 @@ import {
 } from '../pipeline/approved-extension-consumer.mjs';
 import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
+import { createD1OptionExecutionStore, isOptionExecutionConfigured, optionExecutionSchemaReady } from './option-execution-store.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
 const KINDS = new Set(['domain', 'email', 'forms']);
@@ -179,6 +180,36 @@ export function createSiteOptionsRoutes({
     await assertHistoryAccess(env, current);
     const rows = await listOptionApprovals(env, job.id);
     const byKind = Object.fromEntries(rows.map(row => [row.kind, row]));
+    // A stored review is NOT an operator approval. Display activation only for
+    // an independently granted, still-valid exact execution snapshot.
+    const activations = {};
+    if (isOptionExecutionConfigured(env) && await optionExecutionSchemaReady(env.DB)) {
+      const available = await env.DB.prepare(
+        "SELECT x.id, x.kind FROM onboarding_option_executions x " +
+        "JOIN onboarding_option_approvals o ON o.id = x.option_approval_id " +
+        "WHERE x.job_id = ? AND x.github_user_id = ? AND x.cloudflare_account_id = ? " +
+        "AND x.authorization_epoch = ? AND x.status = 'approved' AND x.expires_at > ? " +
+        "AND x.kind = o.kind AND x.approval_digest = o.approval_digest " +
+        "AND x.repository_id = ? AND x.pages_project_id = ? " +
+        "AND x.expected_commit_sha = ? AND o.status = 'stored' LIMIT 3"
+      ).bind(job.id, current.github_user_id, current.cloudflare_account_id,
+        current.authorization_epoch, time, job.repository_id,
+        job.pages_project_id, job.expected_commit_sha).all();
+      const reader = createD1OptionExecutionStore(env, current).approvalStore;
+      for (const entry of available.results || []) {
+        if (!['domain', 'email'].includes(entry.kind)) continue;
+        if (env[entry.kind === 'domain' ? 'OPTION_DOMAIN_ENABLED' : 'OPTION_EMAIL_ENABLED'] !== 'true')
+          continue;
+        if (await reader.readApproved({
+          id: entry.id, githubUserId: current.github_user_id,
+          cloudflareAccountId: current.cloudflare_account_id
+        })) activations[entry.kind] = entry.id;
+      }
+    }
+    const activate = (kind, label) => activations[kind]
+      ? button('/site-options-execute', label, current.csrf,
+          '<input type="hidden" name="id" value="' + escape(activations[kind]) + '">')
+      : '';
     const domainHost = storedDomainHostname(rows);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
     const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, or create a contact form.</p>';
@@ -196,6 +227,7 @@ export function createSiteOptionsRoutes({
         '<label for="opt-hostname">Hostname</label>' +
         '<input id="opt-hostname" name="hostname" required maxlength="253" ' +
         'placeholder="www.example.com" value="' + escape(domainHost || '') + '">') +
+      activate('domain', 'Apply operator-approved domain') +
       '</section>';
     const emailSection =
       '<section><h2>Email forwarding</h2>' +
@@ -210,6 +242,7 @@ export function createSiteOptionsRoutes({
             '<input id="opt-mailbox" name="mailbox" type="email" required maxlength="254" ' +
             'placeholder="you@elsewhere.com">')
         : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
+      activate('email', 'Apply operator-approved email routing') +
       '</section>';
     const formsSection =
       '<section><h2>Contact form</h2>' +
