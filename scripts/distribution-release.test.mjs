@@ -34,7 +34,7 @@ test('checked-in matrix is valid and owner beta is not independent acceptance', 
   assert.match(report, /Browser: static ZIP upload \| deployed \| hosted_beta \| owner_live/);
   assert.match(report, /Portable agent skill \(instructions only\) \| merged \| instructions_only \| ci_only/);
   assert.match(report, /Claude Code plugin \(instructions-only local packaging\) \| merged \| not_available \| ci_only/);
-  assert.match(report, /Shared authenticated MCP\/API \| deployed \| not_available \| ci_only/);
+  assert.match(report, /Shared authenticated MCP\/API \| deployed \| not_available \| owner_live/);
   assert.match(report, /ChatGPT integration with publishing tools \| merged \| not_available \| ci_only/);
 });
 
