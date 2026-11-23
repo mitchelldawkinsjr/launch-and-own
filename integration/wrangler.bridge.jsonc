@@ -10,6 +10,14 @@
     "BRIDGE_DEPLOYMENT": "not_approved",
     "ONBOARDING_ORIGIN": "https://onboard.360web.cloud"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "launch-and-own-mcp-bridge",
+      "database_id": "REPLACE_WITH_BRIDGE_D1_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
   "observability": {
     "enabled": true,
     "logs": {

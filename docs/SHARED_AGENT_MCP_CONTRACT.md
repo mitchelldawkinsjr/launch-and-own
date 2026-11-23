@@ -70,10 +70,12 @@ The in-memory store also rechecks the **current linked identity and authorizatio
 
 ## Isolated Worker scaffold (undeployed)
 
-[`integration/bridge-worker.mjs`](../integration/bridge-worker.mjs) + [`integration/wrangler.bridge.jsonc`](../integration/wrangler.bridge.jsonc) adapt Fetch ↔ `handleBridgeRequest`. The Worker returns **503 `not_deployed`** unless `BRIDGE_DEPLOYMENT=approved`. Wrangler keeps `workers_dev: false`. **Domain must approve** any live route, OAuth resource registration, and D1 bindings. This does not modify `onboarding/worker.mjs`.
+[`integration/bridge-worker.mjs`](../integration/bridge-worker.mjs) + [`integration/wrangler.bridge.jsonc`](../integration/wrangler.bridge.jsonc) adapt Fetch ↔ `handleBridgeRequest`. The Worker returns **503 `not_deployed`** unless `BRIDGE_DEPLOYMENT=approved`. Wrangler keeps `workers_dev: false`. D1 schema: [`integration/migrations/0001_bridge.sql`](../integration/migrations/0001_bridge.sql). Browser link consume: `POST /mcp/link/browser` with a **sealed onboarding ticket** ([`browser-link-ticket.mjs`](../integration/browser-link-ticket.mjs)) — never a raw `verified` map. Approved hosts load D1 adapters via [`create-host-from-env.mjs`](../integration/create-host-from-env.mjs).
+
+**Domain operator checklist:** [`docs/DOMAIN_MCP_BRIDGE_HANDOFF.md`](./DOMAIN_MCP_BRIDGE_HANDOFF.md). This does not modify `onboarding/worker.mjs` (ticket **mint** is a coordinated follow-up).
 
 Thin ChatGPT packaging notes (still instructions-only): [`clients/chatgpt/README.md`](../clients/chatgpt/README.md).
 
 ## Next implementation slice for #43
 
-Obtain Domain approval to deploy the sibling bridge Worker with D1-backed link/site/draft/job stores, a browser-authenticated OAuth link callback (never agent-bearer `verified` maps), and exact HTML artifact hashes from the existing renderer. Run provider-backed QA with one **independent consenting** user, then release review through #2/#55 before promoting `shared_mcp_api` / connected Claude or ChatGPT in the distribution matrix.
+Domain creates D1 + hostname, applies migrations, sets secrets, smoke-deploys with `BRIDGE_DEPLOYMENT=not_approved`, then coordinates an onboarding ticket-mint route (avoid clashing with draft #31/#53). After browser link works end-to-end, flip approved only with owner authorization. Switch digests to exact Worker-rendered HTML bytes, run independent consenting-user QA, then orchestration may promote `shared_mcp_api`.

@@ -18,7 +18,7 @@ const spec = {
   about: 'Locally owned.', services: ['Design', 'Consulting'], theme: 'forest'
 };
 
-function linkedHost(extra = {}) {
+async function linkedHost(extra = {}) {
   const h = createBridgeHost({
     tokens: new MemoryAgentTokenStore(),
     links: new MemoryOwnerLinkStore(),
@@ -31,7 +31,7 @@ function linkedHost(extra = {}) {
   const token = h.tokens.issue({
     subject: 'owner_user_1234', clientId: 'chatgpt_client_1', nowSeconds: now
   });
-  const start = handleBridgeRequest(h, {
+  const start = await handleBridgeRequest(h, {
     method: 'POST', url: ORIGIN + '/mcp/tools/call',
     headers: {authorization: 'Bearer ' + token},
     body: {name: 'start_connect_accounts', arguments: {}}
@@ -39,7 +39,7 @@ function linkedHost(extra = {}) {
   // Test-only simulation of a separately provider-verified browser OAuth
   // callback. HTTP agent bearers must NEVER be able to assert provider IDs.
   const session = h.tokens.lookup(token, {nowSeconds: now});
-  const linked = h.links.consumeLinkChallenge({
+  const linked = await h.links.consumeLinkChallenge({
     challengeId: start.body.challenge_id,
     verifiedIdentity: {githubUserId: 123, cloudflareAccountId: account},
     principal: {
@@ -53,25 +53,25 @@ function linkedHost(extra = {}) {
   return {h, token};
 }
 
-function call(h, token, name, args = {}) {
-  return handleBridgeRequest(h, {
+async function call(h, token, name, args = {}) {
+  return await handleBridgeRequest(h, {
     method: 'POST', url: ORIGIN + '/mcp/tools/call',
     headers: {authorization: 'Bearer ' + token},
     body: {name, arguments: args}
   });
 }
 
-test('prepare_site freezes a digest and approval handoff never returns tokens', () => {
-  const {h, token} = linkedHost();
-  const prepared = call(h, token, 'prepare_site', {site_spec: spec});
+test('prepare_site freezes a digest and approval handoff never returns tokens', async () => {
+  const {h, token} = await linkedHost();
+  const prepared = await call(h, token, 'prepare_site', {site_spec: spec});
   assert.equal(prepared.status, 200);
   assert.equal(prepared.body.preview_sha256, previewDigestFromSpec(spec));
   assert.equal(prepared.body.operation, 'create');
 
-  const preview = call(h, token, 'get_exact_preview', {draft_id: prepared.body.draft_id});
+  const preview = await call(h, token, 'get_exact_preview', {draft_id: prepared.body.draft_id});
   assert.equal(preview.body.preview_sha256, prepared.body.preview_sha256);
 
-  const approval = call(h, token, 'request_explicit_approval', {
+  const approval = await call(h, token, 'request_explicit_approval', {
     draft_id: prepared.body.draft_id,
     preview_sha256: prepared.body.preview_sha256,
     idempotency_key: 'idem_12345678901234'
@@ -81,15 +81,15 @@ test('prepare_site freezes a digest and approval handoff never returns tokens', 
   assert.equal(approval.body.token, undefined);
   assert.equal(approval.body.approved, undefined);
 
-  assert.equal(call(h, token, 'request_explicit_approval', {
+  assert.equal((await call(h, token, 'request_explicit_approval', {
     draft_id: prepared.body.draft_id,
     preview_sha256: 'e'.repeat(64),
     idempotency_key: 'idem_12345678901234'
-  }).body.error, 'stale_preview');
+  })).body.error, 'stale_preview');
 });
 
-test('site inventory is tenant-fenced across linked owners', () => {
-  const {h, token} = linkedHost();
+test('site inventory is tenant-fenced across linked owners', async () => {
+  const {h, token} = await linkedHost();
   const scope = assertTrustedPrincipal({
     authenticated: true, audience: BRIDGE_AUDIENCE,
     subject: 'owner_user_1234', clientId: 'chatgpt_client_1',
@@ -100,17 +100,17 @@ test('site inventory is tenant-fenced across linked owners', () => {
     }
   }, {nowSeconds: now});
   const site = h.sites.seedSite(scope, {name: 'Willow Studio'});
-  const listed = call(h, token, 'list_sites');
+  const listed = await call(h, token, 'list_sites');
   assert.deepEqual(listed.body.sites, [
     {site_id: site.id, name: 'Willow Studio', status: 'draft'}
   ]);
-  assert.equal(call(h, token, 'get_site', {site_id: site.id}).body.name, 'Willow Studio');
-  assert.equal(call(h, token, 'get_site', {site_id: 'site_guessed_other'}).body.error,
+  assert.equal((await call(h, token, 'get_site', {site_id: site.id})).body.name, 'Willow Studio');
+  assert.equal((await call(h, token, 'get_site', {site_id: 'site_guessed_other'})).body.error,
     'not_found');
 });
 
-test('prepare_site_update rejects stale Git base from trusted host facts', () => {
-  const {h, token} = linkedHost();
+test('prepare_site_update rejects stale Git base from trusted host facts', async () => {
+  const {h, token} = await linkedHost();
   const scope = assertTrustedPrincipal({
     authenticated: true, audience: BRIDGE_AUDIENCE,
     subject: 'owner_user_1234', clientId: 'chatgpt_client_1',
@@ -122,19 +122,19 @@ test('prepare_site_update rejects stale Git base from trusted host facts', () =>
   }, {nowSeconds: now});
   const site = h.sites.seedSite(scope, {name: 'Willow Studio'});
 
-  const ok = call(h, token, 'prepare_site_update', {
+  const ok = await call(h, token, 'prepare_site_update', {
     site_id: site.id, base_commit_sha: sha, changes: {headline: 'New'}
   });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.operation, 'update');
 
   h.currentCommitSha = otherSha;
-  assert.equal(call(h, token, 'prepare_site_update', {
+  assert.equal((await call(h, token, 'prepare_site_update', {
     site_id: site.id, base_commit_sha: sha, changes: {headline: 'Newer'}
-  }).body.error, 'stale_source');
+  })).body.error, 'stale_source');
 });
 
-test('cross-tenant site id guesses fail closed', () => {
+test('cross-tenant site id guesses fail closed', async () => {
   const store = new MemorySiteDraftStore();
   const scopeA = assertTrustedPrincipal({
     authenticated: true, audience: BRIDGE_AUDIENCE,

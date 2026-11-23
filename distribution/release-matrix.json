@@ -75,7 +75,9 @@
       ],
       "blockers": [
         "Undeployed prototype only (Worker returns 503 unless Domain sets BRIDGE_DEPLOYMENT=approved)",
-        "Need D1 persistence, browser-authenticated OAuth link callback (not agent-bearer verified maps), exact HTML digests, Domain deploy, and independent consenting-user QA (#43)"
+        "Domain must create dedicated bridge D1, apply migrations, set BRIDGE_TICKET_KEY, smoke-deploy (docs/DOMAIN_MCP_BRIDGE_HANDOFF.md)",
+        "Onboarding ticket-mint route + sealed browser link E2E still outstanding (no agent-bearer verified maps)",
+        "Exact HTML digests and independent consenting-user QA still required (#43)"
       ]
     },
     "claude_plugin": {

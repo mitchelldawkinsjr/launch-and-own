@@ -27,8 +27,8 @@ function issue(h, overrides = {}) {
 
 const ORIGIN = 'https://onboard.360web.cloud';
 
-function toolCall(h, token, name, args = {}) {
-  return handleBridgeRequest(h, {
+async function toolCall(h, token, name, args = {}) {
+  return await handleBridgeRequest(h, {
     method: 'POST',
     url: ORIGIN + '/mcp/tools/call',
     headers: {authorization: 'Bearer ' + token},
@@ -36,17 +36,17 @@ function toolCall(h, token, name, args = {}) {
   });
 }
 
-function complete(h, token, challengeId, verified) {
+async function complete(h, token, challengeId, verified) {
   const session = h.tokens.lookup(token, {nowSeconds: now});
   if (!session) return {status: 401, body: {error: 'unauthenticated'}};
   const principal = {
     authenticated: true, audience: BRIDGE_AUDIENCE,
     subject: session.subject, clientId: session.clientId,
     expiresAt: session.expiresAt,
-    linkedOwner: linkedOwnerFromStore(h.links, session.subject, session.clientId)
+    linkedOwner: await linkedOwnerFromStore(h.links, session.subject, session.clientId)
   };
   try {
-    const record = h.links.consumeLinkChallenge({
+    const record = await h.links.consumeLinkChallenge({
       challengeId, verifiedIdentity: verified, principal, nowSeconds: now
     });
     return {status: 200, body: {
@@ -60,8 +60,8 @@ function complete(h, token, challengeId, verified) {
   }
 }
 
-function untrustedHttpComplete(h, token, challengeId, verified) {
-  return handleBridgeRequest(h, {
+async function untrustedHttpComplete(h, token, challengeId, verified) {
+  return await handleBridgeRequest(h, {
     method: 'POST',
     url: ORIGIN + '/mcp/link/complete',
     headers: {authorization: 'Bearer ' + token},
@@ -69,63 +69,63 @@ function untrustedHttpComplete(h, token, challengeId, verified) {
   });
 }
 
-test('protected resource metadata advertises provisional bridge markers', () => {
+test('protected resource metadata advertises provisional bridge markers', async () => {
   const meta = protectedResourceMetadata();
   assert.equal(meta.resource, RESOURCE_URI);
   assert.equal(meta.launch_and_own.bridge_audience, BRIDGE_AUDIENCE);
   assert.equal(meta.launch_and_own.status, 'not_deployed');
   const h = host();
-  const res = handleBridgeRequest(h, {
+  const res = await handleBridgeRequest(h, {
     method: 'GET', url: 'https://onboard.360web.cloud' + RESOURCE_METADATA_PATH
   });
   assert.equal(res.status, 200);
   assert.equal(res.body.resource, RESOURCE_URI);
 });
 
-test('missing/wrong/expired bearer fails closed at the transport edge', () => {
+test('missing/wrong/expired bearer fails closed at the transport edge', async () => {
   const h = host();
   const token = issue(h);
-  assert.equal(toolCall(h, 'not-a-token', 'get_connection_status').body.error, 'unauthenticated');
-  assert.equal(handleBridgeRequest(h, {
+  assert.equal((await toolCall(h, 'not-a-token', 'get_connection_status')).body.error, 'unauthenticated');
+  assert.equal((await handleBridgeRequest(h, {
     method: 'POST', url: ORIGIN + '/mcp/tools/call',
     headers: {}, body: {name: 'get_connection_status', arguments: {}}
-  }).status, 401);
+  })).status, 401);
   now += 10_000;
-  assert.equal(toolCall(h, token, 'get_connection_status').body.error, 'unauthenticated');
+  assert.equal((await toolCall(h, token, 'get_connection_status')).body.error, 'unauthenticated');
   now = 1_700_000_000;
 });
 
-test('model cannot inject owner identity through tool payload fields', () => {
+test('model cannot inject owner identity through tool payload fields', async () => {
   const h = host();
   const token = issue(h);
-  assert.equal(handleBridgeRequest(h, {
+  assert.equal((await handleBridgeRequest(h, {
     method: 'POST', url: ORIGIN + '/mcp/tools/call',
     headers: {authorization: 'Bearer ' + token},
     body: {
       name: 'get_connection_status', arguments: {},
       linkedOwner: {githubUserId: 999, cloudflareAccountId: otherAccount}
     }
-  }).body.error, 'invalid_arguments');
-  assert.equal(toolCall(h, token, 'list_sites', {
+  })).body.error, 'invalid_arguments');
+  assert.equal((await toolCall(h, token, 'list_sites', {
     owner_id: 'someone_else'
-  }).body.error, 'invalid_arguments');
+  })).body.error, 'invalid_arguments');
 });
 
-test('first-time browser link binds providers; reconnect requires pinned IDs', () => {
+test('first-time browser link binds providers; reconnect requires pinned IDs', async () => {
   const h = host();
   const token = issue(h);
-  const status0 = toolCall(h, token, 'get_connection_status');
+  const status0 = await toolCall(h, token, 'get_connection_status');
   assert.equal(status0.status, 200);
   assert.equal(status0.body.linked, false);
 
-  const start = toolCall(h, token, 'start_connect_accounts');
+  const start = await toolCall(h, token, 'start_connect_accounts');
   assert.equal(start.status, 200);
   assert.equal(start.body.state, 'needs_browser_link');
   assert.equal(start.body.action_url, 'https://onboard.360web.cloud/');
   assert.equal(start.body.expectedGithubUserId, undefined);
   assert.equal(start.body.oauth_state, undefined);
 
-  const linked = complete(h, token, start.body.challenge_id, {
+  const linked = await complete(h, token, start.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
   });
   assert.equal(linked.status, 200);
@@ -133,115 +133,115 @@ test('first-time browser link binds providers; reconnect requires pinned IDs', (
   assert.equal(linked.body.authorization_epoch, 0);
 
   // Replay of the same challenge fails closed.
-  assert.equal(complete(h, token, start.body.challenge_id, {
+  assert.equal((await complete(h, token, start.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
-  }).body.error, 'invalid_link_challenge');
+  })).body.error, 'invalid_link_challenge');
 
-  const status1 = toolCall(h, token, 'get_connection_status');
+  const status1 = await toolCall(h, token, 'get_connection_status');
   assert.equal(status1.body.linked, true);
   assert.equal(status1.body.github_user_id, 123);
 
   // Reconnect with matching pins succeeds and bumps epoch.
-  const reconnect = toolCall(h, token, 'start_connect_accounts');
-  const again = complete(h, token, reconnect.body.challenge_id, {
+  const reconnect = await toolCall(h, token, 'start_connect_accounts');
+  const again = await complete(h, token, reconnect.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
   });
   assert.equal(again.body.authorization_epoch, 1);
 
   // Different verified Cloudflare account fails closed.
-  const bad = toolCall(h, token, 'start_connect_accounts');
-  assert.equal(complete(h, token, bad.body.challenge_id, {
+  const bad = await toolCall(h, token, 'start_connect_accounts');
+  assert.equal((await complete(h, token, bad.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: otherAccount
-  }).body.error, 'invalid_link_challenge');
+  })).body.error, 'invalid_link_challenge');
 });
 
-test('linked tools stay gated until linked; inventory is empty until sites exist', () => {
+test('linked tools stay gated until linked; inventory is empty until sites exist', async () => {
   const h = host();
   const token = issue(h);
-  assert.equal(toolCall(h, token, 'list_sites').body.error, 'needs_reauthorization');
+  assert.equal((await toolCall(h, token, 'list_sites')).body.error, 'needs_reauthorization');
 
-  const start = toolCall(h, token, 'start_connect_accounts');
-  complete(h, token, start.body.challenge_id, {
+  const start = await toolCall(h, token, 'start_connect_accounts');
+  await complete(h, token, start.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
   });
-  const listed = toolCall(h, token, 'list_sites');
+  const listed = await toolCall(h, token, 'list_sites');
   assert.equal(listed.status, 200);
   assert.deepEqual(listed.body.sites, []);
-  assert.equal(toolCall(h, token, 'get_job_status', {job_id: 'job_12345'}).body.error,
+  assert.equal((await toolCall(h, token, 'get_job_status', {job_id: 'job_12345'})).body.error,
     'not_found');
 });
 
-test('wrong client cannot consume another client challenge', () => {
+test('wrong client cannot consume another client challenge', async () => {
   const h = host();
   const tokenA = issue(h, {clientId: 'chatgpt_client_1'});
   const tokenB = issue(h, {clientId: 'claude_client_1'});
-  const start = toolCall(h, tokenA, 'start_connect_accounts');
-  assert.equal(complete(h, tokenB, start.body.challenge_id, {
+  const start = await toolCall(h, tokenA, 'start_connect_accounts');
+  assert.equal((await complete(h, tokenB, start.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
-  }).body.error, 'invalid_link_challenge');
+  })).body.error, 'invalid_link_challenge');
 });
 
-test('memory link store rejects unsafe challenge parameters', () => {
+test('memory link store rejects unsafe challenge parameters', async () => {
   const store = new MemoryOwnerLinkStore();
-  assert.throws(() => store.createLinkChallenge({
+  await assert.rejects(async () => store.createLinkChallenge({
     subject: 'owner_user_1234', clientId: 'chatgpt_client_1',
     nowSeconds: now, ttlSeconds: 5
   }), error => error instanceof BridgeContractError);
 });
 
-test('model bearer cannot complete linking by sending forged verified provider IDs', () => {
+test('model bearer cannot complete linking by sending forged verified provider IDs', async () => {
   const h = host();
   const token = issue(h);
-  const start = toolCall(h, token, 'start_connect_accounts');
+  const start = await toolCall(h, token, 'start_connect_accounts');
   const id = start.body.challenge_id;
   const attackerClaims = {githubUserId: 9999, cloudflareAccountId: otherAccount};
   // Even a valid bearer and a valid fresh challenge cannot assert OAuth success.
-  const forged = untrustedHttpComplete(h, token, id, attackerClaims);
+  const forged = await untrustedHttpComplete(h, token, id, attackerClaims);
   assert.equal(forged.status, 404);
   assert.equal(forged.body.error, 'not_found');
-  assert.equal(h.links.peekChallenge(id).consumedAt, null);
-  assert.equal(toolCall(h, token, 'get_connection_status').body.linked, false);
+  assert.equal((await h.links.peekChallenge(id)).consumedAt, null);
+  assert.equal((await toolCall(h, token, 'get_connection_status')).body.linked, false);
   // An attacker also cannot smuggle a verification into an MCP tool call.
-  assert.equal(toolCall(h, token, 'complete_link', {
+  assert.equal((await toolCall(h, token, 'complete_link', {
     challenge_id: id, verified: attackerClaims
-  }).body.error, 'unknown_tool');
+  })).body.error, 'unknown_tool');
   // The internal mock callback can still simulate separately verified OAuth.
-  assert.equal(complete(h, token, id, {
+  assert.equal((await complete(h, token, id, {
     githubUserId: 123, cloudflareAccountId: account
-  }).status, 200);
+  })).status, 200);
 });
 
-test('old first-time challenge cannot replace the owner after a second challenge links', () => {
+test('old first-time challenge cannot replace the owner after a second challenge links', async () => {
   const h = host();
   const token = issue(h);
-  const first = toolCall(h, token, 'start_connect_accounts');
-  const second = toolCall(h, token, 'start_connect_accounts');
-  assert.equal(complete(h, token, first.body.challenge_id, {
+  const first = await toolCall(h, token, 'start_connect_accounts');
+  const second = await toolCall(h, token, 'start_connect_accounts');
+  assert.equal((await complete(h, token, first.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
-  }).status, 200);
-  const hijack = complete(h, token, second.body.challenge_id, {
+  })).status, 200);
+  const hijack = await complete(h, token, second.body.challenge_id, {
     githubUserId: 456, cloudflareAccountId: otherAccount
   });
   assert.equal(hijack.body.error, 'invalid_link_challenge');
-  assert.equal(h.links.peekChallenge(second.body.challenge_id).consumedAt, null);
-  assert.equal(toolCall(h, token, 'get_connection_status').body.github_user_id, 123);
+  assert.equal((await h.links.peekChallenge(second.body.challenge_id)).consumedAt, null);
+  assert.equal((await toolCall(h, token, 'get_connection_status')).body.github_user_id, 123);
 });
 
-test('concurrent reconnect challenges cannot replay an outdated authorization epoch', () => {
+test('concurrent reconnect challenges cannot replay an outdated authorization epoch', async () => {
   const h = host();
   const token = issue(h);
-  const initial = toolCall(h, token, 'start_connect_accounts');
-  assert.equal(complete(h, token, initial.body.challenge_id, {
+  const initial = await toolCall(h, token, 'start_connect_accounts');
+  assert.equal((await complete(h, token, initial.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
-  }).body.authorization_epoch, 0);
-  const first = toolCall(h, token, 'start_connect_accounts');
-  const second = toolCall(h, token, 'start_connect_accounts');
-  assert.equal(complete(h, token, first.body.challenge_id, {
+  })).body.authorization_epoch, 0);
+  const first = await toolCall(h, token, 'start_connect_accounts');
+  const second = await toolCall(h, token, 'start_connect_accounts');
+  assert.equal((await complete(h, token, first.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
-  }).body.authorization_epoch, 1);
-  const stale = complete(h, token, second.body.challenge_id, {
+  })).body.authorization_epoch, 1);
+  const stale = await complete(h, token, second.body.challenge_id, {
     githubUserId: 123, cloudflareAccountId: account
   });
   assert.equal(stale.body.error, 'invalid_link_challenge');
-  assert.equal(toolCall(h, token, 'get_connection_status').body.authorization_epoch, 1);
+  assert.equal((await toolCall(h, token, 'get_connection_status')).body.authorization_epoch, 1);
 });
