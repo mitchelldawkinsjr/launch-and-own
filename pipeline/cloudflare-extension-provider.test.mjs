@@ -31,6 +31,8 @@ function rig({writes = false, override = {}} = {}) {
       return Response.json(page({id: 'p1', name: 'esp-fern-site'}));
     if (path.endsWith('/repos/siteowner/esp-fern'))
       return Response.json({id: 77, private: true, owner: {id: 42}});
+    if (path.endsWith('/repos/siteowner/esp-fern/branches/main'))
+      return Response.json({commit:{sha:'a'.repeat(40)}});
     if (path.endsWith('/pages/projects/esp-fern-site/domains/www.example.com'))
       return Response.json(page({name: 'www.example.com', status: 'active'}));
     if (path.endsWith('/pages/projects/esp-fern-site/domains'))
@@ -71,8 +73,9 @@ test('reads the exact owner repo and Pages project through bounded backend URLs'
   const {provider,calls} = rig();
   assert.equal((await provider.readPagesProject(site())).name, 'esp-fern-site');
   assert.equal((await provider.readGithubRepository(site())).id, 77);
+  assert.equal((await provider.readGithubBranchHead(site())).commit.sha,'a'.repeat(40));
   assert.equal((await provider.readPagesDomain(site(),'www.example.com')).status, 'active');
-  assert.deepEqual(calls.map(c=>c.method),['GET','GET','GET']);
+  assert.deepEqual(calls.map(c=>c.method),['GET','GET','GET','GET']);
   assert.equal(calls.some(c=>/secret-token/.test(JSON.stringify(c))), false);
 });
 
