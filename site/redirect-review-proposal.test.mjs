@@ -163,7 +163,7 @@ test('existing redirects and case-insensitive collisions cannot be overwritten',
 test('symlinks, Functions, extra HTML, and wrong page modes cannot misrepresent source',async()=>{
   for(const extra of [
     entry('public/legacy.html'),entry('functions','tree'),
-    entry('functions/handler.js'),entry('public/_routes.json'),
+    entry('Functions','tree'),entry('functions/handler.js'),entry('public/_routes.json'),
     entry('public/_worker.js'),entry('public/logo.svg','blob','120000')
   ]) {
     const input=fixture();
