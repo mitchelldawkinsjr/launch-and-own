@@ -69,9 +69,8 @@ export function validateStoredOptionApproval(raw, {
       if (expected.status !== 'awaiting_domain_approval') deny('invalid_domain_review');
       normalized = {hostname: expected.plan.hostname};
     } else if (raw.kind === 'email') {
-      // #118's buildDomainApprovalReview NEVER serialized its mailbox or hashed
-      // it. Do not try to recover the forwarding address from user input, logs,
-      // client state or the previous request. Current rows MUST fail closed.
+      // Email rows must use buildEmailRoutingApprovalReview so the mailbox is
+      // bound into the digest. Older domain-planner payloads fail closed.
       if (payload?.plan?.kind !== 'launch-and-own-email-routing-approval')
         deny('mailbox_not_bound_to_stored_digest');
       expected = buildEmailRoutingApprovalReview({

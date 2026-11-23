@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  accountId, approvePreview, connectTenant, csrfFrom, harness, makeDue, newPreview, post
+  accountId, approvePreview, connectTenant, csrfFrom, harness, jobRow, makeDue,
+  newPreview, post
 } from './worker-test-support.mjs';
 import { optionApprovalsReady, optionsPathForJob } from './post-launch-options.mjs';
+import { validateStoredOptionApproval } from '../pipeline/stored-option-approval.mjs';
 
 async function liveSite(h, t) {
   t.mock.method(globalThis, 'fetch', h.fetchFn);
@@ -141,9 +143,35 @@ test('email stays closed until a domain approval is stored', async (t) => {
     csrf: tenant.csrf, id, kind: 'email', hostname: 'www.example.com',
     mailbox: 'you@elsewhere.com', digest: emailDigest
   })).status, 303);
+  const emailRow = h.sqlite.prepare(
+    'SELECT * FROM onboarding_option_approvals WHERE job_id = ? AND kind = ?'
+  ).get(id, 'email');
+  const payload = JSON.parse(emailRow.payload_json);
+  assert.equal(payload.plan.kind, 'launch-and-own-email-routing-approval');
+  assert.equal(payload.plan.mailbox, 'you@elsewhere.com');
+  assert.equal(payload.plan.alias, 'contact@www.example.com');
+  assert.equal(emailRow.approval_digest, emailDigest);
+  const job = jobRow(h);
+  const validated = validateStoredOptionApproval(emailRow, {
+    jobId: id,
+    githubUserId: job.github_user_id,
+    githubLogin: job.github_login,
+    cloudflareAccountId: job.cloudflare_account_id,
+    customerName: job.customer_name,
+    pagesProjectName: 'esp-' + job.site_slug + '-site'
+  });
+  assert.equal(validated.kind, 'email');
+  assert.equal(validated.normalizedPayload.mailbox, 'you@elsewhere.com');
+  assert.equal(validated.canWrite, false);
   assert.equal(h.sqlite.prepare(
     'SELECT kind FROM onboarding_option_approvals WHERE job_id = ? ORDER BY kind'
   ).all(id).map(row => row.kind).join(','), 'domain,email');
+
+  const sameHost = await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'email', hostname: 'www.example.com',
+    mailbox: 'owner@www.example.com'
+  });
+  assert.equal(sameHost.status, 400);
 });
 
 test('forms without consent cannot be stored', async (t) => {

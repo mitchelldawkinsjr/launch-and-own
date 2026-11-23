@@ -1,6 +1,9 @@
 // Post-launch options screen: store digest-bound domain / email / forms approvals.
 // Never calls Cloudflare or GitHub. Never writes DNS, MX, Turnstile, D1, or Workers.
 import { buildDomainApprovalReview } from '../pipeline/domain-approval-review.mjs';
+import {
+  buildEmailRoutingApprovalReview, ToolkitApprovalExecutionError
+} from '../pipeline/approved-extension-consumer.mjs';
 import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 
@@ -63,13 +66,21 @@ async function storeOptionApproval(env, { job, session, kind, digest, payload, t
   return result.meta.changes === 1;
 }
 
-function domainReview(job, session, hostname, mailbox) {
+function domainReview(job, session, hostname) {
   return buildDomainApprovalReview({
     cloudflareAccountId: job.cloudflare_account_id,
     githubUserId: session.github_user_id,
     hostname,
-    domainConsent: true,
-    ...(mailbox === undefined ? {} : { mailbox })
+    domainConsent: true
+  });
+}
+
+function emailReview(job, session, hostname, mailbox) {
+  return buildEmailRoutingApprovalReview({
+    cloudflareAccountId: job.cloudflare_account_id,
+    githubUserId: session.github_user_id,
+    hostname,
+    mailbox
   });
 }
 
@@ -112,14 +123,24 @@ function buildReview(job, current, kind, form, rows) {
     if (!host) return { error: 'Save a custom domain request before email forwarding.' };
     if (form.get('hostname') !== host)
       return { error: 'Email forwarding must use the stored custom hostname.' };
-    const review = domainReview(job, current, host, form.get('mailbox'));
-    if (review.status !== 'awaiting_domain_approval' || !review.approvalDigest ||
-        review.plan?.capabilities?.email_routing?.state !== 'manual_setup')
+    let review;
+    try {
+      // Bind the exact mailbox into a distinct email digest. The domain planner
+      // does not hash the destination, so it cannot authorize a routing rule.
+      review = emailReview(job, current, host, form.get('mailbox'));
+    } catch (error) {
+      if (error instanceof ToolkitApprovalExecutionError)
+        return { error: 'Forward to an existing mailbox off the site hostname.' };
+      throw error;
+    }
+    if (review.status !== 'awaiting_email_approval' || !review.approvalDigest ||
+        review.plan?.kind !== 'launch-and-own-email-routing-approval' ||
+        review.mxWriteAuthorized !== false)
       return { error: 'Forward to an existing mailbox off the site hostname.' };
     return {
       review,
-      summary: 'Forward <code>' + host + '</code> mail to an existing mailbox. MX stays unchanged.',
-      fields: { hostname: host, mailbox: form.get('mailbox') }
+      summary: 'Forward <code>' + review.plan.alias + '</code> to an existing mailbox. MX stays unchanged.',
+      fields: { hostname: host, mailbox: review.plan.mailbox }
     };
   }
   if (form.get('formsConsent') !== 'true')
