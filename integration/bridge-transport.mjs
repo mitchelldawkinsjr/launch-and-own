@@ -7,9 +7,10 @@
  *
  * NOT a deployed MCP server, OAuth AS, or Worker route. No provider I/O.
  */
+import {DRAFT_ID, draftForOnboarding, draftPublicationRecord} from './draft-handoff.mjs';
 import {
   BRIDGE_AUDIENCE, BROWSER_ORIGIN, BridgeContractError,
-  assertSafeBrowserHandoff, validateToolCall
+  assertSafeBrowserHandoff, publicationStatus, validateToolCall
 } from './tool-contract.mjs';
 import {
   MemoryOwnerLinkStore, linkedOwnerFromStore
@@ -64,11 +65,13 @@ export function createBridgeHost({
   currentCommitSha = null,
   currentRepositoryId = null,
   // 64-hex key shared with onboarding for sealed browser link tickets.
-  bridgeTicketKey = null
+  bridgeTicketKey = null,
+  // async (sealedStatusTicket) => onboarding launch report for a bridge draft.
+  onboardingStatus = null
 } = {}) {
   return {
     tokens, links, sites, jobs, nowSeconds, resourceUri,
-    currentCommitSha, currentRepositoryId, bridgeTicketKey
+    currentCommitSha, currentRepositoryId, bridgeTicketKey, onboardingStatus
   };
 }
 
@@ -138,6 +141,8 @@ export async function handleBridgeRequest(host, request) {
       return await dispatchToolCall(host, request);
     if (method === 'POST' && path === '/mcp/link/browser')
       return await completeBrowserLink(host, request);
+    if (method === 'POST' && path === '/mcp/internal/draft')
+      return jsonOk(await draftForOnboarding(host, readJsonBody(request).ticket));
   } catch (error) {
     if (error instanceof BridgeContractError) {
       const status = error.code === 'unauthenticated' ? 401 :
@@ -250,6 +255,12 @@ async function dispatchToolCall(host, request) {
       previewSha256: call.arguments.preview_sha256,
       idempotencyKey: call.arguments.idempotency_key
     }, {nowSeconds: now}));
+
+  // Agent drafts approved in onboarding are tracked by draft id (#43 item 5).
+  if (['get_job_status', 'verify_publication'].includes(call.name) &&
+      DRAFT_ID.test(call.arguments.job_id) && host.onboardingStatus && host.bridgeTicketKey)
+    return jsonOk(publicationStatus(
+      await draftPublicationRecord(host, call.scope, call.arguments.job_id), call.scope));
 
   if (call.name === 'get_job_status')
     return jsonOk(await host.jobs.getJob(call.scope, call.arguments.job_id));

@@ -21,6 +21,15 @@ export function createHostFromEnv(env) {
     jobs: new D1JobPublicationStore(env.DB),
     nowSeconds: () => Math.floor(Date.now() / 1000),
     resourceUri: env.BRIDGE_RESOURCE_URI || RESOURCE_URI,
-    bridgeTicketKey: env.BRIDGE_TICKET_KEY
+    bridgeTicketKey: env.BRIDGE_TICKET_KEY,
+    onboardingStatus: env.ONBOARDING_ORIGIN ? async ticket => {
+      const res = await fetch(env.ONBOARDING_ORIGIN + '/internal/bridge-launch-status', {
+        method: 'POST', redirect: 'manual',
+        headers: {'content-type': 'application/json', 'user-agent': 'launch-and-own-bridge'},
+        body: JSON.stringify({ticket})
+      });
+      if (!res.ok) throw new Error('onboarding_status_unavailable');
+      return res.json();
+    } : null
   });
 }

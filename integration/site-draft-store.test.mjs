@@ -89,7 +89,7 @@ test('prepare_site freezes a digest and approval handoff never returns tokens', 
     idempotency_key: 'idem_12345678901234'
   });
   assert.equal(approval.body.state, 'needs_human_approval');
-  assert.equal(approval.body.action_url, ORIGIN + '/review');
+  assert.equal(approval.body.action_url, ORIGIN + '/review?draft=' + prepared.body.draft_id);
   assert.equal(approval.body.token, undefined);
   assert.equal(approval.body.approved, undefined);
 

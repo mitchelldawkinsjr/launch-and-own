@@ -51,7 +51,7 @@ export const TOOLS = [
     description: 'Prepare an update draft for an existing site. Not available yet on the hosted bridge.'},
   {name: 'get_exact_preview', annotations: readOnly,
     inputSchema: obj({draft_id: id('Draft id')}, ['draft_id']),
-    description: 'Get the exact preview (and SHA-256) of a prepared draft.'},
+    description: 'Get the SHA-256 of a prepared draft and the review_url where the customer sees the exact page.'},
   {name: 'request_explicit_approval', annotations: {destructiveHint: false},
     inputSchema: obj({
       draft_id: id('Draft id'),
@@ -61,10 +61,10 @@ export const TOOLS = [
     description: 'Hand the customer a browser link to review and approve the exact preview. The agent cannot approve or publish on its own.'},
   {name: 'get_job_status', annotations: readOnly,
     inputSchema: obj({job_id: id('Job id')}, ['job_id']),
-    description: 'Get the status of an approved publication job.'},
+    description: 'Get publication status. For agent drafts, pass the draft_id as job_id.'},
   {name: 'verify_publication', annotations: readOnly,
     inputSchema: obj({job_id: id('Job id')}, ['job_id']),
-    description: 'Verify a publication against the canonical deployment. Only report a site as live when this says live.'}
+    description: 'Verify a publication (job_id = draft_id for agent drafts). Only report a site as live when this returns state live with commit and HTML digests.'}
 ];
 
 const HINTS = {
