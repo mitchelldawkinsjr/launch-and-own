@@ -20,6 +20,7 @@ import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
+import {loadCurrentManagedSitesPage,renderCurrentSitesSection} from './toolkit-current-sites.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -227,12 +228,16 @@ async function home(env,current,notice){
   return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}<p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${appInstalled&&!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
 }
 
-async function toolkit(env,current){
+async function toolkit(env,current,request){
   if(!current?.cloudflare_account_id)
     return renderToolkitPage([],current,{view,escape});
   await assertHistoryAccess(env,current);
   const cards=await loadToolkitCards(env,current,now());
-  return renderToolkitPage(cards,current,{view,escape});
+  const page=Number(new URL(request.url).searchParams.get('page')||'1');
+  const inventory=await loadCurrentManagedSitesPage(env,current,{page,time:now()});
+  return renderToolkitPage(cards,current,{view,escape},{
+    currentInventoryHtml:renderCurrentSitesSection(inventory,{escape})
+  });
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
@@ -606,7 +611,7 @@ export default {
         if(url.pathname==='/oauth/cloudflare/callback')return await cloudflareCallback(request,env,current);
         if(url.pathname==='/review')return await review(env,current,url.searchParams.get('id'));
         if(url.pathname==='/history')return await launchHistory(env,current);
-        if(url.pathname==='/toolkit')return await toolkit(env,current);
+        if(url.pathname==='/toolkit')return await toolkit(env,current,request);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
         if(url.pathname==='/site-update')return await siteUpdates.editor(env,current,url.searchParams.get('id'));
