@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   websiteUrlForSlug, githubRepoUrl, updatePublicationLadder,
-  projectToolkitCard, renderUpdateStatusBody, renderToolkitPage
+  projectToolkitCard, renderUpdateStatusBody, renderToolkitPage,
+  historyToolkitCapabilities
 } from './post-launch-toolkit.mjs';
 import {
   connectTenant, harness, originalFetch, approvePreview, newPreview, post, makeDue
@@ -31,6 +32,11 @@ test('update publication ladder highlights merge until verified live', () => {
   const live = updatePublicationLadder({prStatus: 'merged', verifyStatus: 'live'});
   assert.equal(live.current, 'live');
   assert.equal(live.primaryAction.label, 'View live website');
+
+  const closed = updatePublicationLadder({prStatus: 'closed-unmerged'});
+  assert.equal(closed.current, 'closed');
+  assert.equal(closed.primaryAction.label, 'Start a fresh edit');
+  assert.ok(!closed.steps.some(s => s.id === 'merge' && s.active));
 });
 
 test('toolkit card never invents live URL or analytics for non-live jobs', () => {
@@ -42,12 +48,16 @@ test('toolkit card never invents live URL or analytics for non-live jobs', () =>
     display_status: 'pending_deployment',
     expected_commit_sha: 'a'.repeat(40),
     approval_digest: 'b'.repeat(64),
-    pages_project_id: 'proj'
+    pages_project_id: 'proj',
+    expires_at: 1_800_000_000
   });
   assert.equal(pending.websiteUrl, null);
   assert.equal(pending.statusLabel, 'Publishing');
-  assert.equal(pending.capabilities.analytics.state, 'manual_setup');
-  assert.equal(pending.capabilities.prPreviews.state, 'not_available');
+  assert.equal(pending.capabilities.web_analytics.state, 'manual_setup');
+  assert.equal(pending.capabilities.pr_previews.state, 'blocked_permission_or_plan');
+  assert.equal(pending.capabilities.website_updates.state, 'not_available');
+  assert.equal(pending.verifiedAt, null);
+  assert.equal(pending.expiresAt, 1_800_000_000);
 
   const live = projectToolkitCard({
     id: '11111111-1111-4111-8111-111111111111',
@@ -57,10 +67,21 @@ test('toolkit card never invents live URL or analytics for non-live jobs', () =>
     display_status: 'live',
     expected_commit_sha: 'a'.repeat(40),
     approval_digest: 'b'.repeat(64),
-    pages_project_id: 'proj'
+    pages_project_id: 'proj',
+    approved_at: 1_700_000_000,
+    expires_at: 1_800_000_000
   }, {canEdit: true});
   assert.equal(live.websiteUrl, 'https://esp-willow-studio-site.pages.dev/');
   assert.equal(live.editPath, '/site-update?id=11111111-1111-4111-8111-111111111111');
+  assert.equal(live.verifiedAt, 1_700_000_000);
+  assert.equal(live.capabilities.website_updates.state, 'available_opt_in');
+  assert.equal(live.capabilities.static_hosting.state, 'included_verified');
+});
+
+test('history capabilities mark ZIP sites without the editor', () => {
+  const caps = historyToolkitCapabilities({live: true, canEdit: false, uploadedZip: true});
+  assert.equal(caps.website_updates.state, 'not_available');
+  assert.equal(caps.website_updates.reason, 'uploaded_source_has_no_supported_editor');
 });
 
 test('update status HTML leads with Open update to publish for open PRs', () => {
@@ -79,6 +100,22 @@ test('update status HTML leads with Open update to publish for open PRs', () => 
   assert.match(html, /Publish in GitHub/);
   assert.match(html, /https:\/\/github\.com\/tester\/esp-willow-studio\/pull\/3/);
   assert.doesNotMatch(html, /reviewable pull request/i);
+});
+
+test('closed PR status HTML retires the Merge CTA', () => {
+  const escape = s => String(s);
+  const html = renderUpdateStatusBody({
+    pr: {
+      status: 'closed-unmerged',
+      pullRequest: 'https://github.com/tester/esp-willow-studio/pull/9'
+    },
+    verifyResult: null,
+    approvedHtmlSha256: 'd'.repeat(64),
+    ticketRaw: 'ticketvalue',
+    escape
+  });
+  assert.doesNotMatch(html, /Open update to publish/);
+  assert.match(html, /closed without publishing/i);
 });
 
 test('GET /toolkit lists a live owned site without provider writes', async () => {
