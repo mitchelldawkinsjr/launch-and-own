@@ -1,7 +1,7 @@
 -- Customer-owned contact-form D1 schema (#89).
 -- Deploy only into the customer's dedicated forms database — never the
 -- Launch & Own onboarding D1, and never the platform ZIP staging store.
-CREATE TABLE contact_submissions (
+CREATE TABLE IF NOT EXISTS contact_submissions (
   id TEXT PRIMARY KEY,
   hostname TEXT NOT NULL,
   gate_approval_id TEXT NOT NULL,
@@ -12,15 +12,15 @@ CREATE TABLE contact_submissions (
   turnstile_hostname TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX idx_contact_submissions_day
+CREATE INDEX IF NOT EXISTS idx_contact_submissions_day
   ON contact_submissions (hostname, created_at);
-CREATE INDEX idx_contact_submissions_gate
+CREATE INDEX IF NOT EXISTS idx_contact_submissions_gate
   ON contact_submissions (gate_approval_id, created_at);
 
-CREATE TABLE turnstile_token_uses (
+CREATE TABLE IF NOT EXISTS turnstile_token_uses (
   token_hash TEXT PRIMARY KEY,
   hostname TEXT NOT NULL,
   used_at INTEGER NOT NULL
 );
-CREATE INDEX idx_turnstile_token_uses_day
+CREATE INDEX IF NOT EXISTS idx_turnstile_token_uses_day
   ON turnstile_token_uses (hostname, used_at);

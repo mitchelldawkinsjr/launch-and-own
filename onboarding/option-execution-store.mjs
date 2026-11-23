@@ -2,6 +2,9 @@
 // This module never grants its own approvals. No browser values can create an
 // 'approved' row. An operator must authorize the exact immutable snapshot out
 // of band before this store can claim an action.
+import {isApprovedFormsMutation} from '../pipeline/forms-provider-plan.mjs';
+import {createFormsCostPrivacyGate} from './forms-cost-privacy-store.mjs';
+import {createD1FormsProvisioningStore} from './forms-provisioning-store.mjs';
 import { hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 import { readOwnedStoredOptionApproval } from './stored-option-approvals.mjs';
 
@@ -241,11 +244,40 @@ export function createD1OptionExecutionStore(env, current) {
     return true;
   }
 
+  // Receipts exist only for the claimed forms execution; recording requires the live lease.
+  function provisioning() {
+    if (!pending || pending.raw.kind !== 'forms' || !claims.has(pending.raw.id)) return null;
+    return createD1FormsProvisioningStore(env, current,
+      {optionApprovalId: pending.raw.option_approval_id, jobId: pending.raw.job_id});
+  }
+  const formsReceipts = Object.freeze({
+    async read() { return await provisioning()?.read() ?? null; },
+    async record(fields) {
+      if (!await assertCurrentAuthorization()) return null;
+      return await provisioning()?.record(fields) ?? null;
+    }
+  });
+
   async function assertOperatorApprovedExecution({provider, method, path, requestBody}) {
-    if (provider !== 'cloudflare' || method !== 'POST' ||
+    if (provider !== 'cloudflare' || !['POST', 'PUT'].includes(method) ||
         !pending || !claims.has(pending.raw.id) ||
         !await assertCurrentAuthorization()) return false;
     const x = pending.raw, p = pending.reviewed.normalizedPayload;
+    if (x.kind === 'forms') {
+      const site = pending.reviewed.currentSite;
+      let gate = null;
+      try {
+        gate = await createFormsCostPrivacyGate(env, current)({jobId: x.job_id,
+          owner: {githubUserId: current.github_user_id, githubLogin: current.github_login,
+            cloudflareAccountId: current.cloudflare_account_id},
+          site, formsDigest: x.approval_digest});
+      } catch { return false; }
+      // Read the receipt fresh: each write is bound to its own step and the recorded D1.
+      const receipt = await provisioning()?.read();
+      return isApprovedFormsMutation({method, path, requestBody, gate, receipt,
+        accountId: x.cloudflare_account_id, pagesProjectName: site.pagesProjectName, hostname: p.hostname});
+    }
+    if (method !== 'POST') return false;
     if (x.kind === 'domain') {
       return path === '/accounts/' + x.cloudflare_account_id +
         '/pages/projects/' + pending.reviewed.currentSite.pagesProjectName + '/domains' &&
@@ -271,6 +303,6 @@ export function createD1OptionExecutionStore(env, current) {
   return Object.freeze({
     approvalStore,
     siteStore: {readLiveSite: ({jobId}) => liveSite(jobId)},
-    assertCurrentAuthorization, assertOperatorApprovedExecution
+    assertCurrentAuthorization, assertOperatorApprovedExecution, formsReceipts
   });
 }

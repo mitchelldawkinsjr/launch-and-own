@@ -62,7 +62,8 @@ export async function executeOwnedStoredOption(env, current, executionId, {
       siteStore: stores.siteStore,
       provider, assertCurrentAuthorization: stores.assertCurrentAuthorization,
       ...(grant.kind === 'forms'
-        ? {verifyFormsCostPrivacyGate: createFormsCostPrivacyGate(env, current)}
+        ? {verifyFormsCostPrivacyGate: createFormsCostPrivacyGate(env, current),
+          formsReceipts: stores.formsReceipts}
         : {})
     });
   } catch (error) {

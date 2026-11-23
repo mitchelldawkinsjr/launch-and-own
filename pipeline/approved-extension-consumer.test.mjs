@@ -4,7 +4,7 @@ import { buildDomainApprovalReview } from './domain-approval-review.mjs';
 import { planCustomer } from './plan-customer.mjs';
 import {
   consumeStoredToolkitApproval, ToolkitApprovalExecutionError,
-  buildEmailRoutingApprovalReview
+  buildEmailRoutingApprovalReview, verifyProvisionedFormAcceptance
 } from './approved-extension-consumer.mjs';
 
 const account = 'a'.repeat(32);
@@ -125,15 +125,33 @@ function rig(reviewRow = row(), overrides = {}) {
     async createTurnstileWidget() {
       calls.push('provider.turnstile'); return {sitekey: 'widgetkey', secret: 'not-in-response'};
     },
+    async readTurnstileSecret(_site, {sitekey}) {
+      calls.push('provider.turnstileSecret'); return {sitekey, secret: 'not-in-response'};
+    },
     async createCustomerD1() {
       calls.push('provider.d1'); return {id: 'd1-id'};
     },
+    async applyCustomerSchema() { calls.push('provider.schema'); return {}; },
     async deployServerVerifiedFormWorker() {
-      calls.push('provider.worker'); return {id: 'worker-id'};
+      calls.push('provider.worker'); return {id: 'worker-id', etag: 'etag1'};
+    },
+    async publishFormWorker() {
+      calls.push('provider.publish'); return {endpoint: 'https://esp-fern-site-form.acct.workers.dev/submit'};
     },
     async verifyFormAcceptance() {
       calls.push('provider.acceptance');
-      return {serverSiteverify: true, customerD1Bound: true, endToEndAccepted: true};
+      return {workerBound: true, accepted: true};
+    }
+  };
+  state.receipt = null;
+  const formsReceipts = {
+    async read() { calls.push('receipt.read'); return state.receipt; },
+    async record({gateApprovalId, ...fields}) {
+      calls.push('receipt.record');
+      if (state.receipt && state.receipt.gateApprovalId !== gateApprovalId) return null;
+      state.receipt = {gateApprovalId, widgetSitekey: null, databaseId: null, schemaApplied: false,
+        workerEtag: null, endpoint: null, acceptedAt: null, ...state.receipt, ...fields};
+      return state.receipt;
     }
   };
   const api = {
@@ -141,7 +159,7 @@ function rig(reviewRow = row(), overrides = {}) {
     principal: owner(),
     approvalStore: store,
     siteStore: { async readLiveSite() { calls.push('site.read'); return site(); } },
-    provider,
+    provider, formsReceipts,
     assertCurrentAuthorization: async () => {calls.push('auth.check'); return true;},
     ...overrides
   };
@@ -153,7 +171,7 @@ async function rejected(r, code, {noProvider = false, noWrites = false} = {}) {
   if (noProvider) assert.equal(r.calls.some(s => s.startsWith('provider.')), false);
   if (noWrites) assert.deepEqual(r.calls.filter(s => [
     'provider.attach','provider.createRule', 'provider.turnstile',
-    'provider.d1','provider.worker'
+    'provider.d1','provider.schema','provider.worker','provider.publish'
   ].includes(s)), []);
 }
 
@@ -360,24 +378,67 @@ test('forms have no activation from a review-only #89 plan or a mere boolean gat
   await rejected(s, 'cost_privacy_gate_required', {noProvider: true});
 });
 
-test('forms must have independent exact #89 approved row and server-side Siteverify acceptance', async () => {
+const FORM_WRITES = ['provider.turnstile', 'provider.d1', 'provider.schema', 'provider.worker', 'provider.publish'];
+
+test('forms provision step by step with receipts; provisioned is not working until owner acceptance', async () => {
   const review = row('forms');
   const r = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
   r.state.domain = {name: 'example.com', status: 'active'};
   const out = await consumeStoredToolkitApproval(r.api);
-  assert.equal(out.workingForm, true);
   assert.equal(out.kind, 'forms');
-  assert.deepEqual(r.calls.filter(s => ['provider.turnstile','provider.d1','provider.worker','provider.acceptance'].includes(s)),
-    ['provider.turnstile','provider.d1','provider.worker','provider.acceptance']);
+  assert.equal(out.status, 'form_provisioned_awaiting_acceptance');
+  assert.equal(out.workingForm, false);
+  assert.deepEqual(r.calls.filter(s => FORM_WRITES.includes(s)), FORM_WRITES);
+  assert.equal(r.calls.includes('provider.acceptance'), false);
+  assert.equal(r.calls.filter(s => s === 'receipt.record').length, 6);
   assert.equal(JSON.stringify(out).includes('not-in-response'), false);
-  const deniedForm = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
-  deniedForm.state.domain = {name: 'example.com', status: 'active'};
-  deniedForm.provider.verifyFormAcceptance = async () => ({
-    serverSiteverify: false, customerD1Bound: true, endToEndAccepted: true
-  });
-  await rejected(deniedForm, 'form_not_working_until_acceptance');
-  assert.equal(deniedForm.state.finished, false);
-  assert.equal(deniedForm.calls.includes('store.fail'), true);
+  assert.equal(JSON.stringify(r.state.receipt).includes('not-in-response'), false, 'no secret in receipts');
+  assert.equal(r.state.finished.status, 'form_provisioned_awaiting_acceptance');
+
+  const accept = overrides => verifyProvisionedFormAcceptance({principal: owner(), site: site(), hostname: 'example.com',
+    provider: r.provider, formsReceipts: r.api.formsReceipts,
+    assertCurrentAuthorization: async () => true, ...overrides});
+  r.provider.verifyFormAcceptance = async () => ({workerBound: true, accepted: false});
+  await assert.rejects(accept(), e => e.code === 'form_not_working_until_acceptance');
+  r.provider.verifyFormAcceptance = async () => ({workerBound: false, accepted: true});
+  await assert.rejects(accept(), e => e.code === 'form_worker_binding_mismatch');
+  r.provider.verifyFormAcceptance = async () => ({workerBound: true, accepted: true});
+  const verified = await accept();
+  assert.equal(verified.status, 'form_verified');
+  assert.equal(verified.workingForm, true);
+  assert.ok(r.state.receipt.acceptedAt);
+  await assert.rejects(accept({assertCurrentAuthorization: async () => false}));
+});
+
+test('interrupted forms provisioning resumes from receipts without recreating resources', async () => {
+  const review = row('forms');
+  const r = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
+  r.state.domain = {name: 'example.com', status: 'active'};
+  r.provider.deployServerVerifiedFormWorker = async () => { r.calls.push('provider.worker');
+    throw Object.assign(new Error('x'), {code: 'provider_temporarily_unavailable'}); };
+  await assert.rejects(consumeStoredToolkitApproval(r.api), e => e.code === 'provider_temporarily_unavailable');
+  assert.equal(r.calls.includes('store.fail'), true);
+  assert.deepEqual([r.state.receipt.widgetSitekey, r.state.receipt.databaseId, r.state.receipt.schemaApplied,
+    r.state.receipt.workerEtag], ['widgetkey', 'd1-id', true, null]);
+
+  // A new operator grant for the same approval resumes: no second widget, D1 or schema.
+  const again = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
+  again.state.receipt = r.state.receipt;
+  again.state.domain = r.state.domain;
+  const out = await consumeStoredToolkitApproval(again.api);
+  assert.equal(out.status, 'form_provisioned_awaiting_acceptance');
+  assert.deepEqual(again.calls.filter(s => FORM_WRITES.includes(s) || s === 'provider.turnstileSecret'),
+    ['provider.turnstileSecret', 'provider.worker', 'provider.publish']);
+
+  // A receipt from a different cost/privacy gate is never reused.
+  const changed = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
+  changed.state.receipt = {...r.state.receipt, gateApprovalId: 'other-gate'};
+  changed.state.domain = r.state.domain;
+  await rejected(changed, 'forms_gate_changed_reconcile', {noWrites: true});
+  // Without a receipt store nothing is created.
+  const bare = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review), formsReceipts: undefined});
+  bare.state.domain = r.state.domain;
+  await rejected(bare, 'forms_receipts_required', {noWrites: true});
 });
 
 test('forms reject approval gate with a different site or missing privacy approval', async () => {
