@@ -16,7 +16,7 @@ const enc = encodeURIComponent;
 const approvedInclude = 'launch-and-own/site-*';
 function sameGitHubId(value, expected) {
   // Mirror the strict positive, safe primitive-ID rule in #95 until it merges.
-  const valid = v => (typeof v === 'number' || (typeof v === 'string' && /^[1-9]\\d*$/.test(v))) &&
+  const valid = v => (typeof v === 'number' || (typeof v === 'string' && /^[1-9]\d*$/.test(v))) &&
     Number.isSafeInteger(Number(v)) && Number(v) > 0;
   return valid(value) && valid(expected) && String(Number(value)) === String(Number(expected));
 }
