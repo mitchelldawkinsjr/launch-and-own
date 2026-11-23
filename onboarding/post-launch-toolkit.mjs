@@ -182,7 +182,7 @@ export async function loadToolkitCards(env, session, time) {
   return cards;
 }
 
-export function renderToolkitPage(cards, current, {view, escape}) {
+export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = ''} = {}) {
   if (!current?.cloudflare_account_id)
     return view('Your website toolkit',
       '<p>Connect GitHub and choose your Cloudflare account to see your sites.</p>' +
@@ -192,7 +192,8 @@ export function renderToolkitPage(cards, current, {view, escape}) {
     : '<p>No websites in your current launch history yet. Create or upload a site first.</p>';
   return view('Your website toolkit',
     '<p>Launch history is available for 30 days. Verification details reflect the recorded launch.</p>' +
-    body + '<p><a href="/history">Launch history</a> · <a href="/">Back to setup</a></p>');
+    body + currentInventoryHtml +
+    '<p><a href="/history">Launch history</a> · <a href="/">Back to setup</a></p>');
 }
 
 function renderCard(card, escape) {
