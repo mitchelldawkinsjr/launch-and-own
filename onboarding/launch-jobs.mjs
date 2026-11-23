@@ -121,6 +121,7 @@ export async function listOwnedJobs(env, session, time) {
           AND COALESCE(json_extract(j.plan_json,'$.site.layout'),'')!='multi-page'
           AND json_extract(j.plan_json,'$.forms')=0
           AND json_type(j.plan_json,'$.zip') IS NULL THEN 1 ELSE 0 END AS can_edit,
+      CASE WHEN json_type(j.plan_json,'$.zip') IS NOT NULL THEN 1 ELSE 0 END AS uploaded_zip,
       (${resumable}) AS can_restore, ${deletable} AS can_delete
     FROM onboarding_launch_jobs j WHERE ${OWNED} ORDER BY j.updated_at DESC LIMIT 20`)
     .bind(time, time, time, time, time, ...ownerBindings(session, time)).all();
