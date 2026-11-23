@@ -195,16 +195,18 @@ function harness({withJobs=true}={}){
   const zoneId='b'.repeat(32);
   const page=result=>Response.json({success:true,result,
     result_info:{page:1,total_pages:1}});
+  const accountPage=result=>Response.json({success:true,result,
+    result_info:{page:1,per_page:50,count:result.length,total_count:result.length}});
   if(parsed.pathname==='/client/v4/zones'&&parsed.searchParams.get('account.id')===accountId)
     return page([{id:zoneId,name:'example.com',status:'active',account:{id:accountId}}]);
   if(parsed.pathname==='/client/v4/zones/'+zoneId+'/email/routing'&&opts.method!=='POST')
     return page({enabled:true,status:'ready'});
   if(parsed.pathname==='/client/v4/accounts/'+accountId+'/email/routing/addresses'&&opts.method!=='POST')
-    return page([{email:'existing@example.net',verified:'2026-11-22T01:00:00Z'}]);
-  if(parsed.pathname==='/client/v4/accounts/'+zoneId+'/email/routing/rules'&&opts.method!=='POST')
-    return page(resourceState.emailRules||[]);
+    return accountPage([{email:'existing@example.net',verified:'2026-11-22T01:00:00Z'}]);
+  if(parsed.pathname==='/client/v4/accounts/'+accountId+'/email/routing/rules'&&opts.method!=='POST')
+    return accountPage(resourceState.emailRules||[]);
   if(parsed.pathname==='/client/v4/zones/'+zoneId+'/email/routing/rules'&&opts.method==='POST'){
-    const rule={...JSON.parse(opts.body),id:'rule-1'};
+    const rule={...JSON.parse(opts.body),id:'rule-1',zone:{tag:zoneId}};
     resourceState.emailRules=[rule];
     return page(rule);
   }
