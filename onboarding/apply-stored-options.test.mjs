@@ -36,23 +36,21 @@ test('blocked apply reasons stay explicit for email and forms', () => {
   assert.match(blockedOptionApplyReason('forms'), /#89/);
 });
 
-test('stored domain can attach to the verified Pages project without MX writes', async (t) => {
+test('legacy #121 domain apply is blocked: stored approval alone makes no Cloudflare writes', async (t) => {
   const h = harness();
   t.after(() => h.sqlite.close());
   const { tenant, id } = await liveSite(h, t);
   const digest = await storeDomain(h, tenant, id);
-
-  const mxBefore = h.calls.filter(c => /\/dns_records|email_routing|\/mx/i.test(c.url)).length;
+  const before = h.calls.filter(c =>
+    c.method === 'POST' && c.url.endsWith('/pages/projects/esp-willow-studio-site/domains')).length;
   const applied = await post(h, '/site-options-apply', tenant.cookie, {
     csrf: tenant.csrf, id, kind: 'domain', digest
   });
-  assert.equal(applied.status, 200);
-  assert.match(await applied.text(), /attached pending dns|www\.example\.com/i);
-  assert.equal(h.resourceState.pagesDomains[0].name, 'www.example.com');
-  const mxAfter = h.calls.filter(c => /\/dns_records|email_routing|\/mx/i.test(c.url)).length;
-  assert.equal(mxAfter, mxBefore);
-  assert.ok(h.calls.some(c =>
-    c.method === 'POST' && c.url.endsWith('/pages/projects/esp-willow-studio-site/domains')));
+  assert.equal(applied.status, 403);
+  assert.match(await applied.text(), /operator-approved execution grant/i);
+  assert.equal(h.calls.filter(c =>
+    c.method === 'POST' && c.url.endsWith('/pages/projects/esp-willow-studio-site/domains')).length, before);
+  assert.equal(h.resourceState.customDomain, null);
 });
 
 test('email and forms apply stay blocked even with a stored row', async (t) => {
@@ -74,8 +72,8 @@ test('email and forms apply stay blocked even with a stored row', async (t) => {
   const emailApply = await post(h, '/site-options-apply', tenant.cookie, {
     csrf: tenant.csrf, id, kind: 'email', digest: emailDigest
   });
-  assert.equal(emailApply.status, 400);
-  assert.match(await emailApply.text(), /MX|Email Routing/i);
+  assert.equal(emailApply.status, 403);
+  assert.match(await emailApply.text(), /operator-approved/i);
 
   const formsPrep = await post(h, '/site-options-prepare', tenant.cookie, {
     csrf: tenant.csrf, id, kind: 'forms', ownerEmail: 'owner@example.com', formsConsent: 'true'
@@ -88,7 +86,7 @@ test('email and forms apply stay blocked even with a stored row', async (t) => {
   const formsApply = await post(h, '/site-options-apply', tenant.cookie, {
     csrf: tenant.csrf, id, kind: 'forms', digest: formsDigest
   });
-  assert.equal(formsApply.status, 400);
-  assert.match(await formsApply.text(), /#89/);
+  assert.equal(formsApply.status, 403);
+  assert.match(await formsApply.text(), /operator-approved/i);
   assert.equal(domainDigest.length, 64);
 });
