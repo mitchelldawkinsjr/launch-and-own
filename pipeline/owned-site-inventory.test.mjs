@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {discoverOwnedManagedSites, readCurrentManagedHomepage, ManagedSiteInventoryError}
   from './owned-site-inventory.mjs';
 import { summarizeOwnedToolkitSite } from './toolkit-capabilities.mjs';
+import { createHash } from 'node:crypto';
 
 const accountId = 'a'.repeat(32), otherAccount = 'b'.repeat(32);
 const head = 'c'.repeat(40), movedHead = 'd'.repeat(40);
@@ -61,7 +62,8 @@ function fake(f = fixtures()) {
     if (parsed.host === 'api.cloudflare.com') {
       if (path === cfRoot) return json({success: true,
         result: [{id: projectId, name: projectName}],
-        result_info: {page: 1, per_page: 10, total_pages: 1, total_count: 1}});
+        result_info: {page: Number(parsed.searchParams.get('page')), per_page: 3,
+          total_pages: 1, total_count: 1}});
       if (path === cfRoot + '/' + projectName) return json({success: true, result: f.project});
       return json({success: false, result: null}, 404);
     }
@@ -72,12 +74,17 @@ function fake(f = fixtures()) {
     return authorized;
   };
   const base = {principal: f.principal, ...keys, assertCurrentAuthorization, fetchFn};
+  const reference = {siteId: 'managed_' + repoId + '_' + projectId,
+    githubUserId: identity.githubUserId, githubOwner: identity.githubLogin,
+    cloudflareAccountId: accountId, repositoryId: repoId, repositoryName: repoName,
+    pagesProjectId: projectId, pagesProjectName: projectName,
+    branch: 'main', productionBranch: 'main', sourceKind: 'managed-existing'};
   return {
-    f, calls, auth, custom, base,
+    f, calls, auth, custom, base, reference,
     revoke: () => { authorized = false; },
     read: (opts = {}) => discoverOwnedManagedSites({...base, ...opts}),
     source: (opts = {}) => readCurrentManagedHomepage({
-      siteId: 'managed_' + repoId + '_' + projectId, ...base, ...opts
+      siteId: reference.siteId, reference, ...base, ...opts
     }),
     getBranchCalls: () => branchCalls,
     json
@@ -93,8 +100,11 @@ function expectCode(code) {
 test('discovers an existing site after job history expiry without D1, tokens or provider writes', async () => {
   const m = fake();
   const result = await m.read();
-  assert.equal(result.status, 'fresh_owner_scoped_inventory');
-  assert.equal(result.scanCompleted, true);
+  assert.equal(result.status, 'fresh_owner_scoped_inventory_page');
+  assert.equal(result.coverage, 'single_provider_page');
+  assert.equal(result.page, 1);
+  assert.equal(result.pageComplete, true);
+  assert.equal(result.nextPage, null);
   assert.equal(result.accountId, accountId);
   assert.equal(result.sites.length, 1);
   const site = result.sites[0];
@@ -108,12 +118,14 @@ test('discovers an existing site after job history expiry without D1, tokens or 
   assert.equal(site.productionCommitSha, head);
   assert.equal(site.sourceKind, 'managed-existing');
   assert.equal(site.publicationVerified, false);
+  assert.equal(site.historicalContinuityVerified, false);
   assert.equal(site.sourceState, 'github_main_verified_publication_unverified');
   assert.equal(site.repositoryUrl, 'https://github.com/test-owner/' + repoName);
   assert.equal(site.pagesProjectDashboardUrl,
     'https://dash.cloudflare.com/' + accountId + '/pages/view/' + projectName);
   assert(m.calls.every(c => c.options.method === 'GET' && c.options.redirect === 'manual'));
-  assert(m.calls.some(c => c.url.includes('?page=1&per_page=10')));
+  assert(m.calls.some(c => c.url.includes('?page=1&per_page=3')));
+  assert(m.calls.length <= 11);
   assert(m.calls.every(c => c.url.startsWith('https://api.github.com/') ||
     c.url.startsWith('https://api.cloudflare.com/client/v4/')));
   assert(m.auth.length >= m.calls.length * 2);
@@ -243,38 +255,102 @@ test('provider redirects, malformed JSON and failed Cloudflare envelopes never b
   await assert.rejects(x.read(), expectCode('cloudflare_unexpected_response'));
 });
 
-test('Cloudflare pagination reads every bounded page and ignores unrelated projects', async () => {
+test('Pages discovery returns a bounded one-page continuation instead of scanning the entire account', async () => {
   const m = fake();
-  const first = Array.from({length: 9}, (_, i) => ({id: 'other-' + i, name: 'not-managed-' + i}));
-  first.push({id: projectId, name: projectName});
   m.custom[cfRoot] = async url => m.json({success: true,
-    result: url.searchParams.get('page') === '1' ? first : [
-      {id: 'unrelated-provider', name: 'another-page'}],
-    result_info: {page: Number(url.searchParams.get('page')), per_page: 10,
-      total_pages: 2, total_count: 11}
+    result: url.searchParams.get('page') === '1' ? [
+      {id: 'other-1', name: 'unrelated-site'},
+      {id: projectId, name: projectName},
+      {id: 'other-2', name: 'another-unrelated'}] :
+      [{id: 'other-3', name: 'other-provider-site'}],
+    result_info: {page: Number(url.searchParams.get('page')), per_page: 3,
+      total_pages: 2, total_count: 4}
   });
-  const result = await m.read();
-  assert.equal(result.sites.length, 1);
-  assert(m.calls.some(c => c.url.includes('?page=2&per_page=10')));
+  const first = await m.read();
+  assert.equal(first.page, 1);
+  assert.equal(first.nextPage, 2);
+  assert.equal(first.sites.length, 1);
+  assert(!m.calls.some(c => c.url.includes('?page=2&per_page=3')),
+    'do not silently exceed one bounded provider page');
+  const firstCalls = m.calls.length;
+  assert(firstCalls <= 11);
+  const second = await m.read({page: 2});
+  assert.equal(second.page, 2);
+  assert.equal(second.nextPage, null);
+  assert.equal(second.sites.length, 0);
+  assert(m.calls.length - firstCalls <= 11);
+  assert(m.calls.some(c => c.url.includes('?page=2&per_page=3')));
 });
 
-test('pagination omissions, duplicate project records and overlarge scans fail closed', async () => {
+test('Cloudflare documented zero-page empty account reports an empty page, not an error', async () => {
+  const m = fake();
+  m.custom[cfRoot] = async () => m.json({success: true,
+    result: [], result_info: {page: 1, per_page: 3, total_pages: 0, total_count: 0}
+  });
+  const result = await m.read();
+  assert.equal(result.sites.length, 0);
+  assert.equal(result.nextPage, null);
+  assert.equal(result.pageComplete, true);
+});
+
+test('pagination inconsistency, duplicate project records and oversized page fail closed', async () => {
   const mutations = [
-    (m) => m.json({success: true,
-      result: Array(10).fill({name: 'unrelated', id: 'whatever'})}),
-    (m) => m.json({success: true,
+    m => m.json({success: true,
+      result: Array(4).fill({name: 'unrelated', id: 'whatever'}),
+      result_info: {page: 1, total_pages: 2}}),
+    m => m.json({success: true,
       result: [{id: projectId, name: projectName}, {id: projectId, name: projectName}],
       result_info: {page: 1, total_pages: 1}}),
-    (m) => m.json({success: true, result: [],
-      result_info: {page: 1, total_pages: 11}}),
-    (m) => m.json({success: true, result: [],
-      result_info: {page: 2, total_pages: 1}})
+    m => m.json({success: true, result: [],
+      result_info: {page: 1, total_pages: 101}}),
+    m => m.json({success: true, result: [],
+      result_info: {page: 2, total_pages: 1}}),
+    m => m.json({success: true, result: []})
   ];
   for (const mutation of mutations) {
     const m = fake();
     m.custom[cfRoot] = async () => mutation(m);
     await assert.rejects(m.read(), expectCode('cloudflare_pagination_unverified'));
   }
+});
+
+test('page selector is bounded and never changes the verified account identity', async () => {
+  const m = fake();
+  for (const page of [0, -1, 101, 1.3, '2', null]) {
+    await assert.rejects(m.read({page}), expectCode('invalid_inventory_page'));
+  }
+  assert.equal(m.calls.length, 0);
+});
+
+test('copied managed marker and recreated resources are only present-day candidates, not historic identity proof', async () => {
+  const m = fake();
+  const newId = 'newly-recreated-pages';
+  m.f.repo.id = 999;
+  m.f.project.id = newId;
+  m.f.project.source.config.repo_id = '999';
+  m.custom[cfRoot] = async () => m.json({success: true,
+    result: [{id: newId, name: projectName}],
+    result_info: {page: 1, total_pages: 1}
+  });
+  const inventory = await m.read();
+  assert.equal(inventory.sites.length, 1);
+  assert.equal(inventory.sites[0].repositoryId, 999);
+  assert.equal(inventory.sites[0].pagesProjectId, newId);
+  assert.equal(inventory.sites[0].historicalContinuityVerified, false);
+  assert.equal(inventory.sites[0].publicationVerified, false);
+});
+
+test('throttled GitHub 403 is rate limited, not misreported as permission loss', async () => {
+  const m = fake();
+  m.custom['/user'] = async () => new Response('{}', {
+    status: 403, headers: {'retry-after': '10'}
+  });
+  await assert.rejects(m.read(), expectCode('github_rate_limited'));
+  const n = fake();
+  n.custom['/user'] = async () => new Response('{}', {
+    status: 403, headers: {'x-ratelimit-remaining': '0'}
+  });
+  await assert.rejects(n.read(), expectCode('github_rate_limited'));
 });
 
 test('readCurrentManagedHomepage is SHA-pinned to current main, not the original job', async () => {
@@ -389,6 +465,36 @@ test('revocation inside async provider JSON parse prevents even a verified owner
   });
   await assert.rejects(m.read(), expectCode('authorization_changed'));
   assert.equal(m.calls.length, 1);
+});
+
+test('BOM is hashed as exact GitHub bytes before UTF-8 representation decoding', async () => {
+  const m = fake();
+  const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(html)]);
+  m.f.content.content = bytes.toString('base64');
+  m.f.content.size = bytes.length;
+  const source = await m.source();
+  assert.equal(source.homepageHtmlSha256,
+    createHash('sha256').update(bytes).digest('hex'));
+  assert.notEqual(source.homepageHtmlSha256,
+    createHash('sha256').update(Buffer.from(html)).digest('hex'));
+  assert.equal(source.html.codePointAt(0), 0xfeff,
+    'UTF-8 BOM should survive into the internal representation');
+  assert.equal(source.html.slice(1), html);
+});
+
+test('selected source read uses exact current reference and at most eleven GET requests', async () => {
+  const m = fake();
+  const result = await m.source();
+  assert.equal(result.status, 'github_current_source_verified');
+  assert.equal(m.calls.length, 8,
+    'a selected source read must revalidate directly, not re-enumerate 100 sites');
+  assert(m.calls.length <= 11);
+  assert(m.calls.every(x => x.options.method === 'GET'));
+  assert.equal(result.historicalContinuityVerified, false);
+  const missing = fake();
+  await assert.rejects(missing.source({reference: undefined}),
+    expectCode('owned_site_not_found'));
+  assert.equal(missing.calls.length, 0);
 });
 
 test('the old site needs a separate approved config migration; no source or provider writes occur', async () => {
