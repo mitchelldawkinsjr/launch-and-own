@@ -700,6 +700,8 @@ export default {
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
         if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);
+        // Retired #121 direct-write endpoint: a stored review cannot authorize a provider mutation.
+        if(url.pathname==='/site-options-apply')return fail('Reopen site options. A separate operator-approved execution grant is now required.',403);
       }
       return fail('Page not found',404);
     }catch(error){
