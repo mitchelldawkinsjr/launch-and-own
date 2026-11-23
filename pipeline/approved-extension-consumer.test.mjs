@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { buildDomainApprovalReview } from './domain-approval-review.mjs';
 import { planCustomer } from './plan-customer.mjs';
 import {
-  consumeStoredToolkitApproval, ToolkitApprovalExecutionError
+  consumeStoredToolkitApproval, ToolkitApprovalExecutionError,
+  buildEmailRoutingApprovalReview
 } from './approved-extension-consumer.mjs';
 
 const account = 'a'.repeat(32);
@@ -15,7 +16,7 @@ const domainReview = (host = 'example.com') => buildDomainApprovalReview({
   cloudflareAccountId: account, githubUserId: 42, hostname: host, domainConsent: true
 });
 const emailReview = (host = 'example.com', mailbox = 'user@example.net') =>
-  buildDomainApprovalReview({
+  buildEmailRoutingApprovalReview({
     cloudflareAccountId: account, githubUserId: 42, hostname: host,
     domainConsent: true, mailbox
   });
@@ -205,6 +206,14 @@ test('email requires a separately applied matching domain row', async () => {
   r.store.readAppliedDomain = async () => null;
   await rejected(r, 'applied_domain_row_required', {noWrites: true});
   assert.equal(r.calls.includes('provider.createRule'), false);
+});
+
+test('separate email digest binds the exact forwarding mailbox unlike domain-only plan', () => {
+  assert.notEqual(emailReview('example.com', 'a@example.net').approvalDigest,
+    emailReview('example.com', 'b@example.net').approvalDigest);
+  assert.notEqual(emailReview('example.com', 'a@example.net').approvalDigest,
+    emailReview('sub.example.com', 'a@example.net').approvalDigest);
+  assert.equal(emailReview('example.com', 'a@example.net').plan.alias, 'contact@example.com');
 });
 
 test('email refuses changed hostname or changed forwarding mailbox', async () => {
