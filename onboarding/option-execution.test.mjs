@@ -141,6 +141,7 @@ test('another owner and stale replaced approval cannot activate a domain',async 
   assert.equal((await post(h,'/site-options-execute',other.cookie,{csrf:other.csrf,id})).status,403);
   assert.equal(providerWrites(h).length,0);
   // Restoring original user does not restore a replaced review digest or ID.
+  h.resourceState.githubUserId=42;
   const rewritten=await store(h,tenant,jobId,'domain',{hostname:'other.example.com'});
   assert.notEqual(rewritten.id,row.id);
   assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id})).status,403);
@@ -158,7 +159,9 @@ test('only one concurrent claimant can transition approved -> applying',async t=
   const selector={id,githubUserId:s.github_user_id,cloudflareAccountId:accountId};
   const [ra,rb]=await Promise.all([a.readApproved(selector),b.readApproved(selector)]);
   assert.ok(ra);assert.ok(rb);
-  const wins=await Promise.all([a.claimApproved(ra),b.claimApproved(rb)]);
+  const canonical=r=>({...r,jobId:r.job_id,githubUserId:r.github_user_id,
+    cloudflareAccountId:r.cloudflare_account_id,digest:r.approval_digest,payloadJson:r.payload_json});
+  const wins=await Promise.all([a.claimApproved(canonical(ra)),b.claimApproved(canonical(rb))]);
   assert.deepEqual(wins.sort(),[false,true]);
   assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_option_executions WHERE id = ?')
     .get(id).status,'applying');
