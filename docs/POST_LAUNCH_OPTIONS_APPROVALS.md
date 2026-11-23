@@ -1,13 +1,21 @@
-# Post-launch options approvals (#88)
+# Post-launch stored option requests — #88
 
-After a site is live, [`/site-options`](../onboarding/post-launch-options.mjs) lets the verified owner store separate requests for a custom domain, email forwarding, and a contact-form plan.
+The existing `/site-options` toolkit page lets a verified owner review and store a separate hostname, forwarding-email and forms request. Each request recomputes its digest server-side; email fingerprints include the **exact external mailbox and fixed contact@ alias**. The `0005_option_approvals.sql` table is **already applied to hosted onboarding D1**. Its only status is `stored`; the row is a review record, not authority for a Cloudflare or GitHub mutation.
 
-Each kind has its own prepare → confirm → store path. The confirm page shows the SHA-256 digest. The server recomputes that digest and writes `onboarding_option_approvals` only when it matches. Status is always `stored`.
+## Applying the reviewed domain or email
 
-Email rows use `buildEmailRoutingApprovalReview`, which binds the exact external mailbox and fixed `contact@` alias into the digest. The domain planner alone cannot authorize a routing rule.
+The former PR #121 direct `POST /site-options-apply` implementation has been retired in the new code because a stored approval alone did not have a separate operator-authorization and atomic execution claim. Calls to that old endpoint now fail closed with 403. This is a security reconciliation, not a second consent screen.
 
-A stored **domain** row can be applied with **Attach stored domain to Pages**. That uses the owner's Cloudflare token against their verified Pages project. Cloudflare may create DNS in the customer's zone. Platform apex/www/mail DNS are not changed. MX is never written here.
+An **Apply operator-approved domain/email** button appears on the **same toolkit page** only if an operator independently approved a second, exact matching D1 execution row and the feature release flags are explicitly enabled. The new `0006_option_executions.sql` ledger binds the stored request's ID, digest, normalized reviewed payload, current GitHub user, Cloudflare account, repository ID, Pages project, source SHA and session authorization epoch. Its atomic `approved → applying → applied` transition has a one-winner lease and no automatic replay after unknown provider outcome. No public endpoint creates an execution grant.
 
-Email rule create and form Worker create stay blocked: Email Routing must already be ready (no MX write from this path), and forms still need a separate #89 cost/privacy approval record.
+Domain execution attaches only the approved hostname to the matching currently verified, owner-owned Cloudflare Pages project. No app DNS/MX/name-server API calls are made. **Cloudflare Pages itself may automatically create DNS records in a zone that the owner controls**, so this operation requires an explicit operator review; do not promise that the customer's zone is untouched. Never change the platform's `360web.cloud` apex/www/mail records or other sites.
 
-Migration `0005_option_approvals.sql` is applied on the hosted onboarding D1. Keep platform DNS (`360web.cloud` apex/www/mail) and Brittney untouched.
+Email execution additionally requires a matching **applied** domain execution, currently active Pages domain, ready Email Routing/DNS on an active owner zone, existing verified forwarding mailbox and nonconflicting `contact@hostname` alias. The app creates only the exact forwarding rule; it never writes MX, offers a sending mailbox, or initiates mailbox verification.
+
+Forms remain review-only until a separate #89 cost/privacy authorization, customer D1 and server-side Siteverify Worker with independent acceptance; a widget is not a working form.
+
+## Hosted status and release
+
+PR #121's prior Worker was reported deployed and its direct route may **still be present on the hosted Worker** until Domain #2 explicitly authorizes deployment of this safer replacement. Merging code alone does not change the running Worker. **Do not run the hosted `0006` D1 migration, deploy the Worker, add email OAuth scopes, or enable feature flags without Domain #2 / Sol #83 review.** The new code is disabled by default and tests no longer authorize stored-only domain writes. #53 onboarding redesign is untouched and #21 customer test has not been run.
+
+Detailed operator/execution contract: [APPROVED_EXTENSION_CONSUMER.md](APPROVED_EXTENSION_CONSUMER.md).
