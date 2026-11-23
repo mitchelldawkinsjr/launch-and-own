@@ -159,6 +159,17 @@ function storedDomainHostname(rows) {
   }
 }
 
+// Suggest the contact email only when it passes the exact forwarding review.
+function onboardingMailbox(job, current, host) {
+  if (!host) return '';
+  try {
+    const email = JSON.parse(job.plan_json)?.site?.contactEmail;
+    return typeof email === 'string' ? emailReview(job, current, host, email.trim()).plan.mailbox : '';
+  } catch {
+    return '';
+  }
+}
+
 function buildReview(job, current, kind, form, rows) {
   if (kind === 'domain') {
     const review = domainReview(job, current, form.get('hostname'));
@@ -325,6 +336,7 @@ export function createSiteOptionsRoutes({
           '<input type="hidden" name="id" value="' + escape(activations[kind]) + '">')
       : '';
     const domainHost = storedDomainHostname(rows);
+    const mailboxDefault = onboardingMailbox(job, current, domainHost);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
     const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, enable analytics, turn on preview builds, publish SEO files, create redirects, or create a contact form.</p>';
     const stored = (row, label) => row
@@ -354,7 +366,7 @@ export function createSiteOptionsRoutes({
             '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
             '<label for="opt-mailbox">Existing mailbox</label>' +
             '<input id="opt-mailbox" name="mailbox" type="email" required maxlength="254" ' +
-            'placeholder="you@elsewhere.com">')
+            'placeholder="you@elsewhere.com" value="' + escape(mailboxDefault) + '">')
         : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
       activate('email', 'Apply operator-approved email routing') +
       '</section>';
@@ -420,6 +432,8 @@ export function createSiteOptionsRoutes({
             'I want these redirects reviewed later. This does not create redirect rules.</label>')
         : '<p>Save a custom domain request first. Redirects need that hostname.</p>') +
       '</section>';
+    if (!await hasCurrentOwnerSession(env, current, now()))
+      return fail('Reconnect GitHub and Cloudflare to view your site options.', 403);
     return view('Optional features for ' + job.customer_name,
       notice +
       '<p><strong>Site:</strong> <code>' + website + '</code></p>' +

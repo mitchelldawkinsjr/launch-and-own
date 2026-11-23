@@ -131,6 +131,24 @@ test('email stays closed until a domain approval is stored', async (t) => {
     csrf: tenant.csrf, id, kind: 'domain', hostname: 'www.example.com', digest
   })).status, 303);
 
+  // The onboarding contact email pre-fills forwarding, unless it is on the site hostname.
+  const setContact = email => {
+    const plan = JSON.parse(jobRow(h).plan_json);
+    plan.site = { ...plan.site, contactEmail: email };
+    h.sqlite.prepare('UPDATE onboarding_launch_jobs SET plan_json = ? WHERE id = ?')
+      .run(JSON.stringify(plan), id);
+  };
+  const mailboxValue = async () => (await (await h.request('/site-options?id=' + id,
+    { cookie: tenant.cookie })).text()).match(/name="mailbox"[^>]*value="([^"]*)"/)?.[1];
+  setContact('owner@elsewhere.com');
+  assert.equal(await mailboxValue(), 'owner@elsewhere.com');
+  setContact('hello@www.example.com');
+  assert.equal(await mailboxValue(), '');
+  setContact('a'.repeat(81) + '@elsewhere.com');
+  assert.equal(await mailboxValue(), '');
+  setContact('');
+  assert.equal(await mailboxValue(), '');
+
   const emailPrep = await post(h, '/site-options-prepare', tenant.cookie, {
     csrf: tenant.csrf, id, kind: 'email', hostname: 'www.example.com',
     mailbox: 'you@elsewhere.com'
@@ -172,6 +190,19 @@ test('email stays closed until a domain approval is stored', async (t) => {
     mailbox: 'owner@www.example.com'
   });
   assert.equal(sameHost.status, 400);
+
+  setContact('owner@elsewhere.com');
+  const prepare = h.DB.prepare.bind(h.DB);
+  t.mock.method(h.DB, 'prepare', sql => {
+    const statement = prepare(sql);
+    if (sql.includes('FROM onboarding_option_approvals WHERE job_id = ? ORDER BY kind')) {
+      h.sqlite.prepare('UPDATE onboarding_sessions SET authorization_epoch = authorization_epoch + 1').run();
+    }
+    return statement;
+  });
+  const changed = await h.request('/site-options?id=' + id, { cookie: tenant.cookie });
+  assert.equal(changed.status, 403);
+  assert.doesNotMatch(await changed.text(), /owner@elsewhere\.com/);
 });
 
 test('forms without consent cannot be stored', async (t) => {
