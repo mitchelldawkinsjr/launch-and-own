@@ -203,7 +203,7 @@ test('sidecar must match renderer byte-for-byte, not merely claim the homepage h
 test('sidecar must be pinned to same current main commit and Git blob', async () => {
   for (const ev of [evidence(true, {refCommitSha: 'f'.repeat(40)}),
     evidence(true, {blobSha: 'bad'}),
-    evidence(false), undefined]) {
+    evidence(false), {}]) {
     await assert.rejects(currentEdit({ev, patch: {tagline: 'New'}}),
       rejected('pinned_sidecar_evidence_required'));
   }
@@ -212,7 +212,7 @@ test('sidecar must be pinned to same current main commit and Git blob', async ()
 test('edits cannot change name, source identity, or unexpected fields', async () => {
   for (const patch of [
     {name: 'Different business'}, {repositoryId: 888}, {__proto__: null, siteId: id},
-    {'__proto__': 'x'}, {tagline: 'a'.repeat(141)},
+    JSON.parse('{"__proto__":"x"}'), {tagline: 'a'.repeat(141)},
     {theme: '../../../secret'}, {contactEmail: 'javascript:alert(1)'}, [],
     null
   ]) {
