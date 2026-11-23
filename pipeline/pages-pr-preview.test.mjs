@@ -62,7 +62,8 @@ function harness(){
  };
  return {state,calls,fetchFn};
 }
-const auth={githubToken:'test-gh',cloudflareToken:'test-cf'};
+const auth={githubToken:'test-gh',cloudflareToken:'test-cf',
+ assertCurrentAuthorization:async()=>true};
 const verify=(h,update=input)=>verifyExistingPrPreview(update,{...auth,fetchFn:h.fetchFn});
 const noPublicCall=h=>assert(h.calls.every(c=>c.url.startsWith('https://api.github.com/') ||
   c.url.startsWith('https://api.cloudflare.com/')), 'No preview URL or page content is fetched');
@@ -78,6 +79,51 @@ test('metadata-only success never returns URL, content or a claim of Access prot
  assert(!JSON.stringify(r).includes('pages.dev'));
  assert(!JSON.stringify(r).includes(previewLabel));
  noPublicCall(h);
+});
+test('live authorization callback is mandatory, before any provider request',async()=>{
+ const h=harness();
+ const r=await verifyExistingPrPreview(input,{
+  githubToken:'test-gh',cloudflareToken:'test-cf',fetchFn:h.fetchFn});
+ assert.equal(r.status,'blocked-authorization-fence');
+ assert.equal(r.previewUrl,null);assert.equal(h.calls.length,0);
+ let called=0;
+ const refused=await verifyExistingPrPreview(input,{...auth,fetchFn:h.fetchFn,
+  assertCurrentAuthorization:async()=>{called++;return false;}});
+ assert.equal(refused.status,'authorization-changed-or-expired');
+ assert.equal(called,1);assert.equal(h.calls.length,0);
+});
+test('revocation and account changes between provider awaits fail closed',async()=>{
+ for(const revokeAt of [2,3,4,5]){
+  const h=harness();let checks=0;
+  const result=await verifyExistingPrPreview(input,{...auth,fetchFn:h.fetchFn,
+   assertCurrentAuthorization:async snapshot=>{
+    checks++;
+    assert.equal(snapshot.githubRepositoryId,site.githubRepositoryId);
+    assert.equal(snapshot.cloudflareAccountId,cloudflareAccountId);
+    assert.equal(snapshot.approvedBaseSha,baseSha);
+    assert(!JSON.stringify(snapshot).includes('test-gh'));
+    return checks<revokeAt;
+   }});
+  assert.equal(result.status,'authorization-changed-or-expired');
+  assert.equal(result.previewUrl,null);noPublicCall(h);
+ }
+ const h=harness(),siteMoved={...site};
+ const inFlight={...input,site:siteMoved};let checks=0;
+ const changed=await verifyExistingPrPreview(inFlight,{...auth,fetchFn:h.fetchFn,
+  assertCurrentAuthorization:async()=>{
+   if(++checks===2)siteMoved.cloudflareAccountId='f'.repeat(32);
+   return true;
+  }});
+ assert.equal(changed.status,'authorization-changed-or-expired');
+ assert.equal(changed.previewUrl,null);noPublicCall(h);
+});
+test('exceptions inside live session validator never leak messages or provider URLs',async()=>{
+ const h=harness();
+ const result=await verifyExistingPrPreview(input,{...auth,fetchFn:h.fetchFn,
+  assertCurrentAuthorization:async()=>{throw Error('private-token-and-site-uri');}});
+ assert.equal(result.status,'authorization-changed-or-expired');
+ assert(!JSON.stringify(result).includes('private-token'));
+ assert.equal(h.calls.length,0);
 });
 test('approval, expiry, tenant and privacy gate before any network',async()=>{
  for(const bad of [
