@@ -68,19 +68,17 @@
       "label": "Shared authenticated MCP/API",
       "implementation": "deployed",
       "access": "not_available",
-      "verification": "owner_live",
+      "verification": "ci_only",
       "evidence": [
         "https://github.com/mitchelldawkinsjr/launch-and-own/issues/43",
         "https://github.com/mitchelldawkinsjr/launch-and-own/pull/79",
         "https://github.com/mitchelldawkinsjr/launch-and-own/pull/77",
-        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/76",
-        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/43#issuecomment-7089818896",
-        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/43#issuecomment-7104228298"
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/76"
       ],
       "blockers": [
         "Hosted Worker at https://mcp.360web.cloud is BRIDGE_DEPLOYMENT=approved (metadata deployed_gated) but customer access stays not_available",
-        "Owner-account Claude Code E2E passed 2026-11-22 (MCP OAuth registration + consent, /agent-link, list/prepare/preview/approval tools) and bridge drafts open /review?draft= (#94); owner-only evidence is not independent acceptance",
-        "Independent consenting-user connected-client QA and owner distribution approval still required (#43/#21)"
+        "Consenting-user /agent-link E2E and MCP OAuth client registration still outstanding",
+        "Update-draft re-render and independent consenting-user QA still required (#43/#21)"
       ]
     },
     "claude_plugin": {

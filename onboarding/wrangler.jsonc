@@ -14,7 +14,7 @@
   "vars": {
     "ONBOARDING_ORIGIN": "https://onboard.360web.cloud",
     "BRIDGE_ORIGIN": "https://mcp.360web.cloud",
-    "CF_SCOPES": "account-settings.read page.read page.write zone.read dns.read email-routing-address.read email-routing-rule.read email-routing-rule.write email-routing-account-rule.read offline_access",
+    "CF_SCOPES": "account-settings.read page.read page.write zone.read zone-settings.read dns.read email-routing-address.read email-routing-rule.read email-routing-rule.write email-routing-account-rule.read offline_access",
     "GH_CLIENT_ID": "Iv23li8rVTNtZrfTctqJ",
     "GH_APP_SLUG": "launch-and-own",
     "CF_CLIENT_ID": "27de4e083c08b48f9a003ade56b9c8ea",
