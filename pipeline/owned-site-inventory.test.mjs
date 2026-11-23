@@ -163,10 +163,9 @@ test('different selected Cloudflare account never carries old inventory through'
   const m = fake();
   m.f.principal.cloudflareAccountId = otherAccount;
   m.base.principal = m.f.principal;
-  const result = await m.read();
-  assert.equal(result.accountId, otherAccount);
-  assert.equal(result.sites.length, 0);
+  await assert.rejects(m.read(), expectCode('cloudflare_temporarily_unavailable'));
   assert(m.calls.every(c => !c.url.includes(cfRoot)));
+  assert(m.calls.some(c => c.url.includes('/accounts/' + otherAccount + '/pages/projects')));
 });
 
 test('changed GitHub user identity is rejected before exposing any site', async () => {
