@@ -38,9 +38,19 @@ function exactHost(s) {
 }
 function safePage(data) {
   const info = data?.result_info;
-  if (!Array.isArray(data?.result) || data.result.length > 50 ||
+  const length = data?.result?.length;
+  // Cloudflare's actual Email Routing list responses return total_count but
+  // may omit total_pages. Accept either completeness proof, never a partial
+  // first page or missing pagination metadata (which could hide conflicts).
+  if (!Array.isArray(data?.result) || length > 50 ||
       !Number.isSafeInteger(info?.page) || info.page !== 1 ||
-      !Number.isSafeInteger(info?.total_pages) || info.total_pages !== 1)
+      (info.total_pages === undefined && info.total_count === undefined) ||
+      (info.total_pages !== undefined &&
+        (!Number.isSafeInteger(info.total_pages) || info.total_pages !== 1)) ||
+      (info.total_count !== undefined &&
+        (!Number.isSafeInteger(info.total_count) || info.total_count !== length)) ||
+      (info.count !== undefined &&
+        (!Number.isSafeInteger(info.count) || info.count !== length)))
     deny('provider_list_incomplete');
   return data.result;
 }
@@ -192,13 +202,20 @@ export function createCloudflareExtensionProvider({
     async readEmailRoutingRule(zoneId, alias) {
       if (!verifiedZoneIds.has(zoneId) || !MAILBOX.test(alias || ''))
         deny('owned_zone_required');
-      const rules = safePage(await cfGet('/accounts/' + zoneId +
+      // List routing rules with the owner's ACCOUNT ID. The account-level
+      // endpoint works with Cloudflare's real API and carries zone tags.
+      // A zone ID in /accounts/{id}/... may return 403 even for the owner.
+      const rules = safePage(await cfGet('/accounts/' + owner.cloudflareAccountId +
         '/email/routing/rules?page=1&per_page=50'));
       const matches = rules.filter(r =>
         Array.isArray(r?.matchers) &&
         r.matchers.some(m=>m?.type==='literal' && m.field==='to' &&
           lower(m.value)===lower(alias)));
-      if (matches.length > 1) deny('existing_email_rule_conflict');
+      // Account-level list can contain unrelated tenant zones. The exact
+      // alias must not exist in a different/unknown zone, and we must never
+      // consider a rule belonging to a different zone an authorized match.
+      if (matches.some(r => r?.zone?.tag !== zoneId) || matches.length > 1)
+        deny('existing_email_rule_conflict');
       return matches[0] || null;
     },
     async createEmailRoutingRule(zoneId, rule) {
