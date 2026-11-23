@@ -38,7 +38,9 @@ test('the toolkit displays exact launch evidence only for complete successful re
     display_status: 'pending_deployment',
     expected_commit_sha: 'a'.repeat(40),
     approval_digest: 'b'.repeat(64),
-    updated_at: 1795345200
+    updated_at: 1795345200,
+    approved_at: 1795345100,
+    expires_at: 1795345100 + 30 * 24 * 60 * 60
   };
   const pending = projectToolkitCard(record, {canEdit: true});
   assert.equal(pending.recordedWebsite, null);
@@ -50,6 +52,7 @@ test('the toolkit displays exact launch evidence only for complete successful re
   assert.equal(live.recordedWebsite, 'https://esp-willow-studio-site.pages.dev/');
   assert.equal(live.editPath, '/site-update?id=11111111-1111-4111-8111-111111111111');
   assert.equal(live.verifiedAt, new Date(record.updated_at * 1000).toISOString());
+  assert.equal(live.expiresAt, new Date(record.expires_at * 1000).toISOString());
   assert.equal(live.verifiedCommitSha, record.expected_commit_sha);
   assert.equal(live.approvalFingerprint, record.approval_digest);
   assert.equal(projectToolkitCard({...record, display_status: 'live', updated_at: null},
@@ -107,6 +110,7 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   assert.match(html, /Your website toolkit/);
   assert.match(html, /Willow Studio/);
   assert.match(html, /Last verified at <time/);
+  assert.match(html, /Available in history until <time/);
   assert.match(html, /Approval fingerprint/);
   assert.match(html, /30 days/);
   assert.match(html, /esp-willow-studio-site\.pages\.dev/);

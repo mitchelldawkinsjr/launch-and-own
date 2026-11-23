@@ -57,13 +57,18 @@ export function updatePublicationLadder({prStatus, verifyStatus = null}) {
   };
 }
 
+function timestamp(seconds) {
+  if (!Number.isSafeInteger(seconds) || seconds <= 0) return null;
+  const time = new Date(seconds * 1000);
+  return Number.isFinite(time.valueOf()) ? time.toISOString() : null;
+}
+
 export function projectToolkitCard(job, {canEdit = false} = {}) {
   if (!job || !isLaunchId(job.id)) return null;
   const status = job.display_status || job.status;
-  const time = new Date(job.updated_at * 1000);
+  const time = timestamp(job.updated_at);
   const verified = status === 'live' && typeof job.expected_commit_sha === 'string' &&
-    SHA.test(job.expected_commit_sha) && Number.isSafeInteger(job.updated_at) &&
-    job.updated_at > 0 && Number.isFinite(time.valueOf());
+    SHA.test(job.expected_commit_sha) && time !== null;
   let copy = Object.hasOwn(STATUS_COPY, status) ? STATUS_COPY[status] : {
     label: 'Status unavailable', detail: 'Open launch history for the latest recorded result.'
   };
@@ -76,7 +81,8 @@ export function projectToolkitCard(job, {canEdit = false} = {}) {
     statusDetail: copy.detail,
     recordedWebsite: verified ? websiteUrlForSlug(job.site_slug) : null,
     verifiedCommitSha: verified ? job.expected_commit_sha.toLowerCase() : null,
-    verifiedAt: verified ? time.toISOString() : null,
+    verifiedAt: verified ? time : null,
+    expiresAt: timestamp(job.expires_at),
     approvalFingerprint: typeof job.approval_digest === 'string' && DIGEST.test(job.approval_digest)
       ? job.approval_digest.toLowerCase() : null,
     errorCode: typeof job.error_code === 'string' ? job.error_code : null,
@@ -106,12 +112,14 @@ export function renderToolkitPage(cards, current, {view, escape}) {
 }
 
 function renderCard(card, escape) {
+  const time = iso => '<time datetime="' + escape(iso) + '">' + escape(iso.slice(0, 10)) +
+    ' ' + escape(iso.slice(11, 16)) + ' UTC</time>';
   const website = card.recordedWebsite
     ? '<p>Website address at verification <code>' + escape(card.recordedWebsite) + '</code></p>' : '';
   const verification = card.verifiedAt
-    ? '<p>Last verified at <time datetime="' + escape(card.verifiedAt) + '">' + escape(card.verifiedAt.slice(0, 10)) +
-      ' ' + escape(card.verifiedAt.slice(11, 16)) + ' UTC</time></p><p>Verified GitHub revision <code>' +
+    ? '<p>Last verified at ' + time(card.verifiedAt) + '</p><p>Verified GitHub revision <code>' +
       escape(card.verifiedCommitSha) + '</code></p>' : '';
+  const expires = card.expiresAt ? '<p>Available in history until ' + time(card.expiresAt) + '</p>' : '';
   const digest = card.approvalFingerprint
     ? '<p>Approval fingerprint <code>' + escape(card.approvalFingerprint.slice(0, 12)) + '…</code></p>' : '';
   const error = card.errorCode
@@ -119,7 +127,7 @@ function renderCard(card, escape) {
   const edit = card.editPath
     ? '<p><a href="' + escape(card.editPath) + '">Update this website</a></p>' : '';
   return '<section><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' +
-    '<p>' + escape(card.statusDetail) + '</p>' + website + verification + digest + error + edit +
+    '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + digest + error + edit +
     '<details><summary>Toolkit capabilities</summary><ul>' +
     '<li>Website editor · ' + (card.editPath ? 'Available for this launch' : 'Unavailable for this launch') + '</li>' +
     '<li>Visitor insights · Setup and traffic verification pending</li>' +

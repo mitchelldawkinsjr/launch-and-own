@@ -114,7 +114,7 @@ const deletable = `(${UNCLAIMED} AND (NOT (${RUNNABLE}) OR NOT ${HAS_APPROVAL}))
 
 export async function listOwnedJobs(env, session, time) {
   const result = await env.DB.prepare(`SELECT j.id, j.customer_name, j.site_slug, j.updated_at,
-      j.expected_commit_sha, j.approval_digest, j.error_code, ${statusColumn},
+      j.expires_at, j.expected_commit_sha, j.approval_digest, j.error_code, ${statusColumn},
       CASE WHEN j.status='live' AND j.production_branch='main'
           AND j.repository_id IS NOT NULL AND j.repository_id > 0
           AND json_type(j.plan_json,'$.site')='object'
