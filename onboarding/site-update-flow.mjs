@@ -189,6 +189,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     if(pr.status==='merged'){
       const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare',fetchFn});
       result=await verifyWebsite(inputFor(item.job,item.site),{cloudflareToken,fetchFn,
+        expectedProject:{projectId:item.job.pages_project_id,repositoryId:item.job.repository_id,
+          githubUserId:item.job.github_user_id,branch:item.job.production_branch},
         expectedCommitSha:pr.mergedCommitSha,expectedHtmlSha256:receipt.approvedHtmlSha256});
     }
     if(!await hasCurrentOwnerSession(env,current,now()))

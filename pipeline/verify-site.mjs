@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Verification of a customer Pages production deployment and its public homepage.
 // Its only write: start the first build of an approved project that has never deployed.
+// expectedProject pins an existing site for status checks without the first-build authority.
 import {readFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
@@ -51,13 +52,20 @@ async function assertApprovedGitHubHead(plan, {githubToken, expectedCommitSha, a
     throw Error("GitHub branch moved before the first Pages build");
 }
 
-export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedCommitSha,expectedHtmlSha256,fetchFn=fetch,approved}={}) {
+export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedCommitSha,expectedHtmlSha256,
+  fetchFn=fetch,approved,expectedProject}={}) {
   const plan=planCustomer(input);
   if(plan.forms||input.hostname)throw Error("This verifier currently supports only website-only pages.dev projects");
   if(!cloudflareToken)throw Error("CLOUDFLARE_API_TOKEN is required for deployment verification");
-  if((approved||expectedCommitSha!==undefined)&&(typeof expectedCommitSha!=="string"||!/^[a-f0-9]{40}$/i.test(expectedCommitSha)))
+  if(expectedProject&&(approved||typeof expectedProject.projectId!=="string"||!expectedProject.projectId||
+      typeof expectedProject.branch!=="string"||!expectedProject.branch||
+      !Number.isSafeInteger(expectedProject.repositoryId)||expectedProject.repositoryId<1||
+      !Number.isSafeInteger(expectedProject.githubUserId)||expectedProject.githubUserId<1))
+    throw Error("Read-only verification needs the verified Pages and GitHub identities");
+  const target=approved??expectedProject;
+  if((target||expectedCommitSha!==undefined)&&(typeof expectedCommitSha!=="string"||!/^[a-f0-9]{40}$/i.test(expectedCommitSha)))
     throw Error("Expected commit SHA must be a full 40-character GitHub commit hash");
-  if(expectedHtmlSha256!==undefined&&(typeof expectedHtmlSha256!=="string"||!/^[a-f0-9]{64}$/i.test(expectedHtmlSha256)))
+  if((expectedProject||expectedHtmlSha256!==undefined)&&(typeof expectedHtmlSha256!=="string"||!/^[a-f0-9]{64}$/i.test(expectedHtmlSha256)))
     throw Error("Expected HTML SHA-256 must be a full 64-character digest");
   const projectName="esp-"+plan.customer+"-site";
   const website="https://"+projectName+".pages.dev";
@@ -74,11 +82,12 @@ export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedC
   if(!data.success||!data.result)throw Error("Cloudflare did not return a Pages project");
   const project=data.result;
   const source=project.source;
-  if(project.name!==projectName||source?.type!=="github"||source.config?.owner?.toLowerCase()!==plan.githubOwner.toLowerCase()||source.config?.repo_name!=="esp-"+plan.customer)
+  if(!target&&(project.name!==projectName||source?.type!=="github"||typeof source.config?.owner!=="string"||
+      source.config.owner.toLowerCase()!==plan.githubOwner.toLowerCase()||source.config?.repo_name!=="esp-"+plan.customer))
     throw Error("Project ownership or GitHub source mismatch; refusing to verify an unrelated deployment");
-  if(approved&&!matchesApprovedPagesProject(project,{name:projectName,owner:plan.githubOwner,
-      repositoryName:"esp-"+plan.customer,repositoryId:approved.repositoryId,branch:approved.branch,
-      projectId:approved.projectId}))
+  if(target&&!matchesApprovedPagesProject(project,{name:projectName,owner:plan.githubOwner,
+      ownerId:target.githubUserId,repositoryName:"esp-"+plan.customer,repositoryId:target.repositoryId,
+      branch:target.branch,projectId:target.projectId}))
     throw Error("Pages source or build settings differ from the approved project");
   // Pages builds on pushes made after the project exists. The approved commit lands
   // before the project is created, so nothing ever starts the first build on its own.

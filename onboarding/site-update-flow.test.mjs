@@ -91,6 +91,10 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   const html=await status.text();
   assert.match(html,/Verified live/);
   assert.match(html,/esp-willow-studio-site.pages.dev/);
+  h.resourceState.pages.id='replacement-with-the-same-source';
+  status=await h.request(statusPath,{cookie:tenant.cookie});
+  assert.equal(status.status,400);
+  assert.doesNotMatch(await status.text(),/Verified live/);
  }finally{globalThis.fetch=originalFetch}
 });
 

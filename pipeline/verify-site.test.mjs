@@ -180,6 +180,15 @@ function approvedProjectMock({latest=null,startStatus=200,repositoryId=42,headSh
 }
 const approvedTarget={repositoryId:42,githubUserId:12,branch:"main",projectId:"proj-1",html:DEFAULT_HTML};
 const firstBuildOptions={cloudflareToken:"token",githubToken:"github-grant",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget};
+test("read-only verification of a pinned project cannot start the first build",async()=>{
+ const h=approvedProjectMock();
+ const {html,...expectedProject}=approvedTarget;
+ const r=await verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(html),expectedProject,fetchFn:h.fetchFn});
+ assert.equal(r.status,"pending-deployment");
+ assert.deepEqual(h.posts,[]);
+ assert.equal(h.requests.length,1);
+});
 test("approved project that never deployed gets exactly one production build started",async()=>{
  const h=approvedProjectMock();
  const r=await verifyWebsite(input,{...firstBuildOptions,fetchFn:h.fetchFn});
