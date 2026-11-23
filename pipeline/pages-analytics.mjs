@@ -99,6 +99,8 @@ export async function readPagesAnalyticsStatus({site, principal, cloudflareAcces
       'Before enabling, review your site privacy notice and consent requirements.',
     projectDashboardUrl: 'https://dash.cloudflare.com/' + site.cloudflareAccountId +
       '/pages/view/' + site.pagesProjectName,
-    // The global Web Analytics path differs across Cloudflare dashboard releases.\n    // Do not expose a speculative :account placeholder as a working deep link.\n    analyticsDashboardUrl: null
+    // The global Web Analytics path differs across Cloudflare dashboard releases.
+    // Do not expose a speculative :account placeholder as a working deep link.
+    analyticsDashboardUrl: null
   };
 }
