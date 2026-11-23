@@ -74,8 +74,7 @@ the SAME backend and customer identity with the standalone hosted website:
 ## Standalone browser / ZIP fallback
 
 A customer can use `https://onboard.360web.cloud` without ChatGPT.
-For a finished `index.html`/assets or ZIP, direct them to **Upload a built
-website** and keep the complete authored site rather than recreating it in
+For a finished `index.html`/assets or ZIP, direct them to **Upload a built website** and keep the complete authored site rather than recreating it in
 the simple-site form. The customer connects their own accounts, previews
 exact content, approves separately, and verifies live publication.
 
