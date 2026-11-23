@@ -46,6 +46,9 @@ test('verified site: only GET, safe dashboard handoff and no invented metrics', 
   assert.match(result.action, /next deployment/);
   assert.equal(result.projectDashboardUrl,
     'https://dash.cloudflare.com/' + accountId + '/pages/view/' + site.pagesProjectName);
+  // No undocumented global Analytics destination with a literal :account placeholder.
+  assert.equal(result.analyticsDashboardUrl, null);
+  assert(!JSON.stringify(result).includes(':account'));
   assert(!JSON.stringify(result).includes(cloudflareAccessToken));
 });
 
