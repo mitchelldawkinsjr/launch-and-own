@@ -1,6 +1,7 @@
 // #88 / Agent 2 (GPT-6): consume, but never create, separately stored toolkit approvals.
 // Wire a D1 adapter only after Agent 1 finalizes its additive migration contract.
 // This module has no credentials, fetch, HTML, global side effects or customer secrets.
+import { createHash } from 'node:crypto';
 import { buildDomainApprovalReview } from './domain-approval-review.mjs';
 import { planCustomer, TURNSTILE_FREE_LIMITS } from './plan-customer.mjs';
 import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
@@ -86,6 +87,39 @@ function checkedHostname(raw, {allowPagesDev = false} = {}) {
   return value;
 }
 
+/**
+ * Canonical email-only review. The existing domain planner does NOT hash the
+ * forwarding mailbox, so its digest cannot authorize an Email Routing rule.
+ * Agent 1 must use this distinct email digest for the persisted email row.
+ */
+export function buildEmailRoutingApprovalReview({
+  githubUserId, cloudflareAccountId, hostname, mailbox: destination
+} = {}) {
+  const hostnameValue = checkedHostname(hostname);
+  if (!positiveId(githubUserId) || !ACCOUNT.test(cloudflareAccountId || '') ||
+      !mailbox(destination) || lower(destination).endsWith('@' + hostnameValue))
+    deny('email_review_invalid');
+  const domain = buildDomainApprovalReview({
+    githubUserId, cloudflareAccountId, hostname: hostnameValue,
+    domainConsent: true, mailbox: destination
+  });
+  if (domain.status !== 'awaiting_domain_approval')
+    deny('email_review_invalid');
+  const plan = Object.freeze({
+    kind: 'launch-and-own-email-routing-approval', version: 1,
+    githubUserId, cloudflareAccountId: lower(cloudflareAccountId),
+    hostname: hostnameValue, mailbox: destination, alias: 'contact@' + hostnameValue,
+    domainReviewDigest: domain.approvalDigest,
+    sendingMailbox: false, dnsWriteAuthorized: false, mxWriteAuthorized: false
+  });
+  return Object.freeze({
+    status: 'awaiting_email_approval',
+    plan, approvalDigest: createHash('sha256')
+      .update(JSON.stringify(plan), 'utf8').digest('hex'),
+    canActivate: false, canWrite: false, mxWriteAuthorized: false
+  });
+}
+
 function reviewedDomain(row, owner, {withMailbox = false} = {}) {
   const host = checkedHostname(row.payload.hostname);
   const dest = withMailbox ? row.payload.mailbox : undefined;
@@ -98,8 +132,12 @@ function reviewedDomain(row, owner, {withMailbox = false} = {}) {
     hostname: host, domainConsent: true,
     ...(withMailbox ? {mailbox: dest} : {})
   });
-  if (review.status !== 'awaiting_domain_approval' ||
-      review.approvalDigest !== row.digest)
+  const actualDigest = withMailbox ? buildEmailRoutingApprovalReview({
+    githubUserId: owner.githubUserId,
+    cloudflareAccountId: owner.cloudflareAccountId,
+    hostname: host, mailbox: dest
+  }).approvalDigest : review.approvalDigest;
+  if (review.status !== 'awaiting_domain_approval' || actualDigest !== row.digest)
     deny('approval_digest_mismatch');
   if (withMailbox && (review.plan.capabilities.email_routing.sendingMailbox !== false ||
       review.plan.capabilities.email_routing.state !== 'manual_setup'))
