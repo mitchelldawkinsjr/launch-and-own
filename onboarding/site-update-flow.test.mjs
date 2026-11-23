@@ -43,7 +43,7 @@ test('only a verified live one-page site offers editing; no provider write on op
   const ticket=await reviewedEdit(h,{...tenant,id:unfinished});
   const review=await h.request('/site-update-review?ticket='+ticket,{cookie:tenant.cookie});
   assert.equal(review.status,200);
-  assert.match(await review.text(),/Approve and create reviewable PR/);
+  assert.match(await review.text(),/Approve this update/);
   const exact=await h.request('/site-update-html?ticket='+ticket,{cookie:tenant.cookie});
   assert.equal(exact.status,200);
   assert.match(await exact.text(),/New customer-approved headline/);
@@ -70,18 +70,20 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   const statusPath=approval.headers.get('location');
   let status=await h.request(statusPath,{cookie:tenant.cookie});
   assert.equal(status.status,200);
-  assert.match(await status.text(),/awaiting-customer-merge/);
+  let statusHtml=await status.text();
+  assert.match(statusHtml,/Open update to publish/);
+  assert.match(statusHtml,/Publish in GitHub/);
   h.resourceState.updatePr={...h.resourceState.updatePr,state:'closed',
     merged_at:'2026-11-22T19:00:00Z',merge_commit_sha:UPDATE_COMMIT};
   status=await h.request(statusPath,{cookie:tenant.cookie});
-  assert.match(await status.text(),/pending-expected-commit/);
+  assert.match(await status.text(),/Checking your live site/);
   h.resourceState.pages.canonical_deployment.deployment_trigger.metadata.commit_hash=UPDATE_COMMIT;
   status=await h.request(statusPath,{cookie:tenant.cookie});
-  assert.match(await status.text(),/pending-expected-html/);
+  assert.match(await status.text(),/Checking your live site/);
   h.resourceState.publicHtml=h.resourceState.updateHtml;
   status=await h.request(statusPath,{cookie:tenant.cookie});
   const html=await status.text();
-  assert.match(html,/Verified live: exact merged commit and approved HTML SHA-256 match/);
+  assert.match(html,/Verified live/);
   assert.match(html,/esp-willow-studio-site.pages.dev/);
  }finally{globalThis.fetch=originalFetch}
 });

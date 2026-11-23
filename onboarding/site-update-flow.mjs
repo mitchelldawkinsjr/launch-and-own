@@ -7,6 +7,7 @@ import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {getOwnedJob,isLaunchId,approvalSnapshot} from './launch-jobs.mjs';
 import {getFreshAccessToken} from './token-lifecycle.mjs';
 import {seal,unseal} from './crypto.mjs';
+import {renderUpdateStatusBody} from './post-launch-toolkit.mjs';
 
 const SHA=/^[a-f0-9]{40}$/i, DIGEST=/^[a-f0-9]{64}$/i;
 const REVIEW_LIFETIME=15*60,STATUS_LIFETIME=30*24*60*60;
@@ -139,14 +140,12 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     try{data=await reviewData(env,current,raw);}
     catch{return fail('This site update preview expired or your account changed. Start a fresh edit.',400);}
     const {item,ticket}=data;
-    return view('Review the website update',
+    return view('Review your update',
       '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
-      '<p><strong>Private GitHub repository:</strong> '+escape('esp-'+item.job.site_slug)+'</p>'+
-      '<p><strong>Reviewed main commit:</strong> <code>'+escape(ticket.baseCommitSha)+'</code></p>'+
-      '<p><strong>Exact preview SHA-256:</strong> <code>'+escape(ticket.approvedHtmlSha256)+'</code></p>'+
-      '<p><a href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener">Open exact website preview</a></p>'+
-      '<p>Approval creates only a GitHub feature branch and a reviewable pull request. Your site stays unchanged until <strong>you manually merge</strong> the PR and Cloudflare finishes publishing. GitHub must authorize the app to create pull requests.</p>'+
-      button('/site-update-approve','Approve and create reviewable PR',current.csrf,
+      '<p><a href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener"><strong>See exactly how it will look</strong></a></p>'+
+      '<p>Next: approve here, then open one GitHub link and click <strong>Merge</strong> to publish. Your live site does not change until you merge.</p>'+
+      '<p class="muted">Checked revision <code>'+escape(ticket.baseCommitSha.slice(0,12))+'…</code> · fingerprint <code>'+escape(ticket.approvedHtmlSha256.slice(0,12))+'…</code></p>'+
+      button('/site-update-approve','Approve this update',current.csrf,
         '<input type="hidden" name="ticket" value="'+escape(raw)+'">')+
       '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p>');
   }
@@ -196,16 +195,12 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       result=await verifyWebsite(inputFor(item.job,item.site),{cloudflareToken,fetchFn,
         expectedCommitSha:pr.mergedCommitSha,expectedHtmlSha256:receipt.approvedHtmlSha256});
     }
-    const refresh='<p><a href="/site-update-status?ticket='+encodeURIComponent(raw)+'">Check deployment status again</a></p>';
-    const merged=pr.status==='merged'?
-      '<p>GitHub merged revision: <code>'+escape(pr.mergedCommitSha)+'</code></p><p>Cloudflare verification: <strong>'+escape(result.status)+'</strong></p>'+
-      (result.status==='live'?'<p class="pill">Verified live: exact merged commit and approved HTML SHA-256 match</p><p><a href="'+escape(result.website)+'">'+escape(result.website)+'</a></p>':
-        '<p>Do not consider this update published yet. Cloudflare may still be building or showing an older revision.</p>'):
-      '<p>The pull request is '+escape(pr.status)+'. Your live site has not been verified against this change.</p>';
-    return view('Website update status',
-      '<p>Customer-controlled GitHub PR: <a href="'+escape(pr.pullRequest)+'" rel="noopener">'+escape(pr.pullRequest)+'</a></p>'+
-      '<p>Approved HTML SHA-256: <code>'+escape(receipt.approvedHtmlSha256)+'</code></p>'+merged+refresh+
-      '<p>This receipt lasts 30 days and is accessible only with the same verified GitHub identity and Cloudflare account.</p><p><a href="/history">Back to launch history</a></p>');
+    return view('Update status',
+      '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
+      renderUpdateStatusBody({
+        pr, verifyResult: result, approvedHtmlSha256: receipt.approvedHtmlSha256,
+        ticketRaw: raw, escape
+      }));
   }
   return {editor,prepare,review,html,approve,status};
 }
