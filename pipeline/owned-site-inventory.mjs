@@ -154,8 +154,9 @@ function checkedReference(reference, owner, siteId) {
   // The reference MUST be taken from a backend-owned or authenticated, bounded
   // session handoff. A browser-provided reference is not ownership evidence.
   if (typeof siteId !== 'string' ||
-      !/^managed_[1-9][0-9]*_[a-z0-9_-]{1,128}$/i.test(siteId) ||
-      !reference || reference.siteId !== siteId ||
+      !/^managed_[1-9][0-9]*_[a-z0-9_-]{1,128}$/i.test(siteId))
+    denied('invalid_site_selector');
+  if (!reference || reference.siteId !== siteId ||
       !sameId(reference.githubUserId, owner.githubUserId) ||
       reference.githubOwner?.toLowerCase() !== owner.githubLogin.toLowerCase() ||
       reference.cloudflareAccountId !== owner.cloudflareAccountId ||
