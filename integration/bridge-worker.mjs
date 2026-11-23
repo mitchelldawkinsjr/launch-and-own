@@ -8,6 +8,8 @@
 import {handleBridgeRequest, createBridgeHost} from './bridge-transport.mjs';
 import {createHostFromEnv} from './create-host-from-env.mjs';
 import {RESOURCE_METADATA_PATH} from './protected-resource.mjs';
+import {handleMcp} from './mcp-jsonrpc.mjs';
+import {handleOAuth} from './oauth-server.mjs';
 
 const securityHeaders = Object.freeze({
   'cache-control': 'no-store',
@@ -16,6 +18,14 @@ const securityHeaders = Object.freeze({
   'x-frame-options': 'DENY',
   'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
 });
+
+/** Add default security headers without overriding route-specific ones. */
+function secure(response) {
+  const headers = new Headers(response.headers);
+  for (const [k, v] of Object.entries(securityHeaders))
+    if (!headers.has(k)) headers.set(k, v);
+  return new Response(response.body, {status: response.status, headers});
+}
 
 function toResponse(result) {
   return new Response(JSON.stringify(result.body), {
@@ -83,6 +93,17 @@ export default {
         });
       }
     }
+    const url = new URL(request.url);
+    if (url.pathname === '/mcp') return secure(await handleMcp(host, request));
+    if (env.DB) {
+      const oauth = await handleOAuth(request, {
+        db: env.DB, tokens: host.tokens, nowSeconds: host.nowSeconds()
+      });
+      if (oauth) return secure(oauth);
+    }
+    // RFC 9728 path-suffixed discovery used by MCP clients for resource /mcp.
+    if (url.pathname === RESOURCE_METADATA_PATH + '/mcp')
+      request = new Request(new URL(RESOURCE_METADATA_PATH, url), request);
     return createBridgeFetch(host)(request);
   }
 };

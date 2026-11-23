@@ -51,11 +51,21 @@ Operator secrets/vars on **onboarding** Worker (in addition to bridge):
 - Secret `BRIDGE_TICKET_KEY` — **same** 64-hex value as the bridge Worker
 - Var `BRIDGE_ORIGIN` — exact HTTPS origin of the bridge host (e.g. `https://mcp.360web.cloud`)
 
-### D. MCP OAuth resource registration
+### D. MCP protocol + OAuth (bridge is its own authorization server)
 
-1. Register protected resource metadata URL: `https://<host>/.well-known/oauth-protected-resource`
-2. Align audience with production `BRIDGE_AUDIENCE` / resource URI (replace provisional `launch-and-own-mcp` marker before public clients).
-3. Do not expand GitHub/Cloudflare OAuth scopes without owner authorization.
+MCP clients connect to `https://mcp.360web.cloud/mcp` (Streamable HTTP, JSON responses, `integration/mcp-jsonrpc.mjs`). Unauthenticated requests get `401` with `WWW-Authenticate: Bearer resource_metadata=…`, which starts the client's OAuth flow (`integration/oauth-server.mjs`):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `/.well-known/oauth-protected-resource` (and `/mcp` suffix) | RFC 9728; `authorization_servers: [https://mcp.360web.cloud]` |
+| `/.well-known/oauth-authorization-server` | RFC 8414 metadata |
+| `POST /register` | RFC 7591 dynamic registration, public clients only; https or loopback-http redirects |
+| `GET/POST /authorize` | Human consent page; PKCE S256 required; same-origin POST only |
+| `POST /token` | Code exchange (single use) and rotating refresh tokens |
+
+The OAuth grant identifies an **agent session only** (fresh opaque subject). GitHub/Cloudflare identity still binds only through `start_connect_accounts` → `/agent-link` → sealed ticket. Apply `migrations/0002_oauth.sql` to the bridge D1 before deploying. No GitHub/Cloudflare OAuth scope changes.
+
+Connect a client: `claude mcp add --transport http launch-and-own https://mcp.360web.cloud/mcp`, or add the same URL as a ChatGPT connector (developer mode).
 
 ### E. Release gates
 

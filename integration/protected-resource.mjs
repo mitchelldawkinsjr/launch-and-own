@@ -6,12 +6,13 @@
 import {BRIDGE_AUDIENCE, BROWSER_ORIGIN, CONTRACT_VERSION} from './tool-contract.mjs';
 
 export const RESOURCE_URI = 'https://mcp.360web.cloud/mcp';
+const RESOURCE_ORIGIN = new URL(RESOURCE_URI).origin;
 export const RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource';
 
 /** RFC 9728-shaped document for discovery; audience must match transport checks. */
 export function protectedResourceMetadata({
   resource = RESOURCE_URI,
-  authorizationServers = [BROWSER_ORIGIN],
+  authorizationServers = [RESOURCE_ORIGIN],
   scopesSupported = ['launch_and_own.bridge'],
   // Worker may be approved while customer access stays gated by the release matrix.
   status = 'deployed_gated'
