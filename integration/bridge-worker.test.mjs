@@ -66,3 +66,10 @@ test('approved default export still uses injected host without claiming producti
   assert.equal(res.status, 200);
   assert.equal((await res.json()).linked, false);
 });
+
+test('bridge Worker modules never statically import node:sqlite (Workers bundle)', async () => {
+  const {readFileSync, readdirSync} = await import('node:fs');
+  const dir = new URL('.', import.meta.url);
+  for (const file of readdirSync(dir).filter(f => f.endsWith('.mjs') && !f.endsWith('.test.mjs')))
+    assert.doesNotMatch(readFileSync(new URL(file, dir), 'utf8'), /^import .*['"]node:sqlite['"]/m, file);
+});

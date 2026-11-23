@@ -2,7 +2,6 @@
  * Tiny D1 helpers + Node sqlite stand-in for bridge adapter tests.
  */
 import {readFileSync} from 'node:fs';
-import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
 
@@ -10,6 +9,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 
 /** Wrap node:sqlite like Cloudflare D1's prepare/bind/first/run/batch API. */
 export function createMemoryD1(migrationFiles = ['migrations/0001_bridge.sql']) {
+  // Loaded lazily so the Worker bundle never has to resolve node:sqlite (tests only).
+  const {DatabaseSync} = process.getBuiltinModule('node:sqlite');
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec('PRAGMA foreign_keys = ON');
   for (const file of migrationFiles)
