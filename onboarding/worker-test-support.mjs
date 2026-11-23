@@ -155,6 +155,17 @@ function harness({withJobs=true}={}){
       :new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});
+  if(url===pages+'/esp-willow-studio-site/domains'){
+    resourceState.pagesDomains=resourceState.pagesDomains||[];
+    if((opts.method||'GET')==='GET')
+      return Response.json({success:true,result:resourceState.pagesDomains});
+    if(opts.method==='POST'){
+      const name=JSON.parse(opts.body).name;
+      const domain={name,status:resourceState.domainAttachStatus||'pending'};
+      resourceState.pagesDomains.push(domain);
+      return Response.json({success:true,result:domain},{status:200});
+    }
+  }
   if((url===pages||url.startsWith(pages+'?')) && (opts.method||'GET')==='GET'){
     const listed=resourceState.pages
       ?[{id:resourceState.pages.id,name:resourceState.pages.name}]:[];

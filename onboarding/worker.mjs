@@ -674,6 +674,7 @@ export default {
         if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
+        if(url.pathname==='/site-options-apply')return await siteOptions.apply(request,env,current);
       }
       return fail('Page not found',404);
     }catch(error){
