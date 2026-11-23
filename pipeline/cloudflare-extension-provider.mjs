@@ -53,7 +53,7 @@ function safePage(data) {
  */
 export function createCloudflareExtensionProvider({
   principal, cloudflareAccessToken, githubAccessToken,
-  fetchFn = fetch, allowOperatorApprovedWrites = false
+  fetchFn = fetch, assertOperatorApprovedExecution
 } = {}) {
   if (!Number.isSafeInteger(principal?.githubUserId) || principal.githubUserId <= 0 ||
       !LOGIN.test(principal.githubLogin || '') ||
@@ -75,10 +75,18 @@ export function createCloudflareExtensionProvider({
     authorized();
     if (method === 'GET') {
       if (++getCount > MAX_GETS) deny('provider_request_budget_exceeded');
-    } else if (allowOperatorApprovedWrites !== true) {
-      deny('separate_execution_approval_required');
-    } else if (!['POST'].includes(method)) {
-      deny('unsupported_mutation');
+    } else {
+      if (!['POST'].includes(method)) deny('unsupported_mutation');
+      if (typeof assertOperatorApprovedExecution !== 'function')
+        deny('separate_execution_approval_required');
+      let allowed = false;
+      try {
+        allowed = await assertOperatorApprovedExecution({
+          principal: owner, provider, method, path, requestBody: body
+        });
+      } catch {}
+      if (allowed !== true) deny('separate_execution_approval_required');
+      authorized();
     }
     const token = provider === 'github' ? githubAccessToken : cloudflareAccessToken;
     const url = (provider === 'github'
