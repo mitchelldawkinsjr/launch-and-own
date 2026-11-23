@@ -46,19 +46,19 @@ function digest(value) {
 }
 
 function siteOk(site) {
-  return site && UUID.test(site.jobId || '') && positive(site.githubUserId) &&
-    positive(site.repositoryId) && ACCOUNT.test(site.cloudflareAccountId || '') &&
+  return site && typeof site.jobId === 'string' && UUID.test(site.jobId) && positive(site.githubUserId) &&
+    positive(site.repositoryId) && typeof site.cloudflareAccountId === 'string' && ACCOUNT.test(site.cloudflareAccountId) &&
     typeof site.pagesProjectId === 'string' && PROJECT_ID.test(site.pagesProjectId) &&
-    PROJECT.test(site.pagesProjectName || '') && site.branch === 'main';
+    typeof site.pagesProjectName === 'string' && PROJECT.test(site.pagesProjectName) && site.branch === 'main';
 }
 
 function storedAnalyticsOptIn(option, site) {
-  if (!option || !UUID.test(option.id || '') || option.jobId !== site.jobId ||
+  if (!option || typeof option.id !== 'string' || !UUID.test(option.id) || option.jobId !== site.jobId ||
       option.kind !== 'analytics' || option.status !== 'stored' ||
       option.canWrite !== false || option.canActivate !== false ||
       !positive(option.githubUserId) || option.githubUserId !== site.githubUserId ||
       option.cloudflareAccountId !== site.cloudflareAccountId ||
-      !DIGEST.test(option.digest || '')) return null;
+      typeof option.digest !== 'string' || !DIGEST.test(option.digest)) return null;
   const review = buildAnalyticsOptInReview({
     githubUserId: site.githubUserId,
     cloudflareAccountId: site.cloudflareAccountId,
@@ -72,14 +72,16 @@ function storedAnalyticsOptIn(option, site) {
 }
 
 function configurationOk(evidence, site) {
-  // Caller supplies the safe projection from readPagesAnalyticsStatus (or equal).
-  // Reject raw provider payloads, secrets, and invented active states.
+  // The backend reader binds the projection to the identity used for the GET.
+  // A dashboard URL alone can also refer to a replaced project with the same name.
   if (!evidence || evidence.feature !== 'cloudflare_web_analytics' ||
       evidence.state !== 'manual_setup' || !CONFIGS.has(evidence.configuration) ||
       evidence.metrics?.status !== 'not_queried' ||
-      evidence.metrics?.visitors != null || evidence.metrics?.pageviews != null ||
+      ['visitors', 'pageviews', 'referrers', 'topPages', 'coreWebVitals'].some(key => evidence.metrics[key] != null) ||
       evidence.analyticsDashboardUrl != null) return false;
-  if (typeof evidence.projectDashboardUrl !== 'string') return false;
+  const identity = ['githubUserId', 'repositoryId', 'cloudflareAccountId', 'pagesProjectId',
+    'pagesProjectName', 'branch'];
+  if (!evidence.reviewBinding || !identity.every(key => evidence.reviewBinding[key] === site[key])) return false;
   const expected = 'https://dash.cloudflare.com/' + site.cloudflareAccountId +
     '/pages/view/' + site.pagesProjectName;
   return evidence.projectDashboardUrl === expected;
@@ -89,14 +91,16 @@ function configurationOk(evidence, site) {
  * Builds an exact enablement review record for a later operator-gated apply.
  *
  * Inputs must come from server-side D1/session inventory and the read-only
- * analytics adapter. Browser/agent payloads are not trusted. Output never
- * includes web_analytics_tag, web_analytics_token, or a provider write body.
+ * analytics adapter with includeReviewBinding enabled. The authorization
+ * callback rechecks the frozen owner/site and stored opt-in binding at both
+ * boundaries. Browser/agent payloads are not trusted.
  */
 export async function buildPagesAnalyticsEnablementPlan(input = {}) {
   const keys = ['storedOption', 'trustedSite', 'configurationEvidence',
     'privacyBeaconConsent'];
-  let original, data;
+  let original, data, assertCurrentAuthorization;
   try {
+    assertCurrentAuthorization = input.assertCurrentAuthorization;
     original = keys.map(key => JSON.stringify(input[key]));
     if (original.some(value => value === undefined))
       return deny('blocked-missing-evidence',
@@ -123,13 +127,8 @@ export async function buildPagesAnalyticsEnablementPlan(input = {}) {
   if (configurationEvidence.configuration === 'tag_reported_activation_unverified')
     return deny('manual-review-required',
       'A Web Analytics tag is already reported; verify beacon and metrics separately');
-  if (typeof input.assertCurrentAuthorization !== 'function')
+  if (typeof assertCurrentAuthorization !== 'function')
     return deny('blocked-authorization', 'A server-side current-owner fence is required');
-
-  let authorized = false;
-  try { authorized = await input.assertCurrentAuthorization() === true; } catch {}
-  if (!authorized)
-    return deny('blocked-authorization', 'Owner session was revoked');
 
   const binding = Object.freeze({
     jobId: trustedSite.jobId,
@@ -138,9 +137,22 @@ export async function buildPagesAnalyticsEnablementPlan(input = {}) {
     cloudflareAccountId: trustedSite.cloudflareAccountId.toLowerCase(),
     pagesProjectId: trustedSite.pagesProjectId,
     pagesProjectName: trustedSite.pagesProjectName,
+    branch: trustedSite.branch,
     storedOptionId: storedOption.id,
     storedApprovalDigest: storedOption.digest
   });
+  const authorized = async () => {
+    try { return await assertCurrentAuthorization(binding) === true; }
+    catch { return false; }
+  };
+  const unchanged = () => {
+    try {
+      return input.assertCurrentAuthorization === assertCurrentAuthorization &&
+        keys.every((key, i) => JSON.stringify(input[key]) === original[i]);
+    } catch { return false; }
+  };
+  if (!await authorized()) return deny('blocked-authorization', 'Owner session was revoked');
+
   const proposalSha256 = digest({
     kind: 'launch-and-own-pages-analytics-enablement-v1',
     binding,
@@ -150,12 +162,7 @@ export async function buildPagesAnalyticsEnablementPlan(input = {}) {
     notices: NOTICES
   });
 
-  let unchanged = false;
-  try { unchanged = keys.every((key, i) => JSON.stringify(input[key]) === original[i]); }
-  catch {}
-  let stillAuthorized = false;
-  try { stillAuthorized = await input.assertCurrentAuthorization() === true; } catch {}
-  if (!unchanged || !stillAuthorized)
+  if (!unchanged() || !await authorized() || !unchanged())
     return deny('blocked-review-context-changed',
       'The owner, grant, or evidence changed while preparing the enablement review');
 
