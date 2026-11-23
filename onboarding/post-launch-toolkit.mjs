@@ -8,17 +8,26 @@ const DIGEST = /^[a-f0-9]{64}$/i;
 const STATES = new Set(TOOLKIT_CAPABILITY_STATES);
 
 const CAP_LABELS = Object.freeze({
-  static_hosting: 'Static hosting',
-  https: 'HTTPS',
-  deployment_health: 'Deployment health',
+  static_hosting: 'Website hosting',
+  https: 'Secure website address',
+  deployment_health: 'Publish health',
   website_updates: 'Safe website updates',
   web_analytics: 'Visitor insights',
   pr_previews: 'Private update previews',
-  custom_domains: 'Custom domain',
+  custom_domains: 'Your own domain name',
   email_routing: 'Email forwarding',
-  seo_bundle: 'SEO setup',
+  seo_bundle: 'Search listing help',
   contact_forms: 'Contact forms',
-  advanced_services: 'Advanced services'
+  advanced_services: 'Advanced hosting extras'
+});
+
+const STATE_LABELS = Object.freeze({
+  included_verified: 'Included',
+  available_opt_in: 'Available',
+  active_verified: 'Active',
+  manual_setup: 'Set up yourself',
+  blocked_permission_or_plan: 'Not ready yet',
+  not_available: 'Not available'
 });
 
 function cap(state, reason, detail) {
@@ -35,73 +44,73 @@ export function historyToolkitCapabilities({
 } = {}) {
   const hosting = verified
     ? cap('included_verified', 'verified_launch_job',
-      'Customer-owned Cloudflare Pages from a verified launch in your history.')
+      'Your site is hosted on Cloudflare in an account you own.')
     : cap('not_available', 'awaiting_public_https_verification',
-      'Hosting appears after Launch & Own verifies the public site.');
+      'Hosting shows here after we confirm the public site is live.');
   const https = verified
     ? cap('included_verified', 'verified_https_publication',
-      'Public HTTPS was confirmed with the approved revision.')
+      'The public address was confirmed as secure for the version you approved.')
     : cap('not_available', 'awaiting_public_https_verification',
-      'HTTPS status waits on verified publication.');
+      'Secure-address status shows after the public site is confirmed.');
   const health = verified
     ? cap('included_verified', 'verified_launch_job',
-      'Last successful verify for this retained launch record.')
+      'Last successful live check for this launch.')
     : cap('not_available', 'awaiting_public_https_verification',
-      'Deployment health is shown after a verified live check.');
+      'Publish health shows after a successful live check.');
   let updates;
   if (uploadedZip)
     updates = cap('not_available', 'uploaded_source_has_no_supported_editor',
-      'Uploaded ZIP sites keep the GitHub workflow; the one-page editor does not apply.');
+      'Sites you uploaded as a ZIP are updated in GitHub, not with this simple editor.');
   else if (canEdit && verified)
     updates = cap('available_opt_in', 'editor_eligible',
-      'Edit → exact preview → approve → merge one GitHub update → we verify live.');
+      'Change the copy, preview the exact page, approve, merge in GitHub, then we check the live site.');
   else
     updates = cap('not_available', 'update_acceptance_pending',
       verified
-        ? 'This retained site is not eligible for the one-page editor yet.'
-        : 'Website updates unlock after the site is verified live.');
+        ? 'This site is not eligible for the simple editor yet.'
+        : 'Updates unlock after the site is confirmed live.');
   return Object.freeze({
     static_hosting: hosting,
     https,
     deployment_health: health,
     website_updates: updates,
     web_analytics: cap('manual_setup', 'review_provider_settings',
-      'Not configured here yet. Use Cloudflare Pages → Metrics → Web Analytics when ready (#85).'),
+      'Not set up here yet. In Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
     pr_previews: cap('blocked_permission_or_plan', 'preview_access_and_approval_required',
-      'GitHub PR previews stay off until you opt in; draft URLs can be public (#86).'),
+      'Draft preview links stay off until you turn them on. Those draft links can be public.'),
     custom_domains: cap('manual_setup', 'verified_domain_setup_required',
-      'Point a domain through your Cloudflare Pages project when you are ready.'),
+      'Add your own domain name in your Cloudflare Pages project when you are ready.'),
     email_routing: cap('not_available', 'owned_custom_domain_needed',
-      'Needs a custom domain and inbox you control.'),
+      'Needs a domain name and inbox you control.'),
     seo_bundle: cap('not_available', 'separate_reviewed_artifact_needed',
-      'Extra SEO packaging is a separate reviewed update.'),
+      'Extra search-listing setup is a separate reviewed update.'),
     contact_forms: cap('not_available', 'verified_server_form_integration_needed',
-      'Forms need a separately approved delivery path.'),
+      'Contact forms need a separate approved setup.'),
     advanced_services: cap('not_available', 'separate_usage_and_approval_review_needed',
-      'Workers, D1, KV, or R2 need a reviewed usage plan.')
+      'Extra Cloudflare services need a reviewed plan first.')
   });
 }
 
 const STATUS_COPY = Object.freeze({
   live: {
-    label: 'Previously verified',
-    detail: 'Launch & Own checked the public website against the approved launch.'
+    label: 'Live and checked',
+    detail: 'We confirmed the public website matches the version you approved.'
   },
   pending_deployment: {
     label: 'Publishing',
-    detail: 'Waiting for verification of the approved launch.'
+    detail: 'Your approved site is going live. We will check it next.'
   },
   queued: {
-    label: 'Queued',
-    detail: 'Waiting to create your private GitHub repository and website.'
+    label: 'Getting ready',
+    detail: 'Next we create your private files on GitHub and publish the site.'
   },
   needs_reauthorization: {
     label: 'Reconnect required',
-    detail: 'Sign in again with GitHub and Cloudflare, then reapprove to continue.'
+    detail: 'Sign in again with GitHub and Cloudflare, then continue the launch.'
   },
   failed: {
     label: 'Needs attention',
-    detail: 'The last launch attempt stopped. Reconnect or contact support with the status code.'
+    detail: 'The last launch step stopped. Reconnect, or share the status code if you need help.'
   }
 });
 
@@ -112,10 +121,10 @@ export function websiteUrlForSlug(siteSlug) {
 }
 
 const UPDATE_STEPS = [
-  {id: 'approved', title: 'Update approved', hint: 'Exact preview saved.'},
-  {id: 'merge', title: 'Publish in GitHub', hint: 'Open the pull request and click Merge to publish.'},
-  {id: 'publishing', title: 'Checking your live site', hint: 'Waiting for the public site to match the approved change.'},
-  {id: 'live', title: 'Live', hint: 'Public site matches the approved update.'}
+  {id: 'approved', title: 'Update approved', hint: 'We saved the exact page you reviewed.'},
+  {id: 'merge', title: 'Publish in GitHub', hint: 'Open the change request and click Merge when you are ready.'},
+  {id: 'publishing', title: 'Checking your live site', hint: 'Waiting for the public site to match your approved change.'},
+  {id: 'live', title: 'Live', hint: 'The public site matches your approved update.'}
 ];
 
 export function updatePublicationLadder({prStatus, verifyStatus = null}) {
@@ -124,9 +133,9 @@ export function updatePublicationLadder({prStatus, verifyStatus = null}) {
     return {current: 'unavailable', steps: [], primaryAction: null};
   const current = prStatus === 'merged' ? (verifyStatus === 'live' ? 'live' : 'publishing') : 'merge';
   const actions = {
-    merge: {label: 'Open update to publish', detail: 'Click Merge in GitHub when you are ready.'},
+    merge: {label: 'Open the change to publish', detail: 'In GitHub, click Merge when you are ready.'},
     publishing: {label: 'Check again', detail: 'Publishing usually finishes in a few minutes.'},
-    live: {label: 'View live website', detail: 'Your approved update is verified on the public site.'}
+    live: {label: 'View live website', detail: 'Your approved update is live on the public site.'}
   };
   return {
     current,
@@ -148,10 +157,10 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} =
   const verified = status === 'live' && typeof job.expected_commit_sha === 'string' &&
     SHA.test(job.expected_commit_sha) && time !== null;
   let copy = Object.hasOwn(STATUS_COPY, status) ? STATUS_COPY[status] : {
-    label: 'Status unavailable', detail: 'Open launch history for the latest recorded result.'
+    label: 'Status unavailable', detail: 'Open your launches for the latest recorded result.'
   };
   if (status === 'live' && !verified)
-    copy = {label: 'Verification details unavailable', detail: 'Open launch history for the recorded result.'};
+    copy = {label: 'Check details unavailable', detail: 'Open your launches for the recorded result.'};
   const editable = verified && canEdit;
   const zip = Boolean(uploadedZip) || Number(job.uploaded_zip) === 1;
   return {
@@ -187,26 +196,26 @@ export async function loadToolkitCards(env, session, time) {
 export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = ''} = {}) {
   if (!current?.cloudflare_account_id)
     return view('Your website toolkit',
-      '<p>Connect GitHub and choose your Cloudflare account to see your sites.</p>' +
+      '<p>Connect GitHub and choose your Cloudflare account to see your sites here.</p>' +
       '<p><a href="/">Back to setup</a></p>');
   const body = cards.length
     ? cards.map(card => renderCard(card, escape)).join('')
-    : '<p>No websites in your current launch history yet. Create or upload a site first.</p>';
+    : '<p>No websites in your launches yet. Create or upload a site first.</p>';
   return view('Your website toolkit',
-    '<p>Launch history is available for 30 days. Verification details reflect the recorded launch.</p>' +
+    '<p>Recent launches stay here for 30 days. The details below come from the launch we recorded for you.</p>' +
     body + currentInventoryHtml +
-    '<p><a href="/history">Launch history</a> · <a href="/">Back to setup</a></p>');
+    '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p>');
 }
 
 function renderCard(card, escape) {
   const time = iso => '<time datetime="' + escape(iso) + '">' + escape(iso.slice(0, 10)) +
     ' ' + escape(iso.slice(11, 16)) + ' UTC</time>';
   const website = card.recordedWebsite
-    ? '<p>Website address at verification <code>' + escape(card.recordedWebsite) + '</code></p>' : '';
+    ? '<p>Public address when checked: <code>' + escape(card.recordedWebsite) + '</code></p>' : '';
   const verification = card.verifiedAt
-    ? '<p>Last verified at ' + time(card.verifiedAt) + '</p><p>Verified GitHub revision <code>' +
+    ? '<p>Last checked ' + time(card.verifiedAt) + '</p><p>Checked version: <code>' +
       escape(card.verifiedCommitSha) + '</code></p>' : '';
-  const expires = card.expiresAt ? '<p>Available in history until ' + time(card.expiresAt) + '</p>' : '';
+  const expires = card.expiresAt ? '<p>Stays on this list until ' + time(card.expiresAt) + '</p>' : '';
   const digest = card.approvalFingerprint
     ? '<p>Approval fingerprint <code>' + escape(card.approvalFingerprint.slice(0, 12)) + '…</code></p>' : '';
   const error = card.errorCode
@@ -217,13 +226,14 @@ function renderCard(card, escape) {
     ? '<p><a href="' + escape(card.optionsPath) + '">Optional domain, email, and form requests</a></p>' : '';
   const caps = Object.entries(card.capabilities || {}).map(([id, item]) => {
     const label = CAP_LABELS[id] || id;
-    return '<li><strong>' + escape(label) + '</strong> (' + escape(item.state) + '): ' +
+    const state = STATE_LABELS[item.state] || item.state;
+    return '<li><strong>' + escape(label) + '</strong> · ' + escape(state) + ': ' +
       escape(item.detail) + '</li>';
   }).join('');
   return '<section><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' +
     '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + digest + error + edit +
     options +
-    '<details><summary>Toolkit capabilities</summary><ul>' + caps + '</ul></details></section>';
+    '<details><summary>What this site includes</summary><ul>' + caps + '</ul></details></section>';
 }
 
 export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ticketRaw, jobId, escape}) {
@@ -231,26 +241,26 @@ export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ti
     prStatus: pr.status, verifyStatus: verifyResult?.status
   });
   if (ladder.current === 'closed')
-    return '<p role="status">This pull request was closed before merging.</p>' +
+    return '<p role="status">That change request was closed before it was published.</p>' +
       (isLaunchId(jobId) ? '<p><a href="/site-update?id=' + encodeURIComponent(jobId) + '">Start a fresh edit</a></p>' : '');
-  if (ladder.current === 'unavailable') return '<p>Update status is unavailable.</p>';
+  if (ladder.current === 'unavailable') return '<p>Update status is unavailable right now.</p>';
 
   const steps = ladder.steps.map(step =>
     '<li' + (step.active ? '><strong>' : '>') + escape(step.title) +
-    (step.active ? '</strong>' : '') + ' — ' + escape(step.hint) + '</li>'
+    (step.active ? '</strong>' : '') + ': ' + escape(step.hint) + '</li>'
   ).join('');
   const {label, detail} = ladder.primaryAction;
   const mergeCta = ladder.current === 'merge' && pr.pullRequest
     ? '<p><a class="btn-like" href="' + escape(pr.pullRequest) + '" rel="noopener"><strong>' +
       escape(label) + '</strong></a></p><p>' + escape(detail) + '</p>' : '';
   const live = ladder.current === 'live' && verifyResult.website
-    ? '<p class="pill">Verified live</p><p><a href="' + escape(verifyResult.website) + '">' +
+    ? '<p class="pill">Live and checked</p><p><a href="' + escape(verifyResult.website) + '">' +
       escape(verifyResult.website) + '</a></p>' : '';
   const checking = ladder.current === 'publishing' ? '<p>' + escape(detail) + '</p>' : '';
   const refresh = '<p><a href="/site-update-status?ticket=' + encodeURIComponent(ticketRaw) + '">Refresh status</a></p>';
-  const revision = pr.mergedCommitSha ? '<p>Merged GitHub revision <code>' + escape(pr.mergedCommitSha) + '</code></p>' : '';
+  const revision = pr.mergedCommitSha ? '<p>Published version: <code>' + escape(pr.mergedCommitSha) + '</code></p>' : '';
   return '<ol>' + steps + '</ol>' + mergeCta + live + checking + refresh +
-    '<details><summary>Approved update</summary>' + revision + '<p>Exact preview SHA-256 <code>' +
+    '<details><summary>Technical details</summary>' + revision + '<p>Exact preview code: <code>' +
     escape(approvedHtmlSha256) + '</code></p></details>' +
-    '<p><a href="/toolkit">Website toolkit</a> · <a href="/history">Launch history</a></p>';
+    '<p><a href="/toolkit">Website toolkit</a> · <a href="/history">Your launches</a></p>';
 }

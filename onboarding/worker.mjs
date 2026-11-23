@@ -182,9 +182,9 @@ async function accountOptions(env,current){
   return data.result.filter(a=>typeof a.id==='string'&&/^[a-f\d]{32}$/i.test(a.id)).map(a=>({id:a.id,name:String(a.name||a.id)}));
 }
 async function home(env,current,notice){
-  const disconnectNotice=notice==='unconfirmed'?'<p role="alert">Your local session was removed, but one or more provider authorizations could not be revoked automatically. Review connected applications in your GitHub and Cloudflare account settings.</p>':notice==='complete'?'<p role="status">You are signed out and provider revocation was confirmed for the connected accounts.</p>':'';
+  const disconnectNotice=notice==='unconfirmed'?'<p role="alert">You are signed out here, but GitHub or Cloudflare may still show Launch &amp; Own as connected. Open your account settings on those sites and remove access if you want a full disconnect.</p>':notice==='complete'?'<p role="status">You are signed out, and Launch &amp; Own access was removed from the connected accounts.</p>':'';
   const zipEnabled=zipPreviewConfigured(env);
-  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Upload a built website or create one here. Host it using your own GitHub and Cloudflare accounts.':'Build and maintain your own website using your GitHub and Cloudflare accounts.'}</p><p>Connect GitHub to get started. You approve each launch before any resources are created.</p><p><a href="/connect/github">Connect GitHub</a></p><small>We do not ask for API tokens or passwords.</small>`);
+  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Create a simple site here, or upload one you already built. Your site will live in your own GitHub and Cloudflare accounts.':'Create a simple website that lives in your own GitHub and Cloudflare accounts.'}</p><p>Start by connecting GitHub. Nothing is published until you review a preview and approve it.</p><p><a href="/connect/github">Connect GitHub</a></p><small>We never ask for API tokens or passwords.</small>`);
   let appInstalled=false;
   try{
     const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
@@ -192,14 +192,14 @@ async function home(env,current,notice){
       accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login
     });
   }catch{appInstalled=false;}
-  const installHtml=appInstalled?'':`<p role="alert">Install Launch &amp; Own on your GitHub account so it can create your private website repository. OAuth sign-in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install on GitHub</a></p><p>After installing, return here and refresh.</p>`;
+  const installHtml=appInstalled?'':`<p role="alert">One more GitHub step: install the Launch &amp; Own app so it can create a private place for your website files. Signing in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install on GitHub</a></p><p>After you install it, come back here and refresh the page.</p>`;
   const connected=!!current.cloudflare_token_ct;
   let accountHtml='';
   if(appInstalled&&connected&&!current.cloudflare_account_id){
     try{
       const accounts=await accountOptions(env,current);
-      accountHtml=accounts.length?`<section><h2>Choose your Cloudflare account</h2><p>Only the selected account will be used.</p>${button('/account','Select account',current.csrf,`<label for="account">Cloudflare account</label><select id="account" name="accountId" required>${accounts.map(a=>`<option value="${escape(a.id)}">${escape(a.name)}</option>`).join('')}</select>`)}</section>`:'<p>No authorized Cloudflare accounts were found. Check the connection permissions.</p>';
-    }catch{accountHtml='<p>Could not list your Cloudflare accounts. Reconnect with the required permissions.</p>';}
+      accountHtml=accounts.length?`<section><h2>Choose your Cloudflare account</h2><p>Pick the account that should host your public website. Only the one you select is used.</p>${button('/account','Use this account',current.csrf,`<label for="account">Cloudflare account</label><select id="account" name="accountId" required>${accounts.map(a=>`<option value="${escape(a.id)}">${escape(a.name)}</option>`).join('')}</select>`)}</section>`:'<p>No Cloudflare accounts came back from this connection. Reconnect Cloudflare and allow account access.</p>';
+    }catch{accountHtml='<p>Could not load your Cloudflare accounts. Reconnect Cloudflare and try again.</p>';}
   }
   const siteFields=[
     '<label for="name">Business or website name</label><input id="name" name="name" maxlength="80" required placeholder="e.g. Green Willow Studio">',
@@ -217,19 +217,22 @@ async function home(env,current,notice){
   ].join('');
   const ready=appInstalled&&connected&&current.cloudflare_account_id;
   const aiEntry=ready&&aiDraftConfigured(env)?
-    '<section><h2>Describe it. Get a draft.</h2><p>Optional AI-assisted copy: your business name and description will be sent to the configured AI provider. AI may make mistakes; you must review and edit every claim before publishing. Contact email is not sent to the model.</p>'+
+    '<section><h2>Optional: get help with the wording</h2><p>Describe your business and we will suggest homepage text. Your business name and description are sent to the AI service; your contact email is not. Read every line before you publish. AI can get details wrong.</p>'+
     button('/draft','Draft my website copy',current.csrf,aiFields)+'</section>':'';
-  const zipEntry=ready&&zipEnabled?`<section><h2>Upload a built website</h2>
-    <p>Upload a ZIP of your built site to preview it privately. Include <code>index.html</code> and its assets at the top of the ZIP or inside one build folder.</p>
+  const zipEntry=ready&&zipEnabled?`<section><h2>Upload a website you already built</h2>
+    <p>Upload a ZIP of your finished site for a private preview. Put <code>index.html</code> and its files at the top of the ZIP, or inside one folder.</p>
     <form method="POST" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${escape(current.csrf)}">
     <label for="zip-name">Business or website name</label><input id="zip-name" name="name" maxlength="80" required>
-    <label for="website-zip">Website ZIP (up to 6 MiB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
+    <label for="website-zip">Website ZIP (up to 6 MB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
     <button type="submit">Upload and preview</button></form></section>`:'';
   const next=ready?
-    '<section><h2>Create a site</h2><p>Review your generated homepage before approving publication. After the site is live, optional domain, email, and form requests are saved from your toolkit without changing DNS or creating a form.</p>'+
-    button('/preview','Generate website preview',current.csrf,siteFields)+'</section>':'';
-  const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Launch history</a></p>':'';
-  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}<p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${appInstalled&&!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
+    '<section><h2>Create a simple website</h2><p>Fill in your business details, then preview the page. You will approve it in a separate step before anything goes live. After the site is live, you can save optional domain, email, and form requests from your toolkit; that does not change DNS or create a form by itself.</p>'+
+    button('/preview','Preview my website',current.csrf,siteFields)+'</section>':'';
+  const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Your launches</a></p>':'';
+  const cloudflareLine=connected
+    ?(current.cloudflare_account_id?'Cloudflare connected · hosting account selected':'Cloudflare connected · choose your hosting account next')
+    :'Cloudflare not connected yet';
+  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}<p>${cloudflareLine}</p>${appInstalled&&!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a> (this is where your public website will be hosted)</p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
 }
 
 async function toolkit(env,current,request){
@@ -299,9 +302,9 @@ async function draft(request,env,current){
     '<label for="draft-email">Contact email (optional)</label><input id="draft-email" name="contactEmail" type="email" maxlength="254" value="'+escape(site.contactEmail)+'">'
   ].join('');
   return view('Review your AI-assisted draft',
-    '<p role="status">This is an editable draft, not a live website. AI can make mistakes. Review all claims and contact details before previewing or approving.</p>'+
+    '<p role="status">This is a draft you can edit. It is not live yet. Check every claim and contact detail before you preview or approve.</p>'+
     button('/preview','Preview this edited draft',current.csrf,fields)+
-    '<p><a href="/">Return to the manual editor</a></p>');
+    '<p><a href="/">Back to the form without AI help</a></p>');
 }
 async function preview(request,env,current){
   await limitAttempts(request,env);
@@ -381,7 +384,7 @@ const receiptOwner=(current,time)=>({
 });
 
 async function launchHistory(env,current){
-  if(!current?.cloudflare_account_id)return fail('Connect GitHub and choose your Cloudflare account before viewing launch history.',401);
+  if(!current?.cloudflare_account_id)return fail('Connect GitHub and choose your Cloudflare account before viewing your launches.',401);
   await assertHistoryAccess(env,current);
   const time=now();
   const [jobs,legacy]=await Promise.all([listOwnedJobs(env,current,time),listOwnedReceipts(env,receiptOwner(current,time))]);
@@ -392,15 +395,15 @@ async function launchHistory(env,current){
   const cards=items.map(item=>{
     const website='https://esp-'+item.site_slug+'-site.pages.dev/';
     const live=item.display_status==='live'?`<p>Verified site: <a href="${escape(website)}">${escape(website)}</a></p>`:'';
-    const action=item.can_restore?button('/restore','Review and reapprove this website',current.csrf,launchIdField(item.id)):'';
-    const deletion=item.can_delete?button('/delete-launch-history','Delete history entry',current.csrf,launchIdField(item.id)):'';
+    const action=item.can_restore?button('/restore','Review and continue this launch',current.csrf,launchIdField(item.id)):'';
+    const deletion=item.can_delete?button('/delete-launch-history','Remove from this list',current.csrf,launchIdField(item.id)):'';
     const update=item.can_edit?
-      '<p><a href="/site-update?id='+encodeURIComponent(item.id)+'">Edit this website (reviewable GitHub PR)</a></p>':'';
-    const diagnostic=item.error_code?`<p>Last result: <code>${escape(item.error_code)}</code></p>`:'';
+      '<p><a href="/site-update?id='+encodeURIComponent(item.id)+'">Update this website</a></p>':'';
+    const diagnostic=item.error_code?`<p>Last result code: <code>${escape(item.error_code)}</code> (share this if you need help)</p>`:'';
     return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${live}${update}${action}${deletion}</section>`;
   }).join('');
-  return view('Approved website history','<p>History is retained for 30 days from the first approval. Reconnect and reapprove a paused launch to resume it. Deleting an entry leaves any customer-owned website and repository in place.</p>'+
-    (cards||'<p>No approved launches found for this GitHub identity and Cloudflare account.</p>')+
+  return view('Your launches','<p>This list keeps launches for 30 days after you first approve them. Your live website and its private files stay in your accounts even if a row drops off this list. If a launch paused, reconnect and continue it from here.</p>'+
+    (cards||'<p>No launches yet for this GitHub and Cloudflare pair.</p>')+
     '<p><a href="/">Back to setup</a></p>');
 }
 
@@ -482,7 +485,7 @@ async function sitePreview(env,current,id){
     const stage=item.job_id?'approved':'draft';
     await readZipManifest(env.ZIP_ARTIFACTS,zip,stage);
     const {origin,ticket}=await createZipPreview(env,zip,stage,current.expires_at);
-    return view('Open private website preview',`<p>Review your website and its pages before approving. Forms and external resources are restricted in the preview.</p>
+    return view('Open private website preview',`<p>Open a private look at the site you uploaded. Forms and outside links stay limited in this preview.</p>
       <form action="${escape(origin)}/_open" method="POST"><input name="ticket" type="hidden" value="${escape(ticket)}">
       <button type="submit">Open uploaded website</button></form>`,200,{
       ...textHeaders,'referrer-policy':'origin',
@@ -501,8 +504,21 @@ async function review(env,current,id){
   if(!item)return fail('This launch request is not accessible.',404);
   const {slug,digest,zip}=await itemSnapshot(item,current);
   const website='https://esp-'+slug+'-site.pages.dev';
-  const details=`<p><strong>Name:</strong> ${escape(item.customer_name)}</p><p><strong>GitHub:</strong> ${escape(item.github_login)}</p><p><strong>Cloudflare:</strong> ${escape(item.cloudflare_account_id)}</p><p><strong>Private repository:</strong> ${escape('esp-'+slug)}</p><p><strong>Public Pages URL:</strong> ${escape(website)}</p><p>Approval allows Launch &amp; Own to create the private repository, publish the reviewed website, and retry while this session and both provider grants stay valid. Changes to the repository's production branch can trigger future Pages deployments.</p><p>Cloudflare's Workers &amp; Pages GitHub App needs access to the repository. <a href="https://github.com/settings/installations">Review GitHub App access</a>.</p>`;
-  const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open your website preview</a></p>';
+  const statusLabel={
+    preview:'Ready for your approval',
+    queued:'Creating your site',
+    pending_deployment:'Publishing your site',
+    live:'Live and checked',
+    failed:'Needs attention',
+    needs_reauthorization:'Reconnect required'
+  };
+  const details=`<p><strong>Website name:</strong> ${escape(item.customer_name)}</p>`+
+    `<p><strong>GitHub account:</strong> ${escape(item.github_login)}</p>`+
+    `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
+    `<p><strong>Public website address:</strong> ${escape(website)}</p>`+
+    `<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>`+
+    `<p>Cloudflare also needs permission to read that GitHub folder. <a href="https://github.com/settings/installations">Check GitHub app access</a> if publishing gets stuck.</p>`;
+  const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open the exact preview</a> (new tab)</p>';
   let status=item.status;
   let controls='';
   let output='';
@@ -519,25 +535,26 @@ async function review(env,current,id){
     status=item.job_status??'needs_reauthorization';
     if(!bound&&['queued','pending_deployment'].includes(status))status='needs_reauthorization';
     if(status==='queued'){
-      output='<p>Your launch is queued. Refresh this page for updates.</p>';
-      controls=button('/launch','Run due launch steps',current.csrf,launchIdField(id));
+      output='<p>We are creating your private files and public site. Refresh this page for the latest status.</p>';
+      controls=button('/launch','Continue launch',current.csrf,launchIdField(id));
     }
     if(status==='pending_deployment'){
-      output='<p>Cloudflare is building the approved revision.</p>';
-      controls=button('/verify','Check live deployment',current.csrf,launchIdField(id));
+      output='<p>Cloudflare is publishing the version you approved. This often finishes in a few minutes.</p>';
+      controls=button('/verify','Check if it is live',current.csrf,launchIdField(id));
     }
     if(['failed','needs_reauthorization'].includes(status)){
-      output='<p>Launch is paused. <a href="/history">Open launch history</a> to review and reapprove it when available.</p>';
+      output='<p>This launch paused. <a href="/history">Open your launches</a> to reconnect and continue when you are ready.</p>';
     }
-    if(item.job_error)output+=`<p>Last result: <code>${escape(item.job_error)}</code></p>`;
+    if(item.job_error)output+=`<p>Last result code: <code>${escape(item.job_error)}</code></p>`;
     if(item.attempts>0&&['queued','pending_deployment'].includes(status)&&item.next_attempt_at>now()){
       const timestamp=new Date(item.next_attempt_at*1000).toISOString();
-      output+=`<p>Attempts used: ${escape(item.attempts)}. Next eligible retry <time datetime="${timestamp}">${timestamp}</time>.</p>`;
+      output+=`<p>Tries so far: ${escape(item.attempts)}. Next try after <time datetime="${timestamp}">${timestamp}</time>.</p>`;
     }
-    if(status==='live')output=`<p class="pill">Public website deployment verified</p><p><a href="${escape(website)}">${escape(website)}</a></p><p>Verified revision <code>${escape(item.expected_commit_sha)}</code></p>`;
+    if(status==='live')output=`<p class="pill">Your public website is live and matches what you approved</p><p><a href="${escape(website)}">${escape(website)}</a></p><p>Checked version: <code>${escape(item.expected_commit_sha)}</code></p>`;
   }
-  const source=zip?`<p>Uploaded website · ${zip.fileCount} ${zip.fileCount===1?'file':'files'} · ${Math.ceil(zip.totalBytes/1024)} KiB</p>`:'';
-  return view('Review website launch',`${source}${details}<p class="pill">Status: ${escape(status)}</p>${previewLink}${fileList}${output}${controls}<p><a href="/">Back to setup</a></p>`);
+  const source=zip?`<p>Uploaded website · ${zip.fileCount} ${zip.fileCount===1?'file':'files'} · ${Math.ceil(zip.totalBytes/1024)} KB</p>`:'';
+  const shown=statusLabel[status]||status;
+  return view('Review your website',`${source}${details}<p class="pill">${escape(shown)}</p>${previewLink}${fileList}${output}${controls}<p><a href="/">Back to setup</a></p>`);
 }
 
 function queueAttempt(context,env,id,sessionHash){
@@ -562,7 +579,7 @@ async function approve(request,env,current,context){
     ?await getOwnedReceipt(env,{id:item.legacy_receipt_id,...receiptOwner(current,time)}):null;
   if(item.legacy_receipt_id&&!item.job_id&&!receipt)throw Error('This history entry expired');
   if(!await approveJob(env,{preview:item,session:current,snapshot,receipt,time}))
-    return fail('This launch changed or its target already has an approved launch. Check launch history.',409);
+    return fail('This launch changed or its target already has an approved launch. Check your launches.',409);
   queueAttempt(context,env,snapshot.id,current.hash);
   return redirect(reviewPath(item.id));
 }

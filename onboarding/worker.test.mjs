@@ -33,7 +33,7 @@ test('customer connects both providers, selects verified account, previews and e
   home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Demo Account/);
   const csrf=csrfFrom(html);
   const selected=await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});assert.equal(selected.status,303);
-  home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Generate website preview/);
+  home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Preview my website/);
   const pre=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});assert.equal(pre.status,303);
   const reviewUrl=pre.headers.get('location');assert.match(reviewUrl,/^\/review\?id=/);
   const review=await h.request(reviewUrl,{cookie:sessionCookie});assert.equal(review.status,200);assert.match(await review.text(),/Approve and create website/);
@@ -215,7 +215,7 @@ test('disconnect revokes GitHub grant and Cloudflare OAuth token and removes the
   assert(h.calls.some(c=>c.url==='https://api.github.com/applications/Iv1.example/grant'&&c.method==='DELETE'));
   assert(h.calls.some(c=>c.url==='https://dash.cloudflare.com/oauth2/revoke'&&c.method==='POST'));
   const notice=await (await h.request('/?disconnect=complete')).text();
-  assert.match(notice,/provider revocation was confirmed/);
+  assert.match(notice,/Launch &amp; Own access was removed/);
   const old=await (await h.request('/',{cookie:sessionCookie})).text();
   assert.match(old,/Connect GitHub/);
  }finally{globalThis.fetch=originalFetch}
@@ -231,7 +231,7 @@ test('a remote revocation failure still signs out locally and displays an honest
   assert.equal(result.headers.get('location'),'/?disconnect=unconfirmed');
   assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS count FROM onboarding_sessions').get().count,0);
   const msg=await (await h.request('/?disconnect=unconfirmed')).text();
-  assert.match(msg,/could not be revoked automatically/);
+  assert.match(msg,/may still show Launch &amp; Own as connected/);
   assert(!msg.includes('ghu_secret_example'));
  }finally{globalThis.fetch=originalFetch}
 });
@@ -375,7 +375,7 @@ test('site preview shows exactly the approved copy, and deployed HTML matches it
   assert.match(html,/Portraits/);
   assert.match(html,/--accent:#994936/);
   const review=await (await h.request('/review?id='+id,{cookie:sessionCookie})).text();
-  assert.match(review,/Open your website preview/);
+  assert.match(review,/Open the exact preview/);
   const approved=await approvePreview(h,sessionCookie,csrf,id);
   assert.equal(approved.status,303);
   assert.equal(h.resourceState.homepageHtml,html);
@@ -440,7 +440,7 @@ test('approved job survives logout and reapproval resumes the same pinned deploy
   const csrf2=csrfFrom(await (await h.request('/',{cookie:second.sessionCookie})).text());
   await h.request('/account',{method:'POST',cookie:second.sessionCookie,body:form({csrf:csrf2,accountId})});
   const history=await (await h.request('/history',{cookie:second.sessionCookie})).text();
-  assert.match(history,/Willow Studio/);assert.match(history,/Review and reapprove/);
+  assert.match(history,/Willow Studio/);assert.match(history,/Review and continue/);
   const restored=await h.request('/restore',{method:'POST',cookie:second.sessionCookie,body:form({csrf:csrf2,id})});
   assert.equal(restored.status,303);
   const newId=new URL(origin+restored.headers.get('location')).searchParams.get('id');
@@ -537,7 +537,7 @@ test("AI drafting is invisible until operator configures optional model binding"
   await h.request("/account",{method:"POST",cookie:sessionCookie,body:form({csrf,accountId})});
   const page=await (await h.request("/",{cookie:sessionCookie})).text();
   assert(!page.includes("Draft my website copy"));
-  assert.match(page,/Generate website preview/);
+  assert.match(page,/Preview my website/);
   const disabled=await h.request("/draft",{method:"POST",cookie:sessionCookie,body:form({
     csrf,name:"Willow Studio",description:"Photography services for local families and community events."
   })});

@@ -250,21 +250,21 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
 export function renderCurrentSitesSection(inventory, {escape}) {
   if (!inventory || inventory.status === 'unavailable') {
     const code = inventory?.code ? ' (' + escape(inventory.code) + ')' : '';
-    return '<section><h2>Current managed sites</h2>' +
-      '<p class="muted">Could not refresh provider inventory right now' + code +
-      '. Launch history above is unchanged.</p></section>';
+    return '<section><h2>Sites we found in your accounts</h2>' +
+      '<p class="muted">Could not refresh that list right now' + code +
+      '. Your launches above are unchanged.</p></section>';
   }
   const sites = inventory.sites || [];
   const body = !sites.length
-    ? '<p>No managed Launch &amp; Own sites found on this Cloudflare Pages page.</p>'
+    ? '<p>No Launch &amp; Own sites showed up in this Cloudflare page.</p>'
     : sites.map(site => renderCurrentSite(site, escape)).join('');
   const pager = inventory.nextPage
     ? '<p><a href="/toolkit?page=' + encodeURIComponent(String(inventory.nextPage)) +
-      '">Next provider page</a></p>'
+      '">Show more sites</a></p>'
     : '';
-  return '<section><h2>Current managed sites</h2>' +
-    '<p>Read-only discovery from your connected GitHub and Cloudflare account. ' +
-    'Public HTML is <strong>not</strong> re-verified here; treat dashboard and GitHub links as ownership evidence only.</p>' +
+  return '<section><h2>Sites we found in your accounts</h2>' +
+    '<p>These links come from your connected GitHub and Cloudflare accounts. ' +
+    'This list does not re-check the public website content. Use it to open the places you own.</p>' +
     body + pager + '</section>';
 }
 
@@ -273,47 +273,47 @@ function renderCurrentSite(site, escape) {
     ? site.repositoryName.slice(4)
     : site.repositoryName;
   const repo = site.repositoryUrl
-    ? '<p>Private code: <a href="' + escape(site.repositoryUrl) +
-      '" rel="noopener">Open GitHub repository</a></p>'
+    ? '<p>Private files: <a href="' + escape(site.repositoryUrl) +
+      '" rel="noopener">Open on GitHub</a></p>'
     : '';
   const pages = site.pagesProjectDashboardUrl
-    ? '<p>Pages project: <a href="' + escape(site.pagesProjectDashboardUrl) +
-      '" rel="noopener">Open Cloudflare dashboard</a></p>'
+    ? '<p>Hosting project: <a href="' + escape(site.pagesProjectDashboardUrl) +
+      '" rel="noopener">Open in Cloudflare</a></p>'
     : '';
   const sha = site.baseCommitSha
-    ? '<p>Current GitHub <code>main</code>: <code>' + escape(site.baseCommitSha) + '</code></p>'
+    ? '<p>Current private-files version: <code>' + escape(site.baseCommitSha) + '</code></p>'
     : '';
   const observed = site.productionCommitSha
-    ? '<p class="muted">Observed Pages production commit (unverified public HTML): <code>' +
+    ? '<p class="muted">Version Cloudflare last reported for production (not re-checked here): <code>' +
       escape(site.productionCommitSha) + '</code></p>'
-    : '<p class="muted">No successful production deployment observed in project metadata.</p>';
+    : '<p class="muted">No finished production publish showed up in project details.</p>';
   const source = site.sourceTicket
     ? '<p><a href="/toolkit/source?ticket=' + encodeURIComponent(site.sourceTicket) +
-      '">Inspect current GitHub source fingerprint</a></p>'
+      '">Check the private homepage fingerprint</a></p>'
     : '';
   return '<article><h3>' + escape(name || site.siteId) + '</h3>' +
-    '<p class="pill">Publication unverified</p>' +
-    '<p>Historical continuity with launch history is not proven for this discovery.</p>' +
+    '<p class="pill">Live content not re-checked here</p>' +
+    '<p>This find is separate from your launch list above. Matching them is not guaranteed.</p>' +
     repo + pages + sha + observed + source + '</article>';
 }
 
 export function renderCurrentSourcePage(inspection, {view, escape}) {
   if (!inspection || inspection.status !== 'ok') {
     const code = inspection?.code ? ' (' + escape(inspection.code) + ')' : '';
-    return view('Current GitHub source',
-      '<p>That source inspection is unavailable or expired' + code + '.</p>' +
+    return view('Private homepage check',
+      '<p>That check is unavailable or expired' + code + '.</p>' +
       '<p><a href="/toolkit">Back to toolkit</a></p>');
   }
-  return view('Current GitHub source',
-    '<p>Server-verified GitHub <code>public/index.html</code> fingerprint for a sealed ownership reference. ' +
-    'This is <strong>not</strong> a live public website check and does not unlock editing.</p>' +
-    '<p class="pill">editMode: ' + escape(inspection.editMode) + '</p>' +
-    '<p>Site selector: <code>' + escape(inspection.siteId) + '</code></p>' +
-    '<p>GitHub <code>main</code>: <code>' + escape(inspection.baseCommitSha) + '</code></p>' +
-    '<p>Homepage SHA-256: <code>' + escape(inspection.homepageHtmlSha256) + '</code></p>' +
-    '<p>Git blob SHA: <code>' + escape(inspection.homepageGitBlobSha) + '</code></p>' +
-    '<p class="muted">publicationVerified=' + escape(String(inspection.publicationVerified)) +
-    ' · historicalContinuityVerified=' +
+  return view('Private homepage check',
+    '<p>We read the homepage file from your private GitHub folder and recorded a fingerprint. ' +
+    'This is not a check of the public website, and it does not unlock editing.</p>' +
+    '<p class="pill">Editor mode: ' + escape(inspection.editMode) + '</p>' +
+    '<p>Site id: <code>' + escape(inspection.siteId) + '</code></p>' +
+    '<p>Private-files version: <code>' + escape(inspection.baseCommitSha) + '</code></p>' +
+    '<p>Homepage fingerprint: <code>' + escape(inspection.homepageHtmlSha256) + '</code></p>' +
+    '<p>Git file id: <code>' + escape(inspection.homepageGitBlobSha) + '</code></p>' +
+    '<p class="muted">Public site re-checked: ' + escape(String(inspection.publicationVerified)) +
+    ' · Matched to a launch: ' +
     escape(String(inspection.historicalContinuityVerified)) + '</p>' +
     '<p><a href="/toolkit">Back to toolkit</a></p>');
 }

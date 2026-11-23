@@ -95,7 +95,7 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
   }
   async function editor(env,current,id) {
     const item=await requireOwned(env,current,id);
-    if(!item)return fail('Connect both accounts and open an owned, verified live one-page website from launch history.',404);
+    if(!item)return fail('Connect both accounts and open a live one-page website you own from your launches.',404);
     const s=item.site;
     const themes=['ocean','forest','sunset','graphite'];
     const fields=[
@@ -106,10 +106,10 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       '<label for="theme">Theme</label><select id="theme" name="theme">'+themes.map(x=>'<option value="'+x+'"'+(x===s.theme?' selected':'')+'>'+escape(x)+'</option>').join('')+'</select>',
       '<label for="contactEmail">Contact email (optional)</label><input id="contactEmail" type="email" name="contactEmail" maxlength="254" value="'+escape(s.contactEmail)+'">'
     ].join('');
-    return view('Edit '+s.name,'<p>Starting from your original approved website copy. If you have edited GitHub since launch, review your changes carefully. This editor never writes directly to your live website.</p>'+
-      '<p><strong>Private repository:</strong> '+escape('esp-'+item.job.site_slug)+'</p>'+
+    return view('Edit '+s.name,'<p>You are editing from the copy that was approved at launch. If you changed files on GitHub since then, read the preview carefully. Saving here never publishes straight to the live site.</p>'+
+      '<p><strong>Private files folder:</strong> '+escape('esp-'+item.job.site_slug)+'</p>'+
       button('/site-update-preview','Preview website changes',current.csrf,fields)+
-      '<p><a href="/history">Back to launch history</a></p>');
+      '<p><a href="/history">Back to your launches</a></p>');
   }
   async function prepare(request,env,current) {
     await limitAttempts(request,env);
@@ -138,9 +138,9 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     return view('Review your update',
       '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
       '<p><a href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener"><strong>See exactly how it will look</strong></a></p>'+
-      '<p>Approval creates a GitHub branch and pull request. When you are ready to publish, open the pull request and click <strong>Merge</strong>. Launch &amp; Own then checks the public site.</p>'+
-      '<details><summary>Reviewed revision and content</summary><p>GitHub base <code>'+escape(ticket.baseCommitSha)+
-      '</code></p><p>Exact preview SHA-256 <code>'+escape(ticket.approvedHtmlSha256)+'</code></p></details>'+
+      '<p>If you approve, we open a change request on GitHub. Nothing goes live until you open that request and click <strong>Merge</strong>. After you merge, Launch &amp; Own checks the public site.</p>'+
+      '<details><summary>Technical details</summary><p>Starting version: <code>'+escape(ticket.baseCommitSha)+
+      '</code></p><p>Exact preview code: <code>'+escape(ticket.approvedHtmlSha256)+'</code></p></details>'+
       button('/site-update-approve','Approve this update',current.csrf,
         '<input type="hidden" name="ticket" value="'+escape(raw)+'">')+
       '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p>');
@@ -166,8 +166,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       return fail('GitHub could not prepare the approved PR. Confirm the GitHub App has Pull requests: write permission and try a fresh preview. No merge or publication was performed.',409);
     }
     if(proposal.status==='already-current')return view('No changes needed',
-      '<p>The approved HTML already matches GitHub main. No branch or PR was created. Check your website or edit again.</p>'+
-      '<p><a href="/history">Back to launch history</a></p>');
+      '<p>The page you approved already matches what is in your private files. No change request was created. Check your live site or edit again.</p>'+
+      '<p><a href="/history">Back to your launches</a></p>');
     const receipt=await encodeTicket(env,'status',current,{jobId:item.job.id,repositoryId:item.job.repository_id,
       baseCommitSha:ticket.baseCommitSha,approvedHtmlSha256:ticket.approvedHtmlSha256,number:proposal.number});
     return new Response(null,{status:303,headers:{

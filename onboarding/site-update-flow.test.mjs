@@ -36,7 +36,7 @@ test('only a verified live one-page site offers editing; no provider write on op
   await approvePreview(h,tenant.cookie,tenant.csrf,unfinished);
   await post(h,'/verify',tenant.cookie,{csrf:tenant.csrf,id:unfinished});
   const history=await (await h.request('/history',{cookie:tenant.cookie})).text();
-  assert.match(history,/Edit this website \(reviewable GitHub PR\)/);
+  assert.match(history,/Update this website/);
   const editor=await h.request('/site-update?id='+unfinished,{cookie:tenant.cookie});
   assert.equal(editor.status,200);
   assert.match(await editor.text(),/Original|welcoming place/);
@@ -71,14 +71,14 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   let status=await h.request(statusPath,{cookie:tenant.cookie});
   assert.equal(status.status,200);
   let statusHtml=await status.text();
-  assert.match(statusHtml,/Open update to publish/);
+  assert.match(statusHtml,/Open the change to publish/);
   assert.match(statusHtml,/Publish in GitHub/);
   h.resourceState.updatePr={...h.resourceState.updatePr,state:'closed'};
   status=await h.request(statusPath,{cookie:tenant.cookie});
   assert.equal(status.status,200);
   const closedHtml=await status.text();
   assert.match(closedHtml,/Start a fresh edit/);
-  assert.doesNotMatch(closedHtml,/Open update to publish|href="https:\/\/github\.com/);
+  assert.doesNotMatch(closedHtml,/Open the change to publish|href="https:\/\/github\.com/);
   h.resourceState.updatePr={...h.resourceState.updatePr,state:'closed',
     merged_at:'2026-11-22T19:00:00Z',merge_commit_sha:UPDATE_COMMIT};
   status=await h.request(statusPath,{cookie:tenant.cookie});
@@ -89,12 +89,12 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   h.resourceState.publicHtml=h.resourceState.updateHtml;
   status=await h.request(statusPath,{cookie:tenant.cookie});
   const html=await status.text();
-  assert.match(html,/Verified live/);
+  assert.match(html,/Live and checked/);
   assert.match(html,/esp-willow-studio-site.pages.dev/);
   h.resourceState.pages.id='replacement-with-the-same-source';
   status=await h.request(statusPath,{cookie:tenant.cookie});
   assert.equal(status.status,400);
-  assert.doesNotMatch(await status.text(),/Verified live/);
+  assert.doesNotMatch(await status.text(),/Live and checked/);
  }finally{globalThis.fetch=originalFetch}
 });
 
@@ -237,7 +237,7 @@ test('ZIP-imported website never shows a one-page editor link or accepts a manua
   assert.equal(history.status,200);
   const html=await history.text();
   assert.match(html,/Verified site:/);
-  assert.doesNotMatch(html,/Edit this website/);
+  assert.doesNotMatch(html,/Update this website/);
   const editor=await h.request('/site-update?id='+tenant.id,{cookie:tenant.cookie});
   assert.equal(editor.status,404);
   assert.equal(h.resourceState.updateBranch,null);
@@ -258,7 +258,7 @@ test('non-editable generated site variants never show an update link',async()=>{
      .run(JSON.stringify(plan),tenant.id);
    const history=await h.request('/history',{cookie:tenant.cookie});
    assert.equal(history.status,200);
-   assert.doesNotMatch(await history.text(),/Edit this website/);
+   assert.doesNotMatch(await history.text(),/Update this website/);
    const editor=await h.request('/site-update?id='+tenant.id,{cookie:tenant.cookie});
    assert.equal(editor.status,404);
    assert.equal(h.resourceState.updateBranch,null);

@@ -15,6 +15,10 @@
     "sync:claude-plugin": "node scripts/sync-claude-plugin.mjs",
     "qa:rehearse": "node scripts/beta-rehearsal.mjs",
     "qa:rehearse:recovery": "node scripts/worker-recovery/rehearse.mjs",
-    "qa:distribution": "node distribution/release-gates.mjs"
+    "qa:distribution": "node distribution/release-gates.mjs",
+    "visual:walkthrough": "node scripts/visual-walkthrough.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
   }
 }

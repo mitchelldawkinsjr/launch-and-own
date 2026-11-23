@@ -222,7 +222,7 @@ const N={
   site:{lane:"own",y:590,t:"Live website",s:"esp-<name>-site.pages.dev",
     d:"The public website on the customer's Cloudflare Pages project, serving the exact approved revision. Low or no cost on Cloudflare's free tier.",where:"https://esp-<name>-site.pages.dev"},
   prs:{lane:"own",y:810,t:"Update pull requests",s:"customer merges",
-    d:"Approved edits arrive on a feature branch as a pull request. Merging it triggers a new Pages build; nothing is merged automatically. Toolkit update status leads with Open update to publish.",where:"github.com/<customer>/esp-<name>/pulls"}
+    d:"Approved edits arrive on a feature branch as a change request. Merging it triggers a new Pages build; nothing is merged automatically. Toolkit update status leads with Open the change to publish.",where:"github.com/<customer>/esp-<name>/pulls"}
 };
 const E=[
   ["browser","home","opens site"],
@@ -287,16 +287,16 @@ const JOURNEY=[
 const POST=[
   {k:"Toolkit",title:"Open the website toolkit",nodes:["browser","toolkit","jobs","sessions"],edges:[["browser","toolkit","opens toolkit"],["toolkit","jobs","history cards"]],
    what:"After connecting both providers, GET /toolkit loads owned launch-job history (bounded display query), rechecks the session epoch, and labels each site with #84 capability states. History is not long-term inventory.",
-   sees:"Previously verified cards, capability details, Update this website when #30-eligible.",stores:"No provider writes; read-only D1 history fields."},
+   sees:"Live and checked cards, plain-language includes list, Update this website when #30-eligible.",stores:"No provider writes; read-only D1 history fields."},
   {k:"Inventory",title:"Discover current managed sites",nodes:["toolkit","inventory","cfapi","ghapi","sessions"],edges:[["toolkit","inventory","discover sites"],["inventory","cfapi","list Pages"],["inventory","ghapi","read repos"]],
    what:"The same page soft-loads one #39 provider inventory page using grants already refreshed by the history guard. Epoch is pinned; revoke during discovery returns reconnect without rendering captured history.",
-   sees:"Current managed sites with GitHub and Pages dashboard links; Publication unverified.",stores:"Nothing durable — discovery is live provider evidence only."},
+   sees:"Sites found in your accounts with GitHub and Cloudflare links; live content not re-checked here.",stores:"Nothing durable — discovery is live provider evidence only."},
   {k:"Inspect",title:"Inspect GitHub source fingerprint",nodes:["toolkit","tickets","sourceInspect","ghapi"],edges:[["toolkit","tickets","mint ticket"],["tickets","sourceInspect","open ticket"],["sourceInspect","ghapi","read index.html"]],
    what:"Inventory mints a 15-minute AES-GCM ticket for each discovered site. /toolkit/source re-reads public/index.html and shows SHA fingerprints plus editMode=approved_migration_required. Raw HTML stays out of the onboarding origin.",
-   sees:"Homepage SHA-256, Git blob SHA, and a clear non-editor message.",stores:"Only the short-lived sealed ticket until it expires."},
+   sees:"Homepage fingerprint, Git file id, and a clear non-editor message.",stores:"Only the short-lived sealed ticket until it expires."},
   {k:"Update",title:"Safe website update ladder",nodes:["browser","design","ghapi","prs","repo","verify","site"],edges:[["browser","design","edit site"],["design","ghapi","update branch"],["ghapi","prs","open PR"],["prs","repo","customer merges"],["verify","prs","check merge"],["verify","site","hash after merge"]],
-   what:"Eligible one-page sites use the #30 editor: exact preview → approve → feature branch PR. Status copy is Approve → Open update to publish → Checking → Live. Closed-without-merge retires Merge. Live requires merged SHA + public HTML digest.",
-   sees:"Open update to publish linking to their GitHub PR, then Verified live after merge.",stores:"Review/status tickets; no auto-merge."}
+   what:"Eligible one-page sites use the #30 editor: exact preview → approve → feature branch change request. Status copy is Approve → Open the change to publish → Checking → Live. Closed-without-merge retires Merge. Live requires merged SHA + public HTML digest.",
+   sees:"Open the change to publish linking to their GitHub request, then Live and checked after merge.",stores:"Review/status tickets; no auto-merge."}
 ];
 const ANYTIME=[
   {k:"Pipeline",title:"Automation pipeline runs a job",nodes:["jobs","runner","ghapi","cfapi","repo","build","verify","site"],edges:[["jobs","runner","lease job"],["runner","ghapi","create repo + commit"],["runner","cfapi","create Pages project"],["repo","build","source"],["build","site","publish"],["runner","verify","re-check"]],

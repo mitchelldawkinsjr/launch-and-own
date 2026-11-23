@@ -56,9 +56,9 @@ test('current sites HTML never invents a live website link', () => {
       sourceTicket: 'sealed-ticket-fixture'
     }]
   }, {escape: s => String(s)});
-  assert.match(html, /Publication unverified/);
-  assert.match(html, /Open GitHub repository/);
-  assert.match(html, /Open Cloudflare dashboard/);
+  assert.match(html, /Live content not re-checked here/);
+  assert.match(html, /Open on GitHub/);
+  assert.match(html, /Open in Cloudflare/);
   assert.match(html, /\/toolkit\/source\?ticket=sealed-ticket-fixture/);
   assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
   assert.doesNotMatch(html, /Verified live/i);
@@ -131,10 +131,10 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   const page = await h.request('/toolkit', {cookie: tenant.cookie});
   assert.equal(page.status, 200);
   const html = await page.text();
-  assert.match(html, /Current managed sites/);
-  assert.match(html, /Publication unverified/);
-  assert.match(html, /Open GitHub repository/);
-  assert.match(html, /Open Cloudflare dashboard/);
+  assert.match(html, /Sites we found in your accounts/);
+  assert.match(html, /Live content not re-checked here/);
+  assert.match(html, /Open on GitHub/);
+  assert.match(html, /Open in Cloudflare/);
   assert.match(html, /\/toolkit\/source\?ticket=/);
   assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
   const writesAfter = h.calls.filter(c =>
@@ -156,7 +156,7 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   });
   assert.equal(source.status, 200);
   const sourceHtml = await source.text();
-  assert.match(sourceHtml, /Homepage SHA-256/);
+  assert.match(sourceHtml, /Homepage fingerprint/);
   assert.match(sourceHtml, /approved_migration_required/);
   assert.doesNotMatch(sourceHtml, /Willow Studio/);
   const row = h.sqlite.prepare(`SELECT id_hash AS hash, authorization_epoch, github_user_id,
@@ -182,13 +182,13 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   const beforeRefresh = refreshCount();
   const refreshed = await h.request('/toolkit', {cookie: tenant.cookie});
   assert.equal(refreshed.status, 200);
-  assert.match(await refreshed.text(), /Open GitHub repository/);
+  assert.match(await refreshed.text(), /Open on GitHub/);
   assert.equal(refreshCount(), beforeRefresh + 1);
 
   h.resourceState.invalidateSessionOnRepoRead = true;
   const revoked = await h.request('/toolkit', {cookie: tenant.cookie});
   assert.equal(revoked.status, 401);
-  assert.doesNotMatch(await revoked.text(), /Willow Studio|Open GitHub repository/);
+  assert.doesNotMatch(await revoked.text(), /Willow Studio|Open on GitHub/);
 });
 
 test('source inspection page never embeds raw homepage HTML', () => {
