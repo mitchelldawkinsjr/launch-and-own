@@ -11,7 +11,7 @@ import {encryptGrant,getFreshAccessToken} from './token-lifecycle.mjs';
 import {listOwnedReceipts,getOwnedReceipt,purgeExpiredReceipts} from './launch-receipts.mjs';
 import {privacyHtml,termsHtml} from './legal-pages.mjs';
 import {LOGO_PNG_BASE64} from './logo.mjs';
-import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
+import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,hasCurrentOwnerSession,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
@@ -234,10 +234,13 @@ async function home(env,current,notice){
 async function toolkit(env,current,request){
   if(!current?.cloudflare_account_id)
     return renderToolkitPage([],current,{view,escape});
-  await assertHistoryAccess(env,current);
+  const grants=await assertHistoryAccess(env,current);
   const cards=await loadToolkitCards(env,current,now());
   const page=Number(new URL(request.url).searchParams.get('page')||'1');
-  const inventory=await loadCurrentManagedSitesPage(env,current,{page,time:now()});
+  const inventory=await loadCurrentManagedSitesPage(env,current,{page,...grants});
+  if(['authorization_changed','github_reauthorization_required','cloudflare_reauthorization_required',
+    'provider_reauthorization_required'].includes(inventory.code)||!await hasCurrentOwnerSession(env,current,now()))
+    return fail('Reconnect your accounts to view your website toolkit.',401);
   return renderToolkitPage(cards,current,{view,escape},{
     currentInventoryHtml:renderCurrentSitesSection(inventory,{escape})
   });
@@ -245,9 +248,12 @@ async function toolkit(env,current,request){
 async function toolkitSource(env,current,request){
   if(!current?.cloudflare_account_id)
     return renderCurrentSourcePage({status:'unavailable',code:'verified_owner_required'},{view,escape});
-  await assertHistoryAccess(env,current);
+  const grants=await assertHistoryAccess(env,current);
   const ticket=new URL(request.url).searchParams.get('ticket');
-  const inspection=await inspectSealedManagedSource(env,current,ticket,{time:now()});
+  const inspection=await inspectSealedManagedSource(env,current,ticket,{...grants});
+  if(['authorization_changed','github_reauthorization_required','cloudflare_reauthorization_required',
+    'provider_reauthorization_required'].includes(inspection.code)||!await hasCurrentOwnerSession(env,current,now()))
+    return fail('Reconnect your accounts to view your website toolkit.',401);
   return renderCurrentSourcePage(inspection,{view,escape});
 }
 async function selectAccount(request,env,current){
@@ -364,6 +370,7 @@ async function assertHistoryAccess(env,current){
     githubAccessToken:githubToken,cloudflareAccessToken:cloudflareToken,expectedGitHubUserId:current.github_user_id,fetchFn
   });
   await checkSession();
+  return {githubAccessToken:githubToken,cloudflareAccessToken:cloudflareToken};
 }
 
 const launchIdField=id=>'<input type="hidden" name="id" value="'+escape(id)+'">';
