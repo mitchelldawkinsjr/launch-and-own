@@ -148,12 +148,20 @@ function harness({withJobs=true}={}){
       :new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});
+  if((url===pages||url.startsWith(pages+'?')) && (opts.method||'GET')==='GET'){
+    const listed=resourceState.pages
+      ?[{id:resourceState.pages.id,name:resourceState.pages.name}]:[];
+    return Response.json({success:true,result:listed,result_info:{
+      page:1,per_page:3,total_pages:listed.length?1:0,total_count:listed.length}});
+  }
   if(url===pages && opts.method==='POST'){
     if(resourceState.pagesError)return Response.json({success:false},{status:resourceState.pagesError});
     if(resourceState.failPagesOnce){resourceState.failPagesOnce=false;return Response.json({success:false},{status:503})}
     resourceState.pages={id:'pages-stable-101',name:'esp-willow-studio-site',
-     subdomain:'esp-willow-studio-site.pages.dev',production_branch:'main',
-     build_config:JSON.parse(opts.body).build_config,source:{type:'github',config:{owner:'tester',repo_name:'esp-willow-studio',repo_id:'101'}},
+     subdomain:'esp-willow-studio-site.pages.dev',production_branch:'main',uses_functions:false,
+     build_config:JSON.parse(opts.body).build_config,source:{type:'github',config:{
+       owner:'tester',owner_id:String(resourceState.githubUserId),repo_name:'esp-willow-studio',
+       repo_id:'101',production_deployments_enabled:true,preview_deployment_setting:'none'}},
      canonical_deployment:{id:'deploy-success',environment:'production',latest_stage:{name:'deploy',status:'success'},deployment_trigger:{metadata:{commit_hash:GENERATED_SHA}}}};
     return Response.json({success:true,result:resourceState.pages},{status:201});
   }
