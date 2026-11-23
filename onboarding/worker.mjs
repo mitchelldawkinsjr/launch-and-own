@@ -19,6 +19,7 @@ import {readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
 import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
+import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -222,8 +223,16 @@ async function home(env,current,notice){
   const next=ready?
     '<section><h2>Create a site</h2><p>Review your generated homepage before approving publication. Forms and custom domains remain a future beta milestone.</p>'+
     button('/preview','Generate website preview',current.csrf,siteFields)+'</section>':'';
-  const historyLink=ready?'<p><a href="/history">View previous approved launches</a></p>':'';
+  const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Launch history</a></p>':'';
   return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}<p>Cloudflare: ${connected?'Connected':'Not connected'}${current.cloudflare_account_id?' · Account selected':''}</p>${appInstalled&&!connected?'<p><a href="/connect/cloudflare">Connect Cloudflare</a></p>':''}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
+}
+
+async function toolkit(env,current){
+  if(!current?.cloudflare_account_id)
+    return renderToolkitPage([],current,{view,escape});
+  await assertHistoryAccess(env,current);
+  const cards=await loadToolkitCards(env,current,now());
+  return renderToolkitPage(cards,current,{view,escape});
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
@@ -597,6 +606,7 @@ export default {
         if(url.pathname==='/oauth/cloudflare/callback')return await cloudflareCallback(request,env,current);
         if(url.pathname==='/review')return await review(env,current,url.searchParams.get('id'));
         if(url.pathname==='/history')return await launchHistory(env,current);
+        if(url.pathname==='/toolkit')return await toolkit(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
         if(url.pathname==='/site-update')return await siteUpdates.editor(env,current,url.searchParams.get('id'));
