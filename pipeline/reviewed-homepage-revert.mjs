@@ -101,7 +101,7 @@ function onlyHomepageChanged(current,prior) {
     const before = prior.get(key);
     if (!before || item.path !== before.path ||
         item.mode !== before.mode || item.type !== before.type ||
-        (key!==PATH && item.sha !== before.sha))
+        (key!==PATH && key!=='public' && item.sha !== before.sha))
       fail('other_files_changed');
   }
   if (current.get(PATH).sha === prior.get(PATH).sha)
