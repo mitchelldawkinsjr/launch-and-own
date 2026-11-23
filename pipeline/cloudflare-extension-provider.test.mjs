@@ -50,7 +50,7 @@ function rig({writes = false, override = {}} = {}) {
   const provider = createCloudflareExtensionProvider({
     principal: owner(), cloudflareAccessToken: 'cf-secret-token',
     githubAccessToken: 'gh-secret-token', fetchFn,
-    allowOperatorApprovedWrites: writes
+    ...(writes ? {assertOperatorApprovedExecution: async () => true} : {})
   });
   return {calls, provider};
 }
