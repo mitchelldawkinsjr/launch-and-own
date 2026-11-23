@@ -8,6 +8,7 @@ import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
 
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
+const COMMIT = /^[a-f0-9]{40}$/i;
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const HOST = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -67,14 +68,15 @@ function checkedSite(raw, row, owner) {
       !OPAQUE.test(raw.pagesProjectId || '') ||
       !/^(esp-[a-z0-9]+(?:-[a-z0-9]+)*)-site$/.test(raw.pagesProjectName || '') ||
       raw.repositoryName + '-site' !== raw.pagesProjectName ||
-      raw.productionBranch !== 'main')
+      raw.productionBranch !== 'main' ||
+      (raw.expectedCommitSha !== undefined && !COMMIT.test(raw.expectedCommitSha)))
     deny('current_owned_site_required');
   return Object.freeze({
     jobId: raw.jobId, githubUserId: raw.githubUserId,
     githubLogin: raw.githubLogin, cloudflareAccountId: raw.cloudflareAccountId,
     repositoryId: raw.repositoryId, repositoryName: raw.repositoryName,
     pagesProjectId: raw.pagesProjectId, pagesProjectName: raw.pagesProjectName,
-    productionBranch: 'main'
+    productionBranch: 'main', expectedCommitSha: raw.expectedCommitSha
   });
 }
 
@@ -197,6 +199,15 @@ async function livePagesAndRepo(provider, site, fence) {
     deny('provider_read_fence_required');
   const project = await guarded(fence, () => provider.readPagesProject(site));
   const repo = await guarded(fence, () => provider.readGithubRepository(site));
+  // A current DB job revision is necessary but not sufficient: a site can be
+  // edited directly in GitHub between consent and provider execution.
+  if (site.expectedCommitSha) {
+    if (typeof provider.readGithubBranchHead !== 'function')
+      deny('provider_source_sha_fence_required');
+    const branch = await guarded(fence, () => provider.readGithubBranchHead(site));
+    if (branch?.commit?.sha !== site.expectedCommitSha)
+      deny('provider_source_sha_changed');
+  }
   if (repo?.id !== site.repositoryId || repo?.private !== true ||
       repo?.owner?.id !== site.githubUserId ||
       lower(repo?.owner?.login) !== lower(site.githubLogin) ||
