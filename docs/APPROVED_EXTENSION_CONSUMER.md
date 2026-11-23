@@ -2,6 +2,20 @@
 
 This is a **server-only execution contract**. It consumes Agent 1's separately stored customer domain, email and forms approval rows, not a new consent UI. It has no import-time provider requests and is not wired to a hosted Worker or applied migration.
 
+## Actual stored-row contract from merged #118
+
+Agent 1's additive migration is `onboarding/migrations/0005_option_approvals.sql`, creating `onboarding_option_approvals` (id, job_id, github_user_id, cloudflare_account_id, kind, approval_digest, payload_json, status, created_at, updated_at). **The only permitted status is `stored`**; the migration's SQL CHECK prohibits `approved`, `applying` and `applied`. This is intentionally a request-review table, not a provider mutation or work lease. Its hosted migration has NOT been applied.
+
+The real stored payload is the **entire review object** serialized with `JSON.stringify(review)`, not the flat requested fields. New isolated helpers:
+
+- `pipeline/stored-option-approval.mjs`: `validateStoredOptionApproval` recomputes and strictly compares the entire canonical review and digest; returns normalized fields with `status:'stored'`, `canWrite:false`, `requiresSeparateExecutionAuthorization:true`. It rejects legacy #118 email rows because their digest and payload omitted the actual forwarding destination; they cannot safely be repaired from user-provided data.
+- `onboarding/stored-option-approvals.mjs`: `readOwnedStoredOptionApproval` reads the actual 0005 table via D1, rechecks current authenticated GitHub/Cloudflare session, original live job, approved source commit and tenant-scoped immutable project/repository IDs. No provider or D1 write.
+- The existing `pipeline/approved-extension-consumer.mjs` is a **future executor behind a separate operator-granted approval and lease store**, not a direct consumer of `status:'stored'` rows. A trusted adapter must translate only an *operator-authorized* stored review into its internal `status:'approved'` record, retaining the original request JSON/digest/site identity in the execution lease. Do NOT allow browser/client code to fabricate that transition.
+
+**Required future additive execution store:** separate durable, atomic single-winner grant+CAS receipts pinned to the exact stored row ID, job ID, GitHub user, Cloudflare account, kind, digest, serialized payload SHA-256, project and current grant epoch; status authorized/applying/applied/needs_reconciliation and an independently reviewed Domain operator authorization. It must reject old grants if #118 upserts a row with a new ID. Execution progress cannot be written back to 0005 because its schema prohibits it. Do not create this grant from a stored review request or allow the owner to self-mint an operator approval in the browser. A future form grant must independently bind the real #89 cost/privacy approval row and retention/quotas.
+
+**Critical producer repair needed:** the original #118 email review neither hashes nor stores the mailbox. Update its existing prepare/confirm/store path to persist the canonical `buildEmailRoutingApprovalReview` object in **the same original `/site-options` UI**, showing the exact forwarding destination and new digest; do not add another consent screen. Previously stored email rows must be reconfirmed and overwritten. The current reader rejects them all.
+
 ## Required D1 integration
 
 File: pipeline/approved-extension-consumer.mjs. Export: consumeStoredToolkitApproval.
@@ -13,7 +27,7 @@ The only caller-controlled selector is an opaque approval ID. The backend suppli
 - assertCurrentAuthorization: verify current session, provider authorizations, account and site identity before and after external operations.
 - approvalStore.claimApproved / finish / fail: implement atomic single-winner compare-and-swap approved → applying → applied with an operator-reconciliation failure path. The claim MUST compare ID, job ID, GitHub user ID, account ID, kind, digest, full immutable payload JSON and approved status. A lost race may never write providers. Do not auto-retry a partial provider write after receipt or network failure.
 
-Expected row columns: id (UUID), job_id (UUID), github_user_id (integer), cloudflare_account_id (32 hexadecimal characters), kind (domain/email/forms), approval_digest (64 hexadecimal SHA-256), payload_json (serialized reviewed request), status (approved, applying, applied or an operator-reconciliation state). **These fields and state values must be reconciled with Agent 1's actual migration before any route is wired.** These approval rows are not launch-job/launch-approval rows. No hosted D1 migration apply is part of Agent 2's PR.
+The executor's current **internal** `approved/applying/applied` statuses are a *proposed separate execution-grant contract*, NOT 0005 statuses. **Never update `onboarding_option_approvals.status` to a non-`stored` value**, attempt to claim it as an execution lease or treat receipt storage as operator consent. No hosted D1 migration apply is part of Agent 2's PR.
 
 Payload contracts: domain contains hostname; email contains hostname and external mailbox; forms contains hostname, name and ownerEmail. Domain digest recomputation uses the existing buildDomainApprovalReview with domainConsent=true and exact GitHub user and selected Cloudflare account. **Important:** this existing planner does not hash mailbox values. Agent 1 MUST call the exported buildEmailRoutingApprovalReview helper for email rows, which hashes the exact reviewed hostname, mailbox, fixed contact@ alias, GitHub user ID, Cloudflare account and domain review digest. The email consumer recomputes that distinct email-only hash; the original domain planner digest is never accepted as an email approval. Forms recomputation uses planCustomer with forms=true and formsConsent=true and the existing formsReview digest. The module does not accept an arbitrary claimed digest as approval.
 
