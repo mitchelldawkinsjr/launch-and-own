@@ -130,6 +130,16 @@ test("approved updates accept a valid durable launch marker for the same slug",a
  assert.equal(result.status,"awaiting-customer-merge");
  assert.equal(h.state.currentHtml,oldHtml);
 });
+test("a replaced GitHub repository with the same slug/owner cannot receive an approved edit",async()=>{
+ const h=harness(),approved={...await approvedInput(),expectedRepositoryId:101};
+ h.state.repo.id=102;
+ await assert.rejects(proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn}),/repository identity changed/);
+ assert(h.history.every(x=>x.method==="GET"));
+ assert.equal(h.state.prsCreated,0);
+ h.state.repo.id=101;
+ const valid=await proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn});
+ assert.equal(valid.status,"awaiting-customer-merge");
+});
 test("unmanaged repositories and mismatched immutable GitHub owners fail closed",async()=>{
  for(const options of [{unmanaged:true},{otherOwner:true}]){
   const h=harness(options);

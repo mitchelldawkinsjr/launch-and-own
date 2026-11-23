@@ -100,7 +100,7 @@ This option is **disabled unless the backend operator configures** an approved C
 
 The reusable [safe website update module](docs/SAFE_WEBSITE_UPDATES.md) binds customer-reviewed HTML SHA-256 and an observed base commit to a managed GitHub repository and creates/reuses **only** a feature-branch pull request. The customer reviews and manually merges it; Cloudflare must then show the exact merged commit **and** approved public HTML.
 
-Authenticated one-page editing, exact previews, separately approved PR creation and post-merge verification have been implemented and CI-tested in [**draft PR #31**](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31). They are **not yet merged or deployed**. GitHub App `Pull requests: write` is now granted, but live acceptance must follow the first successful launch and a coordinated release window.
+Authenticated one-page editing, exact previews, separately approved PR creation and post-merge verification are implemented in onboarding (`/site-update*`; see [PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31) and [docs/SAFE_WEBSITE_UPDATES.md](docs/SAFE_WEBSITE_UPDATES.md)). GitHub App `Pull requests: write` is granted. Matrix access stays gated until an owner-live edit walkthrough on [#21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
 
 
 ## Operator onboarding prerequisites

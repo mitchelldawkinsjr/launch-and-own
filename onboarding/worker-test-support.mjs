@@ -43,7 +43,8 @@ function harness({withJobs=true}={}){
  const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',GH_APP_SLUG:'launch-and-own',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
  const calls=[];
  const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,failPagesOnce:false,
-  failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42};
+  failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42,
+  updateBranch:null,updateHtml:null,updatePr:null,updateFileWrites:0,denyPullRequests:false};
  const fetchFn=async(url,opts={})=>{
   calls.push({url,method:opts.method||'GET'});
   if(url==='https://github.com/login/oauth/access_token'){
@@ -90,11 +91,34 @@ function harness({withJobs=true}={}){
   }
   const root='https://api.github.com/repos/tester/esp-willow-studio';
   const pages='https://api.cloudflare.com/client/v4/accounts/'+accountId+'/pages/projects';
-  if(url===root && opts.method!=='POST')return resourceState.repo?Response.json(resourceState.repo):new Response('{}',{status:404});
+  if(url===root && opts.method!=='POST'){
+    if(resourceState.invalidateSessionOnRepoRead){
+      resourceState.invalidateSessionOnRepoRead=false;
+      sqlite.prepare('UPDATE onboarding_sessions SET authorization_epoch=authorization_epoch+1').run();
+    }
+    return resourceState.repo?Response.json(resourceState.repo):new Response('{}',{status:404});
+  }
   if(url==='https://api.github.com/user/repos' && opts.method==='POST'){
     resourceState.repo={id:101,owner:{login:'tester',id:resourceState.githubUserId},name:'esp-willow-studio',description:JSON.parse(opts.body).description,private:true,default_branch:'main'};
     return Response.json(resourceState.repo,{status:201});
   }
+  if(url.startsWith(root+'/branches/')&&decodeURIComponent(url.slice((root+'/branches/').length)).startsWith('launch-and-own/site-')){
+    const name=decodeURIComponent(url.slice((root+'/branches/').length));
+    return resourceState.updateBranch===name?Response.json({commit:{sha:resourceState.updateHtml?'f'.repeat(40):GENERATED_SHA}}):new Response('{}',{status:404});
+  }
+  if(url===root+'/git/refs'&&opts.method==='POST'){
+    resourceState.updateBranch=JSON.parse(opts.body).ref.replace(/^refs\/heads\//,'');
+    return Response.json({ref:'refs/heads/'+resourceState.updateBranch},{status:201});
+  }
+  if(url.startsWith(root+'/pulls?')&&opts.method==='GET')return Response.json(resourceState.updatePr?[resourceState.updatePr]:[]);
+  if(url===root+'/pulls'&&opts.method==='POST'){
+    if(resourceState.denyPullRequests)return new Response('{}',{status:403});
+    const payload=JSON.parse(opts.body);
+    resourceState.updatePr={number:55,state:'open',html_url:'https://github.com/tester/esp-willow-studio/pull/55',
+      head:{ref:payload.head,repo:{full_name:'tester/esp-willow-studio'}},base:{ref:'main'},merged_at:null,merge_commit_sha:null};
+    return Response.json(resourceState.updatePr,{status:201});
+  }
+  if(url===root+'/pulls/55')return resourceState.updatePr?Response.json(resourceState.updatePr):new Response('{}',{status:404});
   if(url===root+'/branches/main')return Response.json({commit:{
     sha:resourceState.headSha??(resourceState.homepage?GENERATED_SHA:BASE_SHA),
     commit:{tree:{sha:resourceState.homepage?GENERATED_TREE:BASE_TREE}}
@@ -107,11 +131,20 @@ function harness({withJobs=true}={}){
   }
   if(url.startsWith(root+'/contents/public/index.html')){
     if(opts.method==='PUT'){
-      resourceState.homepage=true;resourceState.homepageHtml=Buffer.from(JSON.parse(opts.body).content,'base64').toString('utf8');
+      const payload=JSON.parse(opts.body),html=Buffer.from(payload.content,'base64').toString('utf8');
+      if(payload.branch&&payload.branch!=='main'){
+        if(payload.branch!==resourceState.updateBranch)throw Error('Wrong update branch');
+        resourceState.updateHtml=html;resourceState.updateFileWrites++;
+        return Response.json({commit:{sha:'f'.repeat(40)}},{status:200});
+      }
+      resourceState.homepage=true;resourceState.homepageHtml=html;
       return Response.json({commit:{sha:GENERATED_SHA,tree:{sha:GENERATED_TREE}}},{status:201});
     }
-    return resourceState.homepage&&new URL(url).searchParams.get('ref')!==BASE_SHA
-      ?Response.json({type:'file',encoding:'base64',content:Buffer.from(resourceState.homepageHtml).toString('base64')})
+    const ref=new URL(url).searchParams.get('ref');
+    if(ref===resourceState.updateBranch&&resourceState.updateBranch)
+      return Response.json({type:'file',sha:'e'.repeat(40),encoding:'base64',content:Buffer.from(resourceState.updateHtml??resourceState.homepageHtml).toString('base64')});
+    return resourceState.homepage&&ref!==BASE_SHA
+      ?Response.json({type:'file',sha:'e'.repeat(40),encoding:'base64',content:Buffer.from(resourceState.homepageHtml).toString('base64')})
       :new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});

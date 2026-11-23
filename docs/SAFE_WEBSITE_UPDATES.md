@@ -38,7 +38,11 @@ const approved={
 const result=await proposeWebsiteUpdate(approved,{githubToken:authorizedToken});
 ```
 
-Caller responsibilities **not yet wired into the hosted onboarding UI**: verify the authenticated customer, fetch/display the current site and base Git commit, record the customer's CSRF-protected approval of the exact content/hash/branch, obtain a narrowly scoped GitHub user token, and present the resulting PR for review and merge. The helper's input flag alone is **not proof** of customer consent.
+The **customer-facing onboarding workflow is implemented in PR #31 / Issue #30** (pending review, CI and coordinated deployment) for verified *live one-page* launch jobs. From the authenticated `/history` page, a live site owner chooses **Edit this website**, reviews fields and a read-only GitHub `main` revision, opens the rendered HTML preview, and explicitly approves a reviewable PR. The server obtains the currently connected user's GitHub credential. The review receipt is AES-GCM-encrypted and bound to the active session, authorization epoch, user ID, Cloudflare account, exact commit and HTML digest for 15 minutes. Site owner/repository identity always comes from the owned launch record, not submitted form values.
+
+After PR creation the authenticated `/site-update-status` link checks the exact expected PR branch and, after manual merge, the canonical Cloudflare deployment's GitHub commit **and** public HTML SHA-256. Status receipts expire after 30 days and require a valid session with the same verified provider accounts; they contain no OAuth credentials. No PR creation means no publication. All provider writes remain behind explicit user approval and the owner-controlled GitHub PR permission. This workflow needs no new D1 migration or Worker binding.
+
+**Beta limitations:** only *live one-page sites with unexpired 30-day launch history* are editable, and the form starts with the original approved fields, not changes made independently in GitHub. Every proposal checks the current GitHub base and fails if it has advanced. Customers must manually merge and can re-check verification before the receipt expires. Four-page editing and durable post-retention site discovery need a future milestone.
 
 ## Security and recovery behavior
 
@@ -57,3 +61,11 @@ The GitHub App currently planned by the domain agent has Repository creation and
 This code uses **mock GitHub APIs in CI**, not a live customer repository. The first production update acceptance test must show: reviewed page and base SHA → separate approval → only a feature branch and PR created → manual merge → exact-commit Cloudflare verification. Until then the hosted frontend does not offer live website change requests.
 
 The module works without any paid AI service. AI-generated proposed copy must pass the same preview and approval checks; the AI model is not authorized to create branches, PRs or publish sites.
+
+## Hosted self-service route acceptance (Issue #30)
+
+1. With a verified owner-account session and an owned live one-page job, open `/history` and select **Edit this website**. Before any approval, only GitHub/Cloudflare read calls should occur.
+2. Submit a headline update, open the exact preview, check the immutable base commit and SHA-256, and approve a **GitHub PR**. Verify `main` has not changed and the PR only stages `public/index.html` on a feature branch.
+3. Explicitly review and merge that PR in GitHub. Refresh the signed-in status link until canonical Cloudflare production commit SHA and served HTML digest match. Pending commit/HTML means **not live**.
+4. Verify malformed/expired review tickets, other sessions/tenants, mismatched GitHub repositories, revoked grants, invalid CSRF, and stale `main` all fail without new provider writes. The Worker tests simulate the complete sequence but **are not a real customer acceptance test**.
+5. The Domain/OAuth agent must confirm the owner's GitHub App **Pull requests: write** consent before any live PR attempt. Coordinate Worker deployment with the #21 live pilot owner; never change DNS or public client visibility from this implementation.
