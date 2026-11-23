@@ -1,21 +1,17 @@
-/**
- * Owner-scoped post-launch toolkit projections (#87).
- * Read-only: uses existing launch-job ownership checks. Does not call
- * providers, invent analytics/metrics, or claim PR previews are enabled.
- */
-import {getOwnedJob, listOwnedJobs, isLaunchId} from './launch-jobs.mjs';
+/** Owner-scoped launch history and update status views (#87). */
+import {hasCurrentOwnerSession, isLaunchId, listOwnedJobs} from './launch-jobs.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
 
 const STATUS_COPY = Object.freeze({
   live: {
-    label: 'Live',
-    detail: 'Launch & Own verified the public site against the approved revision.'
+    label: 'Previously verified',
+    detail: 'Launch & Own checked the public website against the approved launch.'
   },
   pending_deployment: {
     label: 'Publishing',
-    detail: 'Your website is still deploying. It is not verified live yet.'
+    detail: 'Waiting for verification of the approved launch.'
   },
   queued: {
     label: 'Queued',
@@ -31,227 +27,131 @@ const STATUS_COPY = Object.freeze({
   }
 });
 
-/** Honest placeholders until #84/#85/#86 verify provider truth. */
-const CAPABILITY_PLACEHOLDERS = Object.freeze({
-  hosting: Object.freeze({
-    state: 'included_verified',
-    label: 'Hosting & HTTPS',
-    detail: 'Customer-owned Cloudflare Pages when the site is verified live.'
-  }),
-  analytics: Object.freeze({
-    state: 'manual_setup',
-    label: 'Visitor insights',
-    detail: 'Not configured here yet. Use Cloudflare Pages → Metrics → Web Analytics when ready (#85).'
-  }),
-  prPreviews: Object.freeze({
-    state: 'not_available',
-    label: 'Private update previews',
-    detail: 'GitHub PR previews stay off until you opt in; draft URLs can be public (#86).'
-  }),
-  updates: Object.freeze({
-    state: 'available_opt_in',
-    label: 'Safe website updates',
-    detail: 'Edit → exact preview → approve → merge one GitHub update → we verify live.'
-  })
-});
-
 export function websiteUrlForSlug(siteSlug) {
   if (typeof siteSlug !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(siteSlug))
     return null;
   return 'https://esp-' + siteSlug + '-site.pages.dev/';
 }
 
-export function githubRepoUrl(githubLogin, siteSlug) {
-  if (typeof githubLogin !== 'string' || typeof siteSlug !== 'string') return null;
-  if (!/^[A-Za-z0-9-]{1,39}$/.test(githubLogin) ||
-      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(siteSlug))
-    return null;
-  return 'https://github.com/' + githubLogin + '/esp-' + siteSlug;
-}
+const UPDATE_STEPS = [
+  {id: 'approved', title: 'Update approved', hint: 'Exact preview saved.'},
+  {id: 'merge', title: 'Publish in GitHub', hint: 'Open the pull request and click Merge to publish.'},
+  {id: 'publishing', title: 'Checking your live site', hint: 'Waiting for the public site to match the approved change.'},
+  {id: 'live', title: 'Live', hint: 'Public site matches the approved update.'}
+];
 
-/**
- * Plain-language ladder for post-approval update status (non-technical).
- * @param {{prStatus: string, verifyStatus?: string|null}} input
- */
 export function updatePublicationLadder({prStatus, verifyStatus = null}) {
-  const steps = [
-    Object.freeze({id: 'approved', title: 'Update approved', hint: 'Exact preview saved.'}),
-    Object.freeze({
-      id: 'merge',
-      title: 'Publish in GitHub',
-      hint: 'Open the update link and click Merge to put changes on your live site.'
-    }),
-    Object.freeze({
-      id: 'publishing',
-      title: 'Checking your live site',
-      hint: 'Cloudflare is publishing. Refresh until we confirm the exact change.'
-    }),
-    Object.freeze({
-      id: 'live',
-      title: 'Live',
-      hint: 'Public site matches the approved update.'
-    })
-  ];
-  let current = 'merge';
-  if (prStatus === 'awaiting-customer-merge' || prStatus === 'open')
-    current = 'merge';
-  else if (prStatus === 'closed-unmerged')
-    current = 'merge';
-  else if (prStatus === 'merged' && verifyStatus === 'live')
-    current = 'live';
-  else if (prStatus === 'merged')
-    current = 'publishing';
-  return Object.freeze({
+  if (prStatus === 'closed-unmerged') return {current: 'closed', steps: [], primaryAction: null};
+  if (!['awaiting-customer-merge', 'open', 'merged'].includes(prStatus))
+    return {current: 'unavailable', steps: [], primaryAction: null};
+  const current = prStatus === 'merged' ? (verifyStatus === 'live' ? 'live' : 'publishing') : 'merge';
+  const actions = {
+    merge: {label: 'Open update to publish', detail: 'Click Merge in GitHub when you are ready.'},
+    publishing: {label: 'Check again', detail: 'Publishing usually finishes in a few minutes.'},
+    live: {label: 'View live website', detail: 'Your approved update is verified on the public site.'}
+  };
+  return {
     current,
-    steps: Object.freeze(steps.map(step => Object.freeze({
-      ...step,
-      active: step.id === current
-    }))),
-    primaryAction: current === 'merge'
-      ? Object.freeze({
-        label: 'Open update to publish',
-        detail: 'GitHub shows your change. Click Merge when you are ready.'
-      })
-      : current === 'publishing'
-        ? Object.freeze({
-          label: 'Check again',
-          detail: 'Publishing usually finishes in a few minutes.'
-        })
-        : Object.freeze({
-          label: 'View live website',
-          detail: 'Your approved update is verified on the public site.'
-        })
-  });
+    steps: UPDATE_STEPS.map(step => ({...step, active: step.id === current})),
+    primaryAction: actions[current]
+  };
 }
 
 export function projectToolkitCard(job, {canEdit = false} = {}) {
   if (!job || !isLaunchId(job.id)) return null;
-  const display = job.display_status || job.status;
-  const copy = STATUS_COPY[display] || {
-    label: String(display || 'Unknown'),
-    detail: 'Status could not be classified; do not treat this as live.'
+  const status = job.display_status || job.status;
+  const time = new Date(job.updated_at * 1000);
+  const verified = status === 'live' && typeof job.expected_commit_sha === 'string' &&
+    SHA.test(job.expected_commit_sha) && Number.isSafeInteger(job.updated_at) &&
+    job.updated_at > 0 && Number.isFinite(time.valueOf());
+  let copy = Object.hasOwn(STATUS_COPY, status) ? STATUS_COPY[status] : {
+    label: 'Status unavailable', detail: 'Open launch history for the latest recorded result.'
   };
-  const live = display === 'live';
-  const website = websiteUrlForSlug(job.site_slug);
-  const repo = githubRepoUrl(job.github_login, job.site_slug);
-  const commit = SHA.test(job.expected_commit_sha || '')
-    ? String(job.expected_commit_sha).toLowerCase()
-    : null;
-  const digest = DIGEST.test(job.approval_digest || '')
-    ? String(job.approval_digest).toLowerCase()
-    : null;
-  return Object.freeze({
-    id: job.id,
+  if (status === 'live' && !verified)
+    copy = {label: 'Verification details unavailable', detail: 'Open launch history for the recorded result.'};
+  const editable = verified && canEdit;
+  return {
     name: job.customer_name,
-    status: display,
     statusLabel: copy.label,
     statusDetail: copy.detail,
-    websiteUrl: live ? website : null,
-    githubRepoUrl: repo,
-    pagesProjectId: typeof job.pages_project_id === 'string' ? job.pages_project_id : null,
-    productionCommitSha: live ? commit : null,
-    approvedHtmlSha256: digest,
+    recordedWebsite: verified ? websiteUrlForSlug(job.site_slug) : null,
+    verifiedCommitSha: verified ? job.expected_commit_sha.toLowerCase() : null,
+    verifiedAt: verified ? time.toISOString() : null,
+    approvalFingerprint: typeof job.approval_digest === 'string' && DIGEST.test(job.approval_digest)
+      ? job.approval_digest.toLowerCase() : null,
     errorCode: typeof job.error_code === 'string' ? job.error_code : null,
-    canEdit: Boolean(canEdit) && live,
-    editPath: Boolean(canEdit) && live ? '/site-update?id=' + encodeURIComponent(job.id) : null,
-    capabilities: CAPABILITY_PLACEHOLDERS
-  });
+    editPath: editable ? '/site-update?id=' + encodeURIComponent(job.id) : null
+  };
 }
 
 export async function loadToolkitCards(env, session, time) {
-  const summaries = await listOwnedJobs(env, session, time);
-  const cards = [];
-  for (const summary of summaries) {
-    const job = await getOwnedJob(env, session, summary.id, time);
-    if (!job) continue;
-    const card = projectToolkitCard(job, {canEdit: Number(summary.can_edit) === 1});
-    if (card) cards.push(card);
-  }
-  return Object.freeze(cards);
+  const rows = await listOwnedJobs(env, session, time);
+  const cards = rows.map(job => projectToolkitCard(job, {canEdit: Number(job.can_edit) === 1})).filter(Boolean);
+  if (!await hasCurrentOwnerSession(env, session, Math.floor(Date.now() / 1000)))
+    throw Error('Account authorization changed');
+  return cards;
 }
 
-/**
- * @param {object} ui {view, escape, button?}
- */
-export function renderToolkitPage(cards, current, ui) {
-  const {view, escape} = ui;
+export function renderToolkitPage(cards, current, {view, escape}) {
   if (!current?.cloudflare_account_id)
     return view('Your website toolkit',
       '<p>Connect GitHub and choose your Cloudflare account to see your sites.</p>' +
       '<p><a href="/">Back to setup</a></p>');
-  const body = !cards.length
-    ? '<p>No websites in your current launch history yet. Create or upload a site first.</p>'
-    : cards.map(card => renderCard(card, escape)).join('');
+  const body = cards.length
+    ? cards.map(card => renderCard(card, escape)).join('')
+    : '<p>No websites in your current launch history yet. Create or upload a site first.</p>';
   return view('Your website toolkit',
-    '<p>A simple view of sites you own in Launch &amp; Own. Status comes from verified launch records — not guesses from chat.</p>' +
-    body +
-    '<p><a href="/history">Launch history</a> · <a href="/">Back to setup</a></p>');
+    '<p>Launch history is available for 30 days. Verification details reflect the recorded launch.</p>' +
+    body + '<p><a href="/history">Launch history</a> · <a href="/">Back to setup</a></p>');
 }
 
 function renderCard(card, escape) {
-  const live = card.websiteUrl
-    ? '<p><a href="' + escape(card.websiteUrl) + '">' + escape(card.websiteUrl) + '</a></p>'
-    : '';
-  const repo = card.githubRepoUrl
-    ? '<p>Private code: <a href="' + escape(card.githubRepoUrl) + '" rel="noopener">Open GitHub repository</a></p>'
-    : '';
-  const commit = card.productionCommitSha
-    ? '<p>Verified revision: <code>' + escape(card.productionCommitSha) + '</code></p>'
-    : '';
-  const digest = card.approvedHtmlSha256
-    ? '<p>Approved content fingerprint: <code>' + escape(card.approvedHtmlSha256.slice(0, 12)) + '…</code></p>'
-    : '';
-  const err = card.errorCode
-    ? '<p>Last result code: <code>' + escape(card.errorCode) + '</code></p>'
-    : '';
+  const website = card.recordedWebsite
+    ? '<p>Website address at verification <code>' + escape(card.recordedWebsite) + '</code></p>' : '';
+  const verification = card.verifiedAt
+    ? '<p>Last verified at <time datetime="' + escape(card.verifiedAt) + '">' + escape(card.verifiedAt.slice(0, 10)) +
+      ' ' + escape(card.verifiedAt.slice(11, 16)) + ' UTC</time></p><p>Verified GitHub revision <code>' +
+      escape(card.verifiedCommitSha) + '</code></p>' : '';
+  const digest = card.approvalFingerprint
+    ? '<p>Approval fingerprint <code>' + escape(card.approvalFingerprint.slice(0, 12)) + '…</code></p>' : '';
+  const error = card.errorCode
+    ? '<p>Last result code <code>' + escape(card.errorCode) + '</code></p>' : '';
   const edit = card.editPath
-    ? '<p><a href="' + escape(card.editPath) + '">Update this website</a></p>'
-    : '';
-  const caps = Object.values(card.capabilities).map(cap =>
-    '<li><strong>' + escape(cap.label) + '</strong> (' + escape(cap.state) + '): ' +
-    escape(cap.detail) + '</li>'
-  ).join('');
-  return '<section><h2>' + escape(card.name) + '</h2>' +
-    '<p class="pill">' + escape(card.statusLabel) + '</p>' +
-    '<p>' + escape(card.statusDetail) + '</p>' +
-    live + repo + commit + digest + err + edit +
-    '<details><summary>Toolkit capabilities</summary><ul>' + caps + '</ul></details>' +
-    '</section>';
+    ? '<p><a href="' + escape(card.editPath) + '">Update this website</a></p>' : '';
+  return '<section><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' +
+    '<p>' + escape(card.statusDetail) + '</p>' + website + verification + digest + error + edit +
+    '<details><summary>Toolkit capabilities</summary><ul>' +
+    '<li>Website editor · ' + (card.editPath ? 'Available for this launch' : 'Unavailable for this launch') + '</li>' +
+    '<li>Visitor insights · Setup and traffic verification pending</li>' +
+    '<li>GitHub pull request previews · Protected preview setup pending</li>' +
+    '</ul></details></section>';
 }
 
-/**
- * HTML fragment for /site-update-status using the publication ladder.
- */
-export function renderUpdateStatusBody({
-  pr, verifyResult, approvedHtmlSha256, ticketRaw, escape
-}) {
+export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ticketRaw, jobId, escape}) {
   const ladder = updatePublicationLadder({
-    prStatus: pr.status,
-    verifyStatus: verifyResult?.status || null
+    prStatus: pr.status, verifyStatus: verifyResult?.status
   });
+  if (ladder.current === 'closed')
+    return '<p role="status">This pull request was closed before merging.</p>' +
+      (isLaunchId(jobId) ? '<p><a href="/site-update?id=' + encodeURIComponent(jobId) + '">Start a fresh edit</a></p>' : '');
+  if (ladder.current === 'unavailable') return '<p>Update status is unavailable.</p>';
+
   const steps = ladder.steps.map(step =>
     '<li' + (step.active ? '><strong>' : '>') + escape(step.title) +
-    (step.active ? '</strong>' : '') +
-    ' — ' + escape(step.hint) + '</li>'
+    (step.active ? '</strong>' : '') + ' — ' + escape(step.hint) + '</li>'
   ).join('');
-  const mergeCta = pr.pullRequest && ladder.current === 'merge'
-    ? '<p><a class="btn-like" href="' + escape(pr.pullRequest) +
-      '" rel="noopener"><strong>' + escape(ladder.primaryAction.label) +
-      '</strong></a></p><p>' + escape(ladder.primaryAction.detail) + '</p>'
-    : '';
-  const liveLink = verifyResult?.status === 'live' && verifyResult.website
+  const {label, detail} = ladder.primaryAction;
+  const mergeCta = ladder.current === 'merge' && pr.pullRequest
+    ? '<p><a class="btn-like" href="' + escape(pr.pullRequest) + '" rel="noopener"><strong>' +
+      escape(label) + '</strong></a></p><p>' + escape(detail) + '</p>' : '';
+  const live = ladder.current === 'live' && verifyResult.website
     ? '<p class="pill">Verified live</p><p><a href="' + escape(verifyResult.website) + '">' +
-      escape(verifyResult.website) + '</a></p>'
-    : ladder.current === 'publishing'
-      ? '<p>' + escape(ladder.primaryAction.detail) + '</p>'
-      : '';
-  const closed = pr.status === 'closed-unmerged'
-    ? '<p role="alert">That update was closed without merging. Start a fresh edit if you still want the change.</p>'
-    : '';
-  return '<ol>' + steps + '</ol>' + mergeCta + closed + liveLink +
-    '<p><a href="/site-update-status?ticket=' + encodeURIComponent(ticketRaw) +
-    '">Refresh status</a></p>' +
-    '<p class="muted">Approved content fingerprint: <code>' +
-    escape(String(approvedHtmlSha256 || '').slice(0, 16)) + '…</code></p>' +
+      escape(verifyResult.website) + '</a></p>' : '';
+  const checking = ladder.current === 'publishing' ? '<p>' + escape(detail) + '</p>' : '';
+  const refresh = '<p><a href="/site-update-status?ticket=' + encodeURIComponent(ticketRaw) + '">Refresh status</a></p>';
+  const revision = pr.mergedCommitSha ? '<p>Merged GitHub revision <code>' + escape(pr.mergedCommitSha) + '</code></p>' : '';
+  return '<ol>' + steps + '</ol>' + mergeCta + live + checking + refresh +
+    '<details><summary>Approved update</summary>' + revision + '<p>Exact preview SHA-256 <code>' +
+    escape(approvedHtmlSha256) + '</code></p></details>' +
     '<p><a href="/toolkit">Website toolkit</a> · <a href="/history">Launch history</a></p>';
 }

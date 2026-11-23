@@ -4,7 +4,7 @@ import {normalizeSite} from '../site/render-site.mjs';
 import {previewWebsiteUpdate,proposeWebsiteUpdate} from '../pipeline/propose-site-update.mjs';
 import {readManagedSiteBase,readApprovedUpdatePr} from '../pipeline/site-update-read.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
-import {getOwnedJob,isLaunchId,approvalSnapshot} from './launch-jobs.mjs';
+import {getOwnedJob,isLaunchId,approvalSnapshot,hasCurrentOwnerSession} from './launch-jobs.mjs';
 import {getFreshAccessToken} from './token-lifecycle.mjs';
 import {seal,unseal} from './crypto.mjs';
 import {renderUpdateStatusBody} from './post-launch-toolkit.mjs';
@@ -21,13 +21,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
   // Logging out or reselecting an account fences the rest of an in-flight PR attempt.
   function fencedFetch(env,current) {
     return async(url,options={})=>{
-      const active=await env.DB.prepare(`SELECT 1 FROM onboarding_sessions
-        WHERE id_hash=? AND authorization_epoch=? AND github_user_id=?
-          AND cloudflare_account_id=? AND github_token_ct IS NOT NULL
-          AND cloudflare_token_ct IS NOT NULL AND expires_at>?`)
-        .bind(current.hash,current.authorization_epoch,current.github_user_id,
-          current.cloudflare_account_id,now()).first();
-      if(!active)throw Error('Connected account authorization changed during update');
+      if(!await hasCurrentOwnerSession(env,current,now()))
+        throw Error('Connected account authorization changed during update');
       return await fetch(url,{...options,signal:options.signal??AbortSignal.timeout(8000)});
     };
   }
@@ -143,8 +138,9 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     return view('Review your update',
       '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
       '<p><a href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener"><strong>See exactly how it will look</strong></a></p>'+
-      '<p>Next: approve here, then open one GitHub link and click <strong>Merge</strong> to publish. Your live site does not change until you merge.</p>'+
-      '<p class="muted">Checked revision <code>'+escape(ticket.baseCommitSha.slice(0,12))+'…</code> · fingerprint <code>'+escape(ticket.approvedHtmlSha256.slice(0,12))+'…</code></p>'+
+      '<p>Approval creates a GitHub branch and pull request. When you are ready to publish, open the pull request and click <strong>Merge</strong>. Launch &amp; Own then checks the public site.</p>'+
+      '<details><summary>Reviewed revision and content</summary><p>GitHub base <code>'+escape(ticket.baseCommitSha)+
+      '</code></p><p>Exact preview SHA-256 <code>'+escape(ticket.approvedHtmlSha256)+'</code></p></details>'+
       button('/site-update-approve','Approve this update',current.csrf,
         '<input type="hidden" name="ticket" value="'+escape(raw)+'">')+
       '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p>');
@@ -195,11 +191,13 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       result=await verifyWebsite(inputFor(item.job,item.site),{cloudflareToken,fetchFn,
         expectedCommitSha:pr.mergedCommitSha,expectedHtmlSha256:receipt.approvedHtmlSha256});
     }
+    if(!await hasCurrentOwnerSession(env,current,now()))
+      return fail('Your connected accounts changed. Reconnect to check this update.',401);
     return view('Update status',
       '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
       renderUpdateStatusBody({
         pr, verifyResult: result, approvedHtmlSha256: receipt.approvedHtmlSha256,
-        ticketRaw: raw, escape
+        ticketRaw: raw, jobId: item.job.id, escape
       }));
   }
   return {editor,prepare,review,html,approve,status};
