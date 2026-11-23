@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {verifyExistingPrPreview} from './pages-pr-preview.mjs';
 
-const sha='a'.repeat(40), otherSha='b'.repeat(40);
+const sha='a'.repeat(40), baseSha='d'.repeat(40), otherSha='b'.repeat(40);
 const html='<!doctype html><html><body>Exactly approved</body></html>';
 const htmlDigest=createHash('sha256').update(html).digest('hex');
 const branch='launch-and-own/site-'+'c'.repeat(20);
@@ -16,7 +16,7 @@ const site={githubOwner:'tester',githubUserId:42,githubRepositoryId:101,
   pagesProjectName:projectName,productionBranch:'main'};
 const consent={explicitlyApproved:true,publicExposureAcknowledged:true,
   githubUserId:42,githubRepositoryId:101,cloudflareAccountId,pagesProjectId:'pages-p-1',
-  prNumber:55,approvedHeadSha:sha,approvedHtmlSha256:htmlDigest,
+  prNumber:55,approvedHeadSha:sha,approvedBaseSha:baseSha,approvedHtmlSha256:htmlDigest,
   expiresAt:Math.floor(Date.now()/1000)+3600};
 const input={site,consent,prNumber:55,deploymentId};
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
@@ -25,13 +25,13 @@ function harness(){
   user:{id:42,login:'tester'},
   repo:{id:101,name:repoName,private:true,default_branch:'main',
     description:'Launch & Own managed site: willow-studio',owner:{id:42,login:'tester'}},
-  pr:{number:55,state:'open',base:{ref:'main',repo:{id:101}},
-    head:{ref:branch,sha,repo:{id:101}}},
-  branch:{commit:{sha}},
+  pr:{number:55,state:'open',base:{ref:'main',sha:baseSha,repo:{id:101,owner:{id:42}}},
+    head:{ref:branch,sha,repo:{id:101,owner:{id:42}}}},
+  branch:{commit:{sha}},baseBranch:{commit:{sha:baseSha}},
   project:{id:'pages-p-1',name:projectName,subdomain:projectName+'.pages.dev',
     production_branch:'main',uses_functions:false,
     build_config:{build_command:'',root_dir:'/',destination_dir:'public'},
-    source:{type:'github',config:{owner:'tester',repo_name:repoName,
+    source:{type:'github',config:{owner:'tester',owner_id:'42',repo_name:repoName,
       repo_id:'101',production_deployments_enabled:true,
       preview_deployment_setting:'custom',preview_branch_includes:['launch-and-own/site-*'],
       preview_branch_excludes:['main'],pr_comments_enabled:false}}},
@@ -52,6 +52,7 @@ function harness(){
   if(url==='https://api.github.com/user')return json(state.user);
   if(url===ghRoot)return json(state.repo);
   if(url===ghRoot+'/pulls/55')return json(state.pr);
+  if(url===ghRoot+'/branches/main')return json(state.baseBranch);
   if(url===ghRoot+'/branches/'+encodeURIComponent(branch))return json(state.branch);
   if(url===cfRoot)return json({success:true,result:state.project});
   if(url===cfRoot+'/deployments/'+deploymentId)return json({success:true,result:state.deployment});
@@ -63,14 +64,20 @@ function harness(){
 }
 const auth={githubToken:'test-gh',cloudflareToken:'test-cf'};
 const verify=(h,update=input)=>verifyExistingPrPreview(update,{...auth,fetchFn:h.fetchFn});
-test('only verified approved preview URL returns; never claim live',async()=>{
+const noPublicCall=h=>assert(h.calls.every(c=>c.url.startsWith('https://api.github.com/') ||
+  c.url.startsWith('https://api.cloudflare.com/')), 'No preview URL or page content is fetched');
+test('metadata-only success never returns URL, content or a claim of Access protection',async()=>{
  const h=harness(),r=await verify(h);
- assert.equal(r.status,'preview-verified');assert.equal(r.previewUrl,previewUrl);
- assert.equal(r.htmlSha256,htmlDigest);assert.equal(r.githubHeadSha,sha);
- assert.equal(r.environment,'preview');assert.equal(r.productionVerified,false);
+ assert.deepEqual(r,{status:'preview-metadata-verified-protection-pending',previewUrl:null,
+  deploymentId,githubBaseSha:baseSha,githubHeadSha:sha,environment:'preview',
+  protectionVerified:false,contentVerified:false,productionVerified:false,
+  note:'Deployment metadata only; access protection and signed-in canonical content have not been verified.'});
  assert.equal(h.calls.length,7);
  assert(h.calls.every(c=>c.method==='GET'&&c.redirect==='manual'));
  assert(!JSON.stringify(r).includes('test-gh'));
+ assert(!JSON.stringify(r).includes('pages.dev'));
+ assert(!JSON.stringify(r).includes(previewLabel));
+ noPublicCall(h);
 });
 test('approval, expiry, tenant and privacy gate before any network',async()=>{
  for(const bad of [
@@ -84,6 +91,8 @@ test('approval, expiry, tenant and privacy gate before any network',async()=>{
   {...consent,cloudflareAccountId:'f'.repeat(32)},
   {...consent,prNumber:66},
   {...consent,approvedHeadSha:'no'},
+  {...consent,approvedBaseSha:'no'},
+  {...consent,approvedBaseSha:undefined},
   {...consent,approvedHtmlSha256:'invalid'}
  ]){
   const h=harness(),r=await verify(h,{...input,consent:bad});
@@ -115,6 +124,10 @@ test('Cloudflare project, source repo and build settings must match',async()=>{
  for(const change of [
   s=>s.project.id='wrong',
   s=>s.project.source.config.repo_id='998',
+  s=>s.project.source.config.repo_id='000101',
+  s=>s.project.source.config.owner_id='44',
+  s=>s.project.source.config.owner_id='not-a-number',
+  s=>s.project.source.config.owner_id='9007199254740997',
   s=>s.project.source.config.repo_name='other',
   s=>s.project.source.config.owner='another',
   s=>s.project.production_branch='dev',
@@ -136,7 +149,8 @@ test('disabled and unsafe preview configurations always fail closed',async()=>{
   [s=>s.project.source.config.preview_branch_excludes=['dev'],'blocked-unsafe-preview-policy'],
   [s=>s.project.source.config.preview_branch_excludes=['main','dev'],'blocked-unsafe-preview-policy'],
   [s=>{delete s.project.source.config.preview_branch_excludes;},'blocked-unsafe-preview-policy'],
-  [s=>s.project.source.config.pr_comments_enabled=true,'blocked-unsafe-preview-policy']
+  [s=>s.project.source.config.pr_comments_enabled=true,'blocked-unsafe-preview-policy'],
+  [s=>{delete s.project.source.config.pr_comments_enabled;},'blocked-unsafe-preview-policy']
  ]){
   const h=harness();change(h.state);
   const r=await verify(h);assert.equal(r.status,status);
@@ -144,19 +158,23 @@ test('disabled and unsafe preview configurations always fail closed',async()=>{
   assert(!h.calls.some(c=>c.url.includes('/deployments/')));
  }
 });
-test('PR must be same repository, open, same approved head and live branch',async()=>{
+test('approved GitHub PR/base/head SHA must match same repo and live branches',async()=>{
  for(const [change,status] of [
   [s=>s.pr.state='closed','blocked-pr-or-revision'],
   [s=>s.pr.head.repo.id=222,'blocked-pr-or-revision'],
+  [s=>s.pr.head.repo.owner.id=222,'blocked-pr-or-revision'],
   [s=>s.pr.base.repo.id=222,'blocked-pr-or-revision'],
+  [s=>s.pr.base.repo.owner.id=222,'blocked-pr-or-revision'],
   [s=>s.pr.head.ref='unapproved-draft','blocked-pr-or-revision'],
   [s=>s.pr.head.sha=otherSha,'blocked-pr-or-revision'],
+  [s=>s.pr.base.sha=otherSha,'blocked-pr-or-revision'],
+  [s=>s.baseBranch.commit.sha=otherSha,'blocked-pr-base-moved'],
   [s=>s.branch.commit.sha=otherSha,'blocked-pr-head-moved']
- ]){
+ ]) {
   const h=harness();change(h.state);
   const r=await verify(h);assert.equal(r.status,status);
   assert.equal(r.previewUrl,null);
-  assert(!h.calls.some(c=>c.url.includes('/deployments/')));
+  assert(!h.calls.some(c=>c.url.includes('/deployments/')));noPublicCall(h);
  }
 });
 test('Pages deployment must be exact successful Git preview and exact SHA',async()=>{
@@ -194,15 +212,12 @@ test('never fetches arbitrary domains, branch aliases or changed short IDs',asyn
  const h=harness();h.state.deployment.short_id='c1234567';
  assert.equal((await verify(h)).status,'blocked-preview-url');
 });
-test('wrong HTML, redirect, incorrect content-type or oversize response denied',async()=>{
- for(const change of [
-  s=>s.html='<html>wrong</html>',
-  s=>s.htmlContentType='text/plain',
-  s=>s.htmlStatus=302,
-  s=>s.html='x'.repeat(2*1024*1024+1)
- ]){
-  const h=harness();change(h.state);
-  const r=await verify(h);
-  assert.equal(r.status,'blocked-preview-html-mismatch');assert.equal(r.previewUrl,null);
- }
+test('fake browser/access flags never change metadata-only result or trigger public GET',async()=>{
+ const h=harness(),r=await verify(h,{...input,accessVerified:true,protectedPreview:true,
+  consent:{...consent,protectionVerified:true,viewerAuthenticated:true},
+  previewUrl:'https://attacker.example',canonicalPreviewHtmlSha256:htmlDigest});
+ assert.equal(r.status,'preview-metadata-verified-protection-pending');
+ assert.equal(r.previewUrl,null);assert.equal(r.protectionVerified,false);
+ assert.equal(r.contentVerified,false);assert.equal(r.productionVerified,false);
+ noPublicCall(h);
 });
