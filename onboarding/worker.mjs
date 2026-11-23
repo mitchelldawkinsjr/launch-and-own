@@ -18,6 +18,7 @@ import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './web
 import {readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
 import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
+import {bridgeLaunchStatus,importBridgeDraft} from './bridge-draft-review.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
@@ -586,6 +587,8 @@ export default {
       if(request.method==='GET'&&url.pathname==='/privacy')return view('Privacy Policy',privacyHtml);
       if(request.method==='GET'&&url.pathname==='/terms')return view('Terms of Service',termsHtml);
       if(request.method==='GET'&&url.pathname==='/logo.png')return new Response(Uint8Array.from(atob(LOGO_PNG_BASE64),c=>c.charCodeAt(0)),{headers:{'content-type':'image/png','cache-control':'public, max-age=86400','x-content-type-options':'nosniff'}});
+      // Bridge → onboarding sealed status lookup (no browser session involved).
+      if(request.method==='POST'&&url.pathname==='/internal/bridge-launch-status')return await bridgeLaunchStatus(request,env,{now});
       configured(env);
       if(url.origin!==baseUrl(env))return fail('This service requires its registered HTTPS origin.',400);
       const current=await session(request,env);
@@ -595,6 +598,8 @@ export default {
         if(url.pathname==='/oauth/github/callback')return await gitHubCallback(request,env,current);
         if(url.pathname==='/connect/cloudflare')return await cloudflareStart(request,env,current);
         if(url.pathname==='/oauth/cloudflare/callback')return await cloudflareCallback(request,env,current);
+        if(url.pathname==='/review'&&url.searchParams.has('draft')&&!url.searchParams.has('id'))
+          return await importBridgeDraft(env,current,url.searchParams.get('draft'),{redirect,fail,now});
         if(url.pathname==='/review')return await review(env,current,url.searchParams.get('id'));
         if(url.pathname==='/history')return await launchHistory(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));

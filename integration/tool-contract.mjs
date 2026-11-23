@@ -293,6 +293,13 @@ export function assertSafeBrowserHandoff(url) {
       deny('unsafe_handoff');
     return url;
   }
+  if (parsed.pathname === '/review' && parsed.search) {
+    const draftId = parsed.searchParams.get('draft');
+    if ([...parsed.searchParams.keys()].join() !== 'draft' || !/^draft_[a-f0-9]{20}$/.test(draftId) ||
+        url !== `${BROWSER_ORIGIN}/review?draft=${draftId}`)
+      deny('unsafe_handoff');
+    return url;
+  }
   if (parsed.search || url !== parsed.href) deny('unsafe_handoff');
   return url;
 }

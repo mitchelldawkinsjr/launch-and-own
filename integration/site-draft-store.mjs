@@ -171,7 +171,7 @@ export class MemorySiteDraftStore {
     // Idempotency key is accepted and scoped; durable dedupe is a future D1 concern.
     if (typeof idempotencyKey !== 'string') deny('invalid_arguments');
     return humanApprovalHandoff({
-      url: 'https://onboard.360web.cloud/review',
+      url: 'https://onboard.360web.cloud/review?draft=' + draftId,
       draftId,
       previewSha256,
       expiresAt: nowSeconds + 10 * 60

@@ -189,16 +189,25 @@ export class D1SiteDraftStore {
     });
   }
 
+  /** Unscoped read for the sealed onboarding handoff; callers fence ownership. */
+  async getDraftRecord(draftId) {
+    return rowToDraft(await d1First(this.db, `SELECT * FROM bridge_drafts WHERE id = ?`, draftId));
+  }
+
   async getExactPreview(scope, draftId, {nowSeconds}) {
     const draft = rowToDraft(await d1First(this.db,
       `SELECT * FROM bridge_drafts WHERE id = ?`, draftId));
     assertOwnedRecord(draft || {subject: ''}, scope);
-    return assertPreparedDraft(draft, scope, {
+    const checked = assertPreparedDraft(draft, scope, {
       previewSha256: draft.previewSha256,
       nowSeconds,
       currentCommitSha: draft.baseCommitSha || 'a'.repeat(40),
       currentRepositoryId: draft.repositoryId || 1
     });
+    // The owner sees the exact rendered page on the hosted review screen.
+    return draft.kind === 'create' ?
+      Object.freeze({...checked, review_url: 'https://onboard.360web.cloud/review?draft=' + draft.id}) :
+      checked;
   }
 
   async requestApproval(scope, {draftId, previewSha256, idempotencyKey}, {nowSeconds}) {
@@ -218,7 +227,7 @@ export class D1SiteDraftStore {
       ) VALUES (?, ?, ?, ?)`,
     scope.subject, draftId, idempotencyKey, nowSeconds);
     return humanApprovalHandoff({
-      url: 'https://onboard.360web.cloud/review',
+      url: 'https://onboard.360web.cloud/review?draft=' + draftId,
       draftId,
       previewSha256,
       expiresAt: nowSeconds + 10 * 60

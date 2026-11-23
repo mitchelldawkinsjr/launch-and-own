@@ -67,6 +67,15 @@ The OAuth grant identifies an **agent session only** (fresh opaque subject). Git
 
 Connect a client: `claude mcp add --transport http launch-and-own https://mcp.360web.cloud/mcp`, or add the same URL as a ChatGPT connector (developer mode).
 
+### D2. Agent draft → owner review → launch (#43 item 5)
+
+1. `request_explicit_approval` / `get_exact_preview` hand the owner `https://onboard.360web.cloud/review?draft=<draft_id>`.
+2. Onboarding (signed-in owner) seals a **draft ticket** with the session's GitHub user + Cloudflare account and calls `POST BRIDGE_ORIGIN/mcp/internal/draft`. Bridge returns the draft only if owner matches, kind `create`, still `prepared` and unexpired.
+3. Onboarding re-renders it and requires `sha256(renderSite(...)) === preview_sha256`, then stores a normal preview launch (`plan_json.bridgeDraftId`). Approve → launch → verify are the existing onboarding steps.
+4. Agents poll `get_job_status` / `verify_publication` with `job_id = draft_id`. Bridge seals a **status ticket** to `POST ONBOARDING_ORIGIN/internal/bridge-launch-status`; onboarding answers from `onboarding_launch_jobs` fenced by GitHub user + Cloudflare account. `live` includes commit and approved HTML digest, and onboarding only reaches `live` after its runner verified both.
+
+Separate AAD per ticket purpose; 60 s ticket lifetime; no provider tokens cross either call.
+
 ### E. Release gates
 
 Only after independent consenting-user QA:
