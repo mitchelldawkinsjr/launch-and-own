@@ -141,10 +141,14 @@ function harness({withJobs=true}={}){
       return Response.json({commit:{sha:GENERATED_SHA,tree:{sha:GENERATED_TREE}}},{status:201});
     }
     const ref=new URL(url).searchParams.get('ref');
+    const file=(html)=>({
+      type:'file',sha:'e'.repeat(40),encoding:'base64',
+      content:Buffer.from(html).toString('base64'),size:Buffer.byteLength(html)
+    });
     if(ref===resourceState.updateBranch&&resourceState.updateBranch)
-      return Response.json({type:'file',sha:'e'.repeat(40),encoding:'base64',content:Buffer.from(resourceState.updateHtml??resourceState.homepageHtml).toString('base64')});
+      return Response.json(file(resourceState.updateHtml??resourceState.homepageHtml));
     return resourceState.homepage&&ref!==BASE_SHA
-      ?Response.json({type:'file',sha:'e'.repeat(40),encoding:'base64',content:Buffer.from(resourceState.homepageHtml).toString('base64')})
+      ?Response.json(file(resourceState.homepageHtml))
       :new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});

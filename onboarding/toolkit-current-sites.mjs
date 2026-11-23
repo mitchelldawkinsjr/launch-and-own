@@ -1,15 +1,24 @@
 /**
- * #87 adapter for #39 read-only current managed-site discovery.
- * GET-only provider reads, fenced against session epoch changes. Does not claim
- * public HTML/HTTPS verification or invent live website URLs.
+ * #87 adapter for #39 read-only current managed-site discovery and sealed
+ * reference handoff. GET-only provider reads, fenced against session epoch
+ * changes. Never trusts browser-supplied ownership JSON. Never inserts
+ * untrusted homepage HTML into the onboarding origin.
  */
 import {
   discoverOwnedManagedSites,
+  readCurrentManagedHomepage,
   ManagedSiteInventoryError
 } from '../pipeline/owned-site-inventory.mjs';
 import {hasCurrentOwnerSession} from './launch-jobs.mjs';
+import {seal, unseal} from './crypto.mjs';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+const REFERENCE_LIFETIME = 15 * 60;
+const SITE_ID = /^managed_[1-9][0-9]*_[a-z0-9_-]{1,128}$/i;
+const OPAQUE = /^[a-z0-9_-]{1,128}$/i;
+const REPO = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const NUMERIC = /^[1-9][0-9]*$/;
 
 export function ownerPrincipalFromSession(session) {
   if (!session || !Number.isSafeInteger(session.github_user_id) || session.github_user_id < 1 ||
@@ -39,6 +48,82 @@ export function createOwnerAuthorizationFence(env, session, clock = nowSeconds) 
   };
 }
 
+function ticketAad(session) {
+  return 'managed-site-reference:' + session.hash;
+}
+
+function referenceFromSite(site) {
+  return Object.freeze({
+    siteId: site.siteId,
+    githubUserId: site.githubUserId,
+    githubOwner: site.githubOwner,
+    cloudflareAccountId: site.cloudflareAccountId,
+    repositoryId: site.repositoryId,
+    repositoryName: site.repositoryName,
+    pagesProjectId: site.pagesProjectId,
+    pagesProjectName: site.pagesProjectName,
+    branch: site.branch,
+    productionBranch: site.productionBranch,
+    sourceKind: site.sourceKind
+  });
+}
+
+function validReference(reference, principal) {
+  return reference && SITE_ID.test(reference.siteId || '') &&
+    reference.githubUserId === principal.githubUserId &&
+    typeof reference.githubOwner === 'string' &&
+    reference.githubOwner.toLowerCase() === principal.githubLogin.toLowerCase() &&
+    reference.cloudflareAccountId === principal.cloudflareAccountId &&
+    Number.isSafeInteger(reference.repositoryId) &&
+    NUMERIC.test(String(reference.repositoryId)) &&
+    REPO.test(reference.repositoryName || '') &&
+    OPAQUE.test(reference.pagesProjectId || '') &&
+    reference.pagesProjectName === reference.repositoryName + '-site' &&
+    reference.branch === 'main' && reference.productionBranch === 'main' &&
+    reference.sourceKind === 'managed-existing' &&
+    reference.siteId === 'managed_' + reference.repositoryId + '_' + reference.pagesProjectId;
+}
+
+export async function sealManagedSiteReference(env, session, site, time = Math.floor(Date.now() / 1000)) {
+  const principal = ownerPrincipalFromSession(session);
+  const reference = referenceFromSite(site);
+  if (!principal || !validReference(reference, principal))
+    throw new ManagedSiteInventoryError('invalid_managed_identity');
+  return seal(env.TOKEN_ENCRYPTION_KEY, JSON.stringify({
+    version: 1,
+    kind: 'managed-site-reference',
+    createdAt: time,
+    expiresAt: time + REFERENCE_LIFETIME,
+    githubUserId: principal.githubUserId,
+    cloudflareAccountId: principal.cloudflareAccountId,
+    authorizationEpoch: session.authorization_epoch,
+    reference
+  }), ticketAad(session));
+}
+
+export async function openManagedSiteReference(env, session, raw, time = Math.floor(Date.now() / 1000)) {
+  const principal = ownerPrincipalFromSession(session);
+  if (!principal || typeof raw !== 'string' || raw.length < 50 || raw.length > 8192 ||
+      !/^[A-Za-z0-9_-]+$/.test(raw))
+    throw new ManagedSiteInventoryError('owned_site_not_found');
+  let value;
+  try {
+    value = JSON.parse(await unseal(env.TOKEN_ENCRYPTION_KEY, raw, ticketAad(session)));
+  } catch {
+    throw new ManagedSiteInventoryError('owned_site_not_found');
+  }
+  if (value?.kind !== 'managed-site-reference' || value.version !== 1 ||
+      !Number.isSafeInteger(value.createdAt) || value.createdAt > time ||
+      value.createdAt < time - REFERENCE_LIFETIME ||
+      value.expiresAt !== value.createdAt + REFERENCE_LIFETIME || value.expiresAt <= time ||
+      value.githubUserId !== principal.githubUserId ||
+      value.cloudflareAccountId !== principal.cloudflareAccountId ||
+      value.authorizationEpoch !== session.authorization_epoch ||
+      !validReference(value.reference, principal))
+    throw new ManagedSiteInventoryError('owned_site_not_found');
+  return Object.freeze(value.reference);
+}
+
 /**
  * @returns {Promise<{status:'ok', page:number, nextPage:number|null, sites:object[]}|
  *   {status:'unavailable', code:string}>}
@@ -53,25 +138,62 @@ export async function loadCurrentManagedSitesPage(env, session, {
     return {status: 'unavailable', code: 'invalid_inventory_page'};
 
   try {
+    const authorize = createOwnerAuthorizationFence(env, session, clock);
     const inventory = await discoverOwnedManagedSites({
-      page,
-      principal,
-      githubAccessToken,
-      cloudflareAccessToken,
-      assertCurrentAuthorization: createOwnerAuthorizationFence(env, session, clock),
-      fetchFn
+      page, principal, githubAccessToken, cloudflareAccessToken, assertCurrentAuthorization: authorize, fetchFn
     });
+    const sites = [];
+    for (const site of inventory.sites) {
+      const ticket = await sealManagedSiteReference(env, session, site, clock());
+      sites.push(Object.freeze({...site, sourceTicket: ticket}));
+    }
+    if (!await authorize(principal)) throw new ManagedSiteInventoryError('authorization_changed');
     return {
       status: 'ok',
       page: inventory.page,
       nextPage: inventory.nextPage,
       coverage: inventory.coverage,
-      sites: inventory.sites
+      sites: Object.freeze(sites)
     };
   } catch (error) {
     const code = error instanceof ManagedSiteInventoryError
       ? error.code
       : 'current_inventory_unavailable';
+    return {status: 'unavailable', code};
+  }
+}
+
+/**
+ * Inspect current GitHub homepage bytes for a sealed reference.
+ * Returns metadata only — never the raw HTML for browser embedding.
+ */
+export async function inspectSealedManagedSource(env, session, ticketRaw, {
+  clock = nowSeconds, fetchFn = fetch, githubAccessToken, cloudflareAccessToken
+} = {}) {
+  const principal = ownerPrincipalFromSession(session);
+  if (!principal)
+    return {status: 'unavailable', code: 'verified_owner_required'};
+  try {
+    const reference = await openManagedSiteReference(env, session, ticketRaw, clock());
+    const source = await readCurrentManagedHomepage({
+      siteId: reference.siteId, reference, principal, githubAccessToken, cloudflareAccessToken,
+      assertCurrentAuthorization: createOwnerAuthorizationFence(env, session, clock), fetchFn
+    });
+    return {
+      status: 'ok',
+      siteId: source.siteId,
+      baseCommitSha: source.baseCommitSha,
+      homepageHtmlSha256: source.homepageHtmlSha256,
+      homepageGitBlobSha: source.homepageGitBlobSha,
+      publicationVerified: source.publicationVerified,
+      historicalContinuityVerified: source.historicalContinuityVerified,
+      editMode: source.editMode
+      // deliberately omit source.html
+    };
+  } catch (error) {
+    const code = error instanceof ManagedSiteInventoryError
+      ? error.code
+      : 'current_source_unavailable';
     return {status: 'unavailable', code};
   }
 }
@@ -116,8 +238,33 @@ function renderCurrentSite(site, escape) {
     ? '<p class="muted">Observed Pages production commit (unverified public HTML): <code>' +
       escape(site.productionCommitSha) + '</code></p>'
     : '<p class="muted">No successful production deployment observed in project metadata.</p>';
+  const source = site.sourceTicket
+    ? '<p><a href="/toolkit/source?ticket=' + encodeURIComponent(site.sourceTicket) +
+      '">Inspect current GitHub source fingerprint</a></p>'
+    : '';
   return '<article><h3>' + escape(name || site.siteId) + '</h3>' +
     '<p class="pill">Publication unverified</p>' +
     '<p>Historical continuity with launch history is not proven for this discovery.</p>' +
-    repo + pages + sha + observed + '</article>';
+    repo + pages + sha + observed + source + '</article>';
+}
+
+export function renderCurrentSourcePage(inspection, {view, escape}) {
+  if (!inspection || inspection.status !== 'ok') {
+    const code = inspection?.code ? ' (' + escape(inspection.code) + ')' : '';
+    return view('Current GitHub source',
+      '<p>That source inspection is unavailable or expired' + code + '.</p>' +
+      '<p><a href="/toolkit">Back to toolkit</a></p>');
+  }
+  return view('Current GitHub source',
+    '<p>Server-verified GitHub <code>public/index.html</code> fingerprint for a sealed ownership reference. ' +
+    'This is <strong>not</strong> a live public website check and does not unlock editing.</p>' +
+    '<p class="pill">editMode: ' + escape(inspection.editMode) + '</p>' +
+    '<p>Site selector: <code>' + escape(inspection.siteId) + '</code></p>' +
+    '<p>GitHub <code>main</code>: <code>' + escape(inspection.baseCommitSha) + '</code></p>' +
+    '<p>Homepage SHA-256: <code>' + escape(inspection.homepageHtmlSha256) + '</code></p>' +
+    '<p>Git blob SHA: <code>' + escape(inspection.homepageGitBlobSha) + '</code></p>' +
+    '<p class="muted">publicationVerified=' + escape(String(inspection.publicationVerified)) +
+    ' · historicalContinuityVerified=' +
+    escape(String(inspection.historicalContinuityVerified)) + '</p>' +
+    '<p><a href="/toolkit">Back to toolkit</a></p>');
 }

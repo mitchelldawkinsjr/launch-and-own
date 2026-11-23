@@ -20,7 +20,10 @@ import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
-import {loadCurrentManagedSitesPage,renderCurrentSitesSection} from './toolkit-current-sites.mjs';
+import {
+  loadCurrentManagedSitesPage,renderCurrentSitesSection,
+  inspectSealedManagedSource,renderCurrentSourcePage
+} from './toolkit-current-sites.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
@@ -241,6 +244,14 @@ async function toolkit(env,current,request){
   return renderToolkitPage(cards,current,{view,escape},{
     currentInventoryHtml:renderCurrentSitesSection(inventory,{escape})
   });
+}
+async function toolkitSource(env,current,request){
+  if(!current?.cloudflare_account_id)
+    return renderCurrentSourcePage({status:'unavailable',code:'verified_owner_required'},{view,escape});
+  const grants=await assertHistoryAccess(env,current);
+  const ticket=new URL(request.url).searchParams.get('ticket');
+  const inspection=await inspectSealedManagedSource(env,current,ticket,grants);
+  return renderCurrentSourcePage(inspection,{view,escape});
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
@@ -616,6 +627,7 @@ export default {
         if(url.pathname==='/review')return await review(env,current,url.searchParams.get('id'));
         if(url.pathname==='/history')return await launchHistory(env,current);
         if(url.pathname==='/toolkit')return await toolkit(env,current,request);
+        if(url.pathname==='/toolkit/source')return await toolkitSource(env,current,request);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
         if(url.pathname==='/site-update')return await siteUpdates.editor(env,current,url.searchParams.get('id'));
