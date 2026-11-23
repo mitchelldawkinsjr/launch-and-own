@@ -5,7 +5,7 @@ const ACCOUNT = /^[a-f0-9]{32}$/i;
 const SHA = /^[a-f0-9]{40}$/i;
 const OPAQUE = /^[a-z0-9_-]{1,128}$/i;
 const PURPOSES = new Set(['contact-submissions', 'media-uploads', 'site-settings', 'lightweight-api']);
-const CLASSIFICATIONS = new Set(['none', 'public', 'personal']);
+const CLASSIFICATIONS = new Set(['none', 'public', 'private', 'personal']);
 const DELETE_PLANS = new Set(['none', 'owner-delete', 'time-bound']);
 const MAX_EVIDENCE_AGE_SECONDS = 15 * 60;
 const MAX_RETENTION_DAYS = 365;
@@ -108,7 +108,7 @@ function projection(request, snapshot) {
       const value = key === 'cpuMsPerInvocation' ?
         Math.max(observed[key], request.projectedUsage[key]) :
         observed[key] + request.projectedUsage[key];
-      if (!Number.isSafeInteger(value) && !Number.isFinite(value)) {
+      if (!Number.isFinite(value) || value > Number.MAX_SAFE_INTEGER) {
         return Object.freeze({service, state:'usage_unverified', reason:'invalid_projection',
           headroom:null, costEstimateUsd:null, readyForActivation:false});
       }
@@ -120,10 +120,10 @@ function projection(request, snapshot) {
   let state, reason;
   if (!permission) {
     state='blocked_permission_or_plan'; reason='service_scope_not_verified';
-  } else if (snapshot.workersPlan === 'paid') {
-    state='paid_cost_review_required'; reason='account_wide_paid_usage_and_billing_review_required';
   } else if (service === 'r2' && snapshot.r2SubscriptionActive !== true) {
     state='subscription_activation_required'; reason='r2_requires_separate_subscription_checkout';
+  } else if (snapshot.workersPlan === 'paid') {
+    state='paid_cost_review_required'; reason='account_wide_paid_usage_and_billing_review_required';
   } else if (!observed) {
     state='usage_unverified'; reason='account_wide_usage_not_measured';
   } else if (exceeds) {
