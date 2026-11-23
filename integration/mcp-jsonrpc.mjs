@@ -64,7 +64,7 @@ export const TOOLS = [
     description: 'Get publication status. For agent drafts, pass the draft_id as job_id.'},
   {name: 'verify_publication', annotations: readOnly,
     inputSchema: obj({job_id: id('Job id')}, ['job_id']),
-    description: 'Verify a publication (job_id = draft_id for agent drafts). Only report a site as live when this returns state live with commit and HTML digests.'}
+    description: 'Read publication verification (job_id = draft_id for agent drafts). Only report a site as live when this returns state live with commit and HTML digests. The last_verified state is a historical check with a Unix timestamp in seconds.'}
 ];
 
 const HINTS = {

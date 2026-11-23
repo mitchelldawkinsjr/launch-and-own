@@ -24,7 +24,7 @@ export function createHostFromEnv(env) {
     bridgeTicketKey: env.BRIDGE_TICKET_KEY,
     onboardingStatus: env.ONBOARDING_ORIGIN ? async ticket => {
       const res = await fetch(env.ONBOARDING_ORIGIN + '/internal/bridge-launch-status', {
-        method: 'POST', redirect: 'manual',
+        method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(8000),
         headers: {'content-type': 'application/json', 'user-agent': 'launch-and-own-bridge'},
         body: JSON.stringify({ticket})
       });

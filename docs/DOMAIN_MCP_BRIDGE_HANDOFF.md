@@ -71,10 +71,12 @@ Connect a client: `claude mcp add --transport http launch-and-own https://mcp.36
 
 1. `request_explicit_approval` / `get_exact_preview` hand the owner `https://onboard.360web.cloud/review?draft=<draft_id>`.
 2. Onboarding (signed-in owner) seals a **draft ticket** with the session's GitHub user + Cloudflare account and calls `POST BRIDGE_ORIGIN/mcp/internal/draft`. Bridge returns the draft only if owner matches, kind `create`, still `prepared` and unexpired.
-3. Onboarding re-renders it and requires `sha256(renderSite(...)) === preview_sha256`, then stores a normal preview launch (`plan_json.bridgeDraftId`). Approve → launch → verify are the existing onboarding steps.
-4. Agents poll `get_job_status` / `verify_publication` with `job_id = draft_id`. Bridge seals a **status ticket** to `POST ONBOARDING_ORIGIN/internal/bridge-launch-status`; onboarding answers from `onboarding_launch_jobs` fenced by GitHub user + Cloudflare account. `live` includes commit and approved HTML digest, and onboarding only reaches `live` after its runner verified both.
+3. Onboarding re-renders it and requires `sha256(renderSite(...)) === preview_sha256`. It stages one preview per browser session, selected owner and draft, with the current authorization epoch checked in the same write. Approve → launch → verify use the existing onboarding steps.
+4. Agents poll `get_job_status` or `verify_publication` with `job_id = draft_id`. Onboarding reads unexpired launch records for the exact GitHub user and Cloudflare account with a current owner session. The bridge rechecks the calling token and linked owner before returning the response. A previously verified publication returns `last_verified` with a Unix timestamp in seconds and the then-verified commit and HTML digests. Current public bytes require a fresh production check.
 
-Separate AAD per ticket purpose; 60 s ticket lifetime; no provider tokens cross either call.
+The calls use separate ticket purposes and expire after 60 seconds. The status endpoint accepts up to 4 KiB of JSON on the registered onboarding origin. Provider tokens stay on their originating service.
+
+For an approved rollout of status handoff version 2, Domain deploys the bridge first and then onboarding. The upgraded bridge returns `onboarding_status_unavailable` during a version mismatch. Verify the historical status fields and a revoked or expired session with a consenting QA owner. Roll back both Workers together. No D1 migration is required for version 2.
 
 ### E. Release gates
 

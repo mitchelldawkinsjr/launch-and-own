@@ -10,7 +10,7 @@
 import {DRAFT_ID, draftForOnboarding, draftPublicationRecord} from './draft-handoff.mjs';
 import {
   BRIDGE_AUDIENCE, BROWSER_ORIGIN, BridgeContractError,
-  assertSafeBrowserHandoff, publicationStatus, validateToolCall
+  assertSafeBrowserHandoff, assertTrustedPrincipal, publicationStatus, validateToolCall
 } from './tool-contract.mjs';
 import {
   MemoryOwnerLinkStore, linkedOwnerFromStore
@@ -258,9 +258,12 @@ async function dispatchToolCall(host, request) {
 
   // Agent drafts approved in onboarding are tracked by draft id (#43 item 5).
   if (['get_job_status', 'verify_publication'].includes(call.name) &&
-      DRAFT_ID.test(call.arguments.job_id) && host.onboardingStatus && host.bridgeTicketKey)
-    return jsonOk(publicationStatus(
-      await draftPublicationRecord(host, call.scope, call.arguments.job_id), call.scope));
+      DRAFT_ID.test(call.arguments.job_id) && host.onboardingStatus && host.bridgeTicketKey) {
+    const record = await draftPublicationRecord(host, call.scope, call.arguments.job_id);
+    const current = await principalFromToken(host, token);
+    const currentScope = assertTrustedPrincipal(current, {nowSeconds: host.nowSeconds()});
+    return jsonOk(publicationStatus(record, currentScope));
+  }
 
   if (call.name === 'get_job_status')
     return jsonOk(await host.jobs.getJob(call.scope, call.arguments.job_id));
