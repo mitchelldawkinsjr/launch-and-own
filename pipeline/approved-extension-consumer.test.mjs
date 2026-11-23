@@ -230,6 +230,17 @@ test('email refuses changed hostname or changed forwarding mailbox', async () =>
   }
 });
 
+test('email refuses applied domain rows for a different host or kind', async () => {
+  for (const mode of ['host', 'kind']) {
+    const r = rig(row('email'));
+    r.store.readAppliedDomain = async () => mode === 'kind'
+      ? {...row('domain'), status: 'applied', kind: 'email'}
+      : {...row('domain', {hostname: 'different.example.org'}), status: 'applied'};
+    await rejected(r, mode === 'kind' ? 'applied_domain_row_required' :
+      'matching_applied_domain_required', {noWrites: true});
+  }
+});
+
 test('email requires an active Pages custom domain on correct project and verified destination', async () => {
   const r = rig(row('email'));
   await rejected(r, 'domain_not_active_on_owned_pages', {noWrites: true});
