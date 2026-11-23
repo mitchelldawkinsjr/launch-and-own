@@ -58,7 +58,7 @@ In-repo pieces (still **not** a production MCP server or ChatGPT connector):
 | [`integration/site-draft-store.mjs`](../integration/site-draft-store.mjs) | Tenant-fenced site inventory + immutable draft digests + approval handoff (memory adapter) |
 | [`integration/job-publication-store.mjs`](../integration/job-publication-store.mjs) | Tenant-fenced `get_job_status` / `verify_publication` via `publicationStatus` (memory adapter) |
 
-HTTP-shaped negative coverage lives in the `integration/*.test.mjs` suite, including rejection of forged `verified` provider identities and stale link challenges. The happy-path owner bind is a **direct in-memory test harness stand-in for a separately authenticated browser callback**; it is not a callable API. Job `live` requires host-attached trusted commit + HTML proof; incomplete proof projects `pending_deployment`. Draft digests here hash normalized `site_spec` JSON — production must use exact Worker-rendered HTML bytes.
+HTTP-shaped negative coverage lives in the `integration/*.test.mjs` suite, including rejection of forged `verified` provider identities and stale link challenges. The happy-path owner bind is a **direct in-memory test harness stand-in for a separately authenticated browser callback**; it is not a callable API. Job `live` requires host-attached trusted commit + HTML proof; incomplete proof projects `pending_deployment`. Create-draft digests are SHA-256 of exact `renderSite` homepage HTML (same renderer as onboarding); update drafts still hash change JSON until a full post-change artifact can be re-rendered.
 
 ## Critical trust boundary: completing owner linking
 
@@ -78,4 +78,4 @@ Thin ChatGPT packaging notes (still instructions-only): [`clients/chatgpt/README
 
 ## Next implementation slice for #43
 
-Domain creates bridge D1 + hostname, applies migrations, sets matching `BRIDGE_TICKET_KEY` on bridge **and** onboarding, sets onboarding `BRIDGE_ORIGIN`, smoke-deploys with `BRIDGE_DEPLOYMENT=not_approved`, then exercises `/agent-link` end-to-end. Flip approved only with owner authorization. Switch digests to exact Worker-rendered HTML bytes, run independent consenting-user QA, then orchestration may promote `shared_mcp_api`.
+Domain creates bridge D1 + hostname, applies migrations, sets matching `BRIDGE_TICKET_KEY` on bridge **and** onboarding, sets onboarding `BRIDGE_ORIGIN`, smoke-deploys with `BRIDGE_DEPLOYMENT=not_approved`, then exercises `/agent-link` end-to-end. Flip approved only with owner authorization. Create-draft digests already use exact `renderSite` HTML SHA-256; update drafts still need post-change re-render. Run independent consenting-user QA, then orchestration may promote `shared_mcp_api`.

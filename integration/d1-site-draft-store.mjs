@@ -1,6 +1,6 @@
 /**
  * D1-backed site inventory + draft/preview store for the MCP bridge.
- * Digests still hash normalized site_spec JSON until exact HTML bytes land.
+ * Create digests use previewDigestFromSpec (exact renderSite HTML SHA-256).
  */
 import {createHash, randomBytes} from 'node:crypto';
 import {
