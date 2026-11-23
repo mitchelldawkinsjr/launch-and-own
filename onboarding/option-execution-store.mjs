@@ -214,8 +214,11 @@ export function createD1OptionExecutionStore(env, current) {
       const live = await liveSite(site.jobId);
       if (!live || live.repositoryId !== site.repositoryId ||
           live.pagesProjectId !== site.pagesProjectId ||
-          live.expectedCommitSha !== site.expectedCommitSha &&
-            site.expectedCommitSha !== undefined) return false;
+          (site.expectedCommitSha !== undefined &&
+            live.expectedCommitSha !== site.expectedCommitSha) ||
+          (pending && (live.expectedCommitSha !== pending.raw.expected_commit_sha ||
+            live.repositoryId !== pending.raw.repository_id ||
+            live.pagesProjectId !== pending.raw.pages_project_id))) return false;
     }
     for (const [id, lease] of claims) {
       const row = await env.DB.prepare(
