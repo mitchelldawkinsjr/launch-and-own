@@ -9,6 +9,22 @@ import {MCP_ORIGIN} from './oauth-server.mjs';
 
 const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
+// Public-facing discovery metadata. A custom ChatGPT connection may still
+// require the owner to enter its description and upload an icon in the UI.
+// This refers to the existing public onboarding logo, not an OAuth credential.
+export const SERVER_INFO = Object.freeze({
+  name: 'launch-and-own',
+  title: 'Launch & Own',
+  version: '1.0.0',
+  description: 'Build and launch websites you own using ChatGPT, GitHub, and Cloudflare. Create a website draft, preview the exact result, approve publication securely in your browser, and verify when your site is live.',
+  websiteUrl: 'https://onboard.360web.cloud',
+  icons: Object.freeze([Object.freeze({
+    src: 'https://onboard.360web.cloud/logo.png',
+    mimeType: 'image/png',
+    sizes: Object.freeze(['256x256'])
+  })])
+});
+
 const siteSpec = {
   type: 'object',
   additionalProperties: false,
@@ -114,7 +130,7 @@ export async function handleMcp(host, request) {
       protocolVersion: VERSIONS.includes(params.protocolVersion) ?
         params.protocolVersion : VERSIONS[1],
       capabilities: {tools: {listChanged: false}},
-      serverInfo: {name: 'launch-and-own', title: 'Launch & Own', version: '1.0.0'},
+      serverInfo: SERVER_INFO,
       instructions: 'Launch & Own publishes customer-owned websites. Never ask for or accept GitHub/Cloudflare tokens in chat. Link accounts with start_connect_accounts. Publishing needs the customer\'s explicit approval in the browser; never claim a site is live unless verify_publication says so.'
     });
   case 'ping':

@@ -94,6 +94,14 @@ test('OAuth + MCP flow: unlinked session, browser link, then owner-scoped tools'
   const init = await (await rpc(call, access_token, 'initialize',
     {protocolVersion: '2025-06-18', capabilities: {}, clientInfo: {name: 't', version: '1'}})).json();
   assert.equal(init.result.protocolVersion, '2025-06-18');
+  assert.equal(init.result.serverInfo.title, 'Launch & Own');
+  assert.match(init.result.serverInfo.description, /Build and launch websites you own/);
+  assert.equal(init.result.serverInfo.websiteUrl, 'https://onboard.360web.cloud');
+  assert.deepEqual(init.result.serverInfo.icons, [{
+    src: 'https://onboard.360web.cloud/logo.png',
+    mimeType: 'image/png',
+    sizes: ['256x256']
+  }]);
   const note = await call('/mcp', {method: 'POST',
     headers: {'content-type': 'application/json', authorization: 'Bearer ' + access_token},
     body: JSON.stringify({jsonrpc: '2.0', method: 'notifications/initialized'})});
