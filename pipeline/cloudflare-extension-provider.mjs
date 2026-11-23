@@ -3,8 +3,8 @@
 // operator-authorized, single-winner execution lease. NO DNS, MX, NS, mailbox or
 // billing endpoints. #89 forms methods (Turnstile widget, customer D1, form Worker)
 // are reachable only through the same per-request operator approval callback.
-import {formsResourceNames, formWorkerUpload, CUSTOMER_FORM_SCHEMA_SQL, FORM_WORKER_CRON}
-  from './forms-provider-plan.mjs';
+import {formsResourceNames, formWorkerUpload, CUSTOMER_FORM_SCHEMA_SQL, FORM_WORKER_CRON,
+  PLATFORM_D1_IDS, ACCEPTANCE_SQL} from './forms-provider-plan.mjs';
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const NAME = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*-site$/;
 const ZONE = /^[a-f0-9]{32}$/i;
@@ -140,7 +140,6 @@ export function createCloudflareExtensionProvider({
   const cfPost = (path, body, opts) => request('cloudflare', 'POST', path, body, opts);
   const cfPut = (path, body, opts) => request('cloudflare', 'PUT', path, body, opts);
   const accountRoot = () => '/accounts/' + owner.cloudflareAccountId;
-  const deployedForms = new Map();
   function formsTarget(site, hostname) {
     safeSite(site, owner);
     if (hostname !== site.pagesProjectName + '.pages.dev') deny('forms_hostname_not_active');
@@ -256,49 +255,77 @@ export function createCloudflareExtensionProvider({
         deny('turnstile_widget_unverified');
       return {sitekey: w.sitekey, secret: w.secret};
     },
-    async createCustomerD1(site, {} = {}) {
-      const names = formsTarget(site, site?.pagesProjectName + '.pages.dev');
+    async readTurnstileSecret(site, {hostname, sitekey} = {}) {
+      // Resume after an interrupted run: the secret is re-read, never stored by Launch & Own.
+      const names = formsTarget(site, hostname);
+      if (!/^[A-Za-z0-9_-]{8,64}$/.test(sitekey || '')) deny('turnstile_widget_unverified');
+      const w = (await cfGet(accountRoot() + '/challenges/widgets/' + sitekey))?.result;
+      if (w?.sitekey !== sitekey || typeof w.secret !== 'string' || w.secret.length < 8 ||
+          w.name !== names.widget || w.mode !== 'managed' ||
+          JSON.stringify(w.domains) !== JSON.stringify([hostname]))
+        deny('turnstile_widget_unverified');
+      return {sitekey, secret: w.secret};
+    },
+    async createCustomerD1(site, {hostname} = {}) {
+      const names = formsTarget(site, hostname);
       const root = accountRoot() + '/d1/database';
       if (exactNamed(safePage(await cfGet(root + '?name=' + encodeURIComponent(names.database) +
           '&page=1&per_page=50')), names.database).length)
         deny('customer_d1_exists_reconcile');
       const db = (await cfPost(root, {name: names.database}))?.result;
-      if (!/^[a-f0-9-]{36}$/.test(db?.uuid || '') || db.name !== names.database)
+      if (!/^[a-f0-9-]{36}$/.test(db?.uuid || '') || db.name !== names.database ||
+          PLATFORM_D1_IDS.includes(db.uuid))
         deny('customer_d1_unverified');
-      await cfPost(root + '/' + db.uuid + '/query', {sql: CUSTOMER_FORM_SCHEMA_SQL});
       return {id: db.uuid, name: names.database};
+    },
+    async applyCustomerSchema(site, {hostname, databaseId} = {}) {
+      formsTarget(site, hostname);
+      if (!/^[a-f0-9-]{36}$/.test(databaseId || '') || PLATFORM_D1_IDS.includes(databaseId))
+        deny('customer_d1_unverified');
+      const out = await cfPost(accountRoot() + '/d1/database/' + databaseId + '/query',
+        {sql: CUSTOMER_FORM_SCHEMA_SQL});
+      if (!Array.isArray(out?.result) || out.result.some(r => r?.success !== true))
+        deny('customer_d1_schema_unverified');
+      return {databaseId};
     },
     async deployServerVerifiedFormWorker(site, config = {}) {
       const names = formsTarget(site, config.hostname);
-      const upload = await formWorkerUpload({...config, databaseId: config.databaseId});
+      const upload = await formWorkerUpload(config);
       const scriptPath = accountRoot() + '/workers/scripts/' + names.script;
+      // Create only: never replace an existing same-name Worker (its code, schedules or routes).
+      // shortcut: GET-then-PUT is not atomic; the single-winner execution lease is the only fence until Cloudflare offers create-if-absent.
+      if (await cfGet(scriptPath + '/settings', {allow404: true}) !== null)
+        deny('form_worker_exists_reconcile');
       const deployed = (await cfPut(scriptPath, upload.formData,
         {approvalBody: upload.approvalBody}))?.result;
-      if (deployed?.id !== names.script) deny('form_worker_unverified');
+      if (deployed?.id !== names.script || typeof deployed.etag !== 'string' || !deployed.etag)
+        deny('form_worker_unverified');
+      return {id: names.script, etag: deployed.etag};
+    },
+    async publishFormWorker(site, {hostname} = {}) {
+      const names = formsTarget(site, hostname);
+      const scriptPath = accountRoot() + '/workers/scripts/' + names.script;
       await cfPut(scriptPath + '/schedules', [{cron: FORM_WORKER_CRON}]);
       await cfPost(scriptPath + '/subdomain', {enabled: true, previews_enabled: false});
       const sub = (await cfGet(accountRoot() + '/workers/subdomain'))?.result?.subdomain;
       if (!/^[a-z0-9-]{1,63}$/.test(sub || '')) deny('workers_subdomain_required');
-      const base = 'https://' + names.script + '.' + sub + '.workers.dev';
-      deployedForms.set(names.script, base);
-      return {id: names.script, endpoint: base + '/submit'};
+      return {endpoint: 'https://' + names.script + '.' + sub + '.workers.dev/submit'};
     },
-    async verifyFormAcceptance(site, {hostname, workerId, databaseId} = {}) {
+    async verifyFormAcceptance(site, {hostname, databaseId, gateApprovalId} = {}) {
+      // Owner-authorized: reads the actual deployed Worker bindings and the customer's own D1.
       const names = formsTarget(site, hostname);
-      const base = deployedForms.get(workerId);
-      if (workerId !== names.script || !base) deny('form_worker_unverified');
-      authorized();
-      let health = null;
-      try {
-        const res = await fetchFn(base + '/health', {redirect: 'manual', signal: AbortSignal.timeout(10000)});
-        health = res.status === 200 ? await res.json() : null;
-      } catch {}
-      authorized();
-      const bound = health?.ok === true && health.hostname === hostname;
+      if (!/^[a-f0-9-]{36}$/.test(databaseId || '') || PLATFORM_D1_IDS.includes(databaseId))
+        deny('customer_d1_unverified');
+      const settings = (await cfGet(accountRoot() + '/workers/scripts/' + names.script + '/settings'))?.result;
+      const by = Object.fromEntries((settings?.bindings || []).map(x => [x?.name, x]));
+      const workerBound = by.DB?.type === 'd1' && (by.DB.id ?? by.DB.database_id) === databaseId &&
+        by.SITE_HOSTNAME?.text === hostname && by.GATE_APPROVAL_ID?.text === gateApprovalId &&
+        by.TURNSTILE_SECRET?.type === 'secret_text';
+      if (!workerBound) return {workerBound: false, accepted: false};
+      const rows = (await cfPost(accountRoot() + '/d1/database/' + databaseId + '/query',
+        {sql: ACCEPTANCE_SQL, params: [gateApprovalId, hostname]}))?.result?.[0]?.results;
       // A row exists only after a real Siteverify pass, so this is the owner's own test submission.
-      return {serverSiteverify: bound && health.secretBound === true && health.serverSiteverify === true,
-        customerD1Bound: bound && health.d1Bound === true && typeof databaseId === 'string',
-        endToEndAccepted: bound && health.hasAcceptedSubmission === true};
+      return {workerBound, accepted: Number(rows?.[0]?.n) > 0};
     },
     async createEmailRoutingRule(zoneId, rule) {
       if (!verifiedZoneIds.has(zoneId) || !rule ||

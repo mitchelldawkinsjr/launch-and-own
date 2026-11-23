@@ -2,7 +2,8 @@
 // Uploaded verbatim to the customer's own Cloudflare account by the forms
 // provider adapter. Mirrors customer-form-worker.mjs rules on the async D1 API:
 // origin-locked, server-side Siteverify with hostname match, single-use tokens,
-// size + daily limits, retention purge on cron. Never logs or returns secrets.
+// byte-capped bodies, atomic daily quota, retention purge on cron. Never logs or
+// returns secrets or submission data.
 // shortcut: duplicates customer-form-worker.mjs checks because that module is not Worker-deployable (node:fs); unify when a bundler step exists.
 export const CUSTOMER_FORM_WORKER_MODULE = 'form.mjs';
 
@@ -19,14 +20,36 @@ async function hash(text) {
 const day = now => now - (now % 86400);
 const num = v => Number.parseInt(v, 10);
 
+// Read at most cap bytes of the actual body, whatever content-length claims.
+async function readCapped(request, cap) {
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > cap) { try { await reader.cancel(); } catch {} return null; }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+  return out;
+}
+
 async function submit(request, env) {
-  const origin = 'https://' + env.SITE_HOSTNAME;
+  const host = env.SITE_HOSTNAME, origin = 'https://' + host;
   if (request.headers.get('origin') !== origin) return json({ok: false, error: 'origin_forbidden'}, 403);
   const maxBody = num(env.MAX_BODY_BYTES), maxDay = num(env.MAX_SUBMISSIONS_PER_DAY);
-  if (Number(request.headers.get('content-length') || 0) > maxBody + 4096)
-    return json({ok: false, error: 'body_too_large'}, 413, origin);
+  // Envelope allowance covers field names, encoding and the Turnstile token (<= 2048).
+  const raw = await readCapped(request, maxBody + 4096);
+  if (!raw) return json({ok: false, error: 'body_too_large'}, 413, origin);
   let form;
-  try { form = await request.formData(); } catch { return json({ok: false, error: 'invalid_form_body'}, 400, origin); }
+  try {
+    form = await new Response(raw, {headers: {'content-type': request.headers.get('content-type') || ''}}).formData();
+  } catch { return json({ok: false, error: 'invalid_form_body'}, 400, origin); }
   const name = String(form.get('name') || '').trim();
   const email = String(form.get('email') || '').trim();
   const message = String(form.get('message') || '').trim();
@@ -37,16 +60,14 @@ async function submit(request, env) {
   if (token.length < 8 || token.length > 2048) return json({ok: false, error: 'turnstile_token_required'}, 400, origin);
   const bodyBytes = new TextEncoder().encode(JSON.stringify({name, email, message})).length;
   if (bodyBytes > maxBody) return json({ok: false, error: 'body_too_large'}, 413, origin);
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000), since = day(now), tokenHash = await hash(token);
+  // Cheap early refusals; the authoritative checks are in the atomic write below.
   const today = await env.DB.prepare(
     'SELECT COUNT(*) AS n FROM contact_submissions WHERE hostname = ? AND created_at >= ?')
-    .bind(env.SITE_HOSTNAME, day(now)).first();
+    .bind(host, since).first();
   if (Number(today?.n || 0) >= maxDay) return json({ok: false, error: 'daily_quota_exhausted'}, 429, origin);
-  // Consume the token before trusting Siteverify (single use).
-  try {
-    await env.DB.prepare('INSERT INTO turnstile_token_uses (token_hash, hostname, used_at) VALUES (?, ?, ?)')
-      .bind(await hash(token), env.SITE_HOSTNAME, now).run();
-  } catch { return json({ok: false, error: 'turnstile_token_reuse'}, 403, origin); }
+  if (await env.DB.prepare('SELECT 1 AS used FROM turnstile_token_uses WHERE token_hash = ?').bind(tokenHash).first())
+    return json({ok: false, error: 'turnstile_token_reuse'}, 403, origin);
   const body = new URLSearchParams({secret: env.TURNSTILE_SECRET, response: token});
   const ip = request.headers.get('cf-connecting-ip');
   if (ip && ip.length <= 64) body.set('remoteip', ip);
@@ -55,12 +76,23 @@ async function submit(request, env) {
     const res = await fetch(SITEVERIFY, {method: 'POST', body});
     verdict = res.status === 200 ? await res.json() : null;
   } catch { verdict = null; }
-  if (verdict?.success !== true || String(verdict.hostname || '').toLowerCase() !== env.SITE_HOSTNAME)
+  if (verdict?.success !== true || String(verdict.hostname || '').toLowerCase() !== host)
     return json({ok: false, error: 'turnstile_siteverify_rejected'}, 403, origin);
-  await env.DB.prepare('INSERT INTO contact_submissions (id, hostname, gate_approval_id, name, email, message, ' +
-    'body_bytes, turnstile_hostname, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(crypto.randomUUID(), env.SITE_HOSTNAME, env.GATE_APPROVAL_ID, name, email, message,
-      bodyBytes, env.SITE_HOSTNAME, now).run();
+  // One transaction: the submission is written only while under today's cap, and the
+  // token is recorded only with it. A replayed token hits the primary key and rolls back both.
+  let written;
+  try {
+    [written] = await env.DB.batch([
+      env.DB.prepare('INSERT INTO contact_submissions (id, hostname, gate_approval_id, name, email, message, ' +
+        'body_bytes, turnstile_hostname, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? ' +
+        'WHERE (SELECT COUNT(*) FROM contact_submissions WHERE hostname = ? AND created_at >= ?) < ?')
+        .bind(crypto.randomUUID(), host, env.GATE_APPROVAL_ID, name, email, message, bodyBytes, host, now,
+          host, since, maxDay),
+      env.DB.prepare('INSERT INTO turnstile_token_uses (token_hash, hostname, used_at) SELECT ?, ?, ? ' +
+        'WHERE changes() = 1').bind(tokenHash, host, now)
+    ]);
+  } catch { return json({ok: false, error: 'turnstile_token_reuse'}, 403, origin); }
+  if (written?.meta?.changes !== 1) return json({ok: false, error: 'daily_quota_exhausted'}, 429, origin);
   return json({ok: true}, 200, origin);
 }
 
@@ -74,18 +106,8 @@ export default {
         'access-control-allow-headers': 'content-type', 'access-control-max-age': '600', vary: 'Origin'}})
         : new Response(null, {status: 403});
     if (url.pathname === '/submit' && request.method === 'POST') return submit(request, env);
-    if (url.pathname === '/health' && request.method === 'GET') {
-      // Booleans only: binding presence and whether one Siteverify-passed submission exists for this gate.
-      let accepted = false;
-      try {
-        accepted = Boolean(await env.DB.prepare(
-          'SELECT 1 AS ok FROM contact_submissions WHERE gate_approval_id = ? LIMIT 1')
-          .bind(env.GATE_APPROVAL_ID).first());
-      } catch {}
-      return json({ok: true, d1Bound: Boolean(env.DB), secretBound: typeof env.TURNSTILE_SECRET === 'string' &&
-        env.TURNSTILE_SECRET.length >= 8, serverSiteverify: true, gateApprovalId: env.GATE_APPROVAL_ID,
-        hostname: env.SITE_HOSTNAME, hasAcceptedSubmission: accepted}, 200);
-    }
+    // Liveness only. Acceptance evidence is read by the owner through the Cloudflare API.
+    if (url.pathname === '/health' && request.method === 'GET') return json({ok: true}, 200);
     return json({ok: false, error: 'not_found'}, 404);
   },
   async scheduled(event, env) {

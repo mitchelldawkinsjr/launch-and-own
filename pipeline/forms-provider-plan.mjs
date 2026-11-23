@@ -10,7 +10,7 @@ export const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/si
 export const CUSTOMER_FORM_SCHEMA_SQL = `-- Customer-owned contact-form D1 schema (#89).
 -- Deploy only into the customer's dedicated forms database — never the
 -- Launch & Own onboarding D1, and never the platform ZIP staging store.
-CREATE TABLE contact_submissions (
+CREATE TABLE IF NOT EXISTS contact_submissions (
   id TEXT PRIMARY KEY,
   hostname TEXT NOT NULL,
   gate_approval_id TEXT NOT NULL,
@@ -21,19 +21,27 @@ CREATE TABLE contact_submissions (
   turnstile_hostname TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX idx_contact_submissions_day
+CREATE INDEX IF NOT EXISTS idx_contact_submissions_day
   ON contact_submissions (hostname, created_at);
-CREATE INDEX idx_contact_submissions_gate
+CREATE INDEX IF NOT EXISTS idx_contact_submissions_gate
   ON contact_submissions (gate_approval_id, created_at);
 
-CREATE TABLE turnstile_token_uses (
+CREATE TABLE IF NOT EXISTS turnstile_token_uses (
   token_hash TEXT PRIMARY KEY,
   hostname TEXT NOT NULL,
   used_at INTEGER NOT NULL
 );
-CREATE INDEX idx_turnstile_token_uses_day
+CREATE INDEX IF NOT EXISTS idx_turnstile_token_uses_day
   ON turnstile_token_uses (hostname, used_at);
 `;
+
+// Launch & Own's own D1 databases (onboarding, MCP bridge). A forms write may
+// never target these, whatever a receipt says (asserted against wrangler config in tests).
+export const PLATFORM_D1_IDS = Object.freeze([
+  'b89fb8aa-67a2-49fa-b48c-584e305b5bb2', '384a87b9-8f7c-4477-acbd-29d0c5d08465']);
+// The only read the owner acceptance check may send to the customer's forms D1.
+export const ACCEPTANCE_SQL =
+  'SELECT COUNT(*) AS n FROM contact_submissions WHERE gate_approval_id = ? AND hostname = ?';
 
 const PROJECT = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*-site$/;
 const UUID36 = /^[a-f0-9-]{36}$/;
@@ -93,40 +101,52 @@ export async function formWorkerUpload(config) {
 }
 
 const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const customerDb = id => UUID36.test(id || '') && !PLATFORM_D1_IDS.includes(id);
 
 /**
- * Exact allowlist for forms mutations under one approved grant. Anything not
- * listed (other paths, extra fields, other names/hosts, wrong module) is refused.
+ * Exact allowlist for forms mutations under one approved grant. `receipt` is the
+ * persisted provisioning record for this approval, read fresh by the caller, so
+ * each write is allowed only at its own step and only against the recorded
+ * customer D1. Anything not listed (other paths, extra fields, other
+ * names/hosts/databases, wrong module, a step already done) is refused.
  */
-export async function isApprovedFormsMutation({method, path, requestBody: b, accountId, pagesProjectName, hostname, gate}) {
+export async function isApprovedFormsMutation({method, path, requestBody: b, accountId, pagesProjectName,
+  hostname, gate, receipt}) {
   let names;
   try { names = formsResourceNames(pagesProjectName); } catch { return false; }
-  if (hostname !== pagesProjectName + '.pages.dev' || !/^[a-f0-9]{32}$/.test(accountId || '')) return false;
+  if (hostname !== pagesProjectName + '.pages.dev' || !/^[a-f0-9]{32}$/.test(accountId || '') ||
+      !receipt || !GATE.test(gate?.approvalId || '') || receipt.gateApprovalId !== gate.approvalId) return false;
   const root = '/accounts/' + accountId;
   const script = root + '/workers/scripts/' + names.script;
   if (method === 'POST' && path === root + '/challenges/widgets')
-    return sameJson(b, {name: names.widget, domains: [hostname], mode: 'managed'});
+    return !receipt.widgetSitekey && sameJson(b, {name: names.widget, domains: [hostname], mode: 'managed'});
   if (method === 'POST' && path === root + '/d1/database')
-    return sameJson(b, {name: names.database});
-  if (method === 'POST' && new RegExp('^' + root + '/d1/database/[a-f0-9-]{36}/query$').test(path))
-    return sameJson(b, {sql: CUSTOMER_FORM_SCHEMA_SQL});
+    return !!receipt.widgetSitekey && !receipt.databaseId && sameJson(b, {name: names.database});
+  if (method === 'POST' && path === root + '/d1/database/' + receipt.databaseId + '/query')
+    return customerDb(receipt.databaseId) && !receipt.schemaApplied && sameJson(b, {sql: CUSTOMER_FORM_SCHEMA_SQL});
   if (method === 'PUT' && path === script) {
-    if (Object.keys(b || {}).sort().join() !== 'metadata,moduleSha256' ||
+    if (!customerDb(receipt.databaseId) || !receipt.schemaApplied || receipt.workerEtag ||
+        Object.keys(b || {}).sort().join() !== 'metadata,moduleSha256' ||
         b.moduleSha256 !== await sha256(CUSTOMER_FORM_WORKER_SOURCE)) return false;
-    const m = b.metadata, by = Object.fromEntries((m?.bindings || []).map(x => [x.name, x]));
-    const expected = metadata({hostname, databaseId: by.DB?.id, secret: REDACTED,
-      maxBodyBytes: Number(by.MAX_BODY_BYTES?.text), maxSubmissionsPerDay: Number(by.MAX_SUBMISSIONS_PER_DAY?.text),
-      retentionDays: Number(by.RETENTION_DAYS?.text), gateApprovalId: by.GATE_APPROVAL_ID?.text});
-    // Limits and gate id must be exactly the live #89 cost/privacy approval.
-    return sameJson(m, expected) && UUID36.test(by.DB?.id || '') && GATE.test(gate?.approvalId || '') &&
-      by.GATE_APPROVAL_ID.text === gate.approvalId &&
-      Number(by.MAX_BODY_BYTES.text) === gate.maxBodyBytes && intIn(gate.maxBodyBytes, 256, 65536) &&
-      Number(by.MAX_SUBMISSIONS_PER_DAY.text) === gate.maxSubmissionsPerDay &&
-      intIn(gate.maxSubmissionsPerDay, 1, 1000) &&
-      Number(by.RETENTION_DAYS.text) === gate.retentionDays && intIn(gate.retentionDays, 1, 365);
+    // Limits, gate id and D1 binding must be exactly the live gate and recorded database.
+    return sameJson(b.metadata, metadata({hostname, databaseId: receipt.databaseId, secret: REDACTED,
+      maxBodyBytes: gate.maxBodyBytes, maxSubmissionsPerDay: gate.maxSubmissionsPerDay,
+      retentionDays: gate.retentionDays, gateApprovalId: gate.approvalId})) &&
+      intIn(gate.maxBodyBytes, 256, 65536) && intIn(gate.maxSubmissionsPerDay, 1, 1000) &&
+      intIn(gate.retentionDays, 1, 365);
   }
+  if (!receipt.workerEtag || receipt.endpoint) return false;
   if (method === 'PUT' && path === script + '/schedules') return sameJson(b, [{cron: FORM_WORKER_CRON}]);
   if (method === 'POST' && path === script + '/subdomain')
     return sameJson(b, {enabled: true, previews_enabled: false});
   return false;
+}
+
+/** The owner acceptance check's only non-GET: one read query on the recorded customer D1. */
+export function isApprovedFormsAcceptanceRead({method, path, requestBody: b, accountId, databaseId,
+  gateApprovalId, hostname}) {
+  return method === 'POST' && /^[a-f0-9]{32}$/.test(accountId || '') && customerDb(databaseId) &&
+    GATE.test(gateApprovalId || '') && typeof hostname === 'string' &&
+    path === '/accounts/' + accountId + '/d1/database/' + databaseId + '/query' &&
+    sameJson(b, {sql: ACCEPTANCE_SQL, params: [gateApprovalId, hostname]});
 }

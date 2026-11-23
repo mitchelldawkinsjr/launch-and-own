@@ -236,21 +236,31 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
         calls.push('turnstile');
         return {sitekey: 'widgetkey', secret: 'secret-value'};
       },
+      async readTurnstileSecret() { calls.push('secret'); return {sitekey: 'widgetkey', secret: 'secret-value'}; },
       async createCustomerD1() {
         calls.push('d1');
         return {id: 'd1-db'};
       },
+      async applyCustomerSchema() { calls.push('schema'); return {}; },
       async deployServerVerifiedFormWorker() {
         calls.push('worker');
-        return {id: 'worker-1'};
+        return {id: 'worker-1', etag: 'etag1'};
       },
-      async verifyFormAcceptance() {
-        calls.push('acceptance');
-        return {
-          serverSiteverify: true, customerD1Bound: true, endToEndAccepted: true
-        };
+      async publishFormWorker() {
+        calls.push('publish');
+        return {endpoint: 'https://esp-fern-site-form.acct.workers.dev/submit'};
       }
     },
+    formsReceipts: (() => {
+      let receipt = null;
+      return {
+        async read() { return receipt; },
+        async record({gateApprovalId, ...fields}) {
+          receipt = {gateApprovalId, ...receipt, ...fields};
+          return receipt;
+        }
+      };
+    })(),
     assertCurrentAuthorization: async () => true,
     verifyFormsCostPrivacyGate: async (args) =>
       verifyStoredFormsCostPrivacyApproval(costRow, {
@@ -263,10 +273,11 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
   };
 
   const out = await consumeStoredToolkitApproval(api);
-  assert.equal(out.workingForm, true);
+  assert.equal(out.workingForm, false);
+  assert.equal(out.status, 'form_provisioned_awaiting_acceptance');
   assert.deepEqual(
-    calls.filter(c => ['turnstile', 'd1', 'worker', 'acceptance'].includes(c)),
-    ['turnstile', 'd1', 'worker', 'acceptance']
+    calls.filter(c => ['turnstile', 'd1', 'schema', 'worker', 'publish'].includes(c)),
+    ['turnstile', 'd1', 'schema', 'worker', 'publish']
   );
 
   await assert.rejects(

@@ -377,7 +377,11 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
   };
 }
 
-async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate, fence, preflightGate}) {
+const FORMS_STEPS = ['createTurnstileWidget', 'readTurnstileSecret', 'createCustomerD1',
+  'applyCustomerSchema', 'deployServerVerifiedFormWorker', 'publishFormWorker'];
+
+async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate, fence, preflightGate,
+  formsReceipts}) {
   const {hostname, ownerEmail, review} = reviewedForms(row, site, owner);
   if (typeof verifyFormsCostPrivacyGate !== 'function')
     deny('cost_privacy_gate_required');
@@ -394,42 +398,90 @@ async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate
   if (hostname !== site.pagesProjectName + '.pages.dev' &&
       !verifiedPagesDomain(onProject, hostname))
     deny('forms_hostname_not_active');
-  if (typeof provider.createTurnstileWidget !== 'function' ||
-      typeof provider.createCustomerD1 !== 'function' ||
-      typeof provider.deployServerVerifiedFormWorker !== 'function' ||
-      typeof provider.verifyFormAcceptance !== 'function')
+  if (FORMS_STEPS.some(step => typeof provider[step] !== 'function'))
     deny('forms_provider_permissions_required');
-  // The provider adapter is solely responsible for idempotent scoped resource names,
-  // D1 schema, secret placement, server-only Siteverify, quota checks and rollback.
-  // Never return or log secrets. Unknown #89 gate means none of these methods run.
-  const widget = await guarded(fence, () => provider.createTurnstileWidget(site, {
-    hostname, jobId: row.jobId, formDigest: row.digest
-  }));
-  if (!widget?.sitekey || !widget.secret) deny('turnstile_secret_required');
-  const database = await guarded(fence, () => provider.createCustomerD1(site, {
-    jobId: row.jobId, gateApprovalId: gate.approvalId,
-    retentionDays: gate.retentionDays
-  }));
-  if (!database?.id) deny('customer_d1_required');
-  const worker = await guarded(fence, () => provider.deployServerVerifiedFormWorker(site, {
-    hostname, ownerEmail, sitekey: widget.sitekey, secret: widget.secret,
-    databaseId: database.id, siteverifyUrl: review.siteverify.url,
-    maxBodyBytes: gate.maxBodyBytes, maxSubmissionsPerDay: gate.maxSubmissionsPerDay,
-    retentionDays: gate.retentionDays, gateApprovalId: gate.approvalId
-  }));
-  if (!worker?.id) deny('server_verified_worker_required');
-  const accepted = await guarded(fence, () => provider.verifyFormAcceptance(site, {
-    hostname, workerId: worker.id, databaseId: database.id, sitekey: widget.sitekey
-  }));
-  if (accepted?.serverSiteverify !== true || accepted?.customerD1Bound !== true ||
-      accepted?.endToEndAccepted !== true)
-    deny('form_not_working_until_acceptance');
+  if (typeof formsReceipts?.read !== 'function' || typeof formsReceipts.record !== 'function')
+    deny('forms_receipts_required');
+  // Each completed provider step is recorded before the next one, so a failed run
+  // resumes from its receipts. Never return or log secrets.
+  let receipt = await guarded(fence, () => formsReceipts.read());
+  if (receipt && receipt.gateApprovalId !== gate.approvalId) deny('forms_gate_changed_reconcile');
+  const save = async fields => {
+    receipt = await guarded(fence, () => formsReceipts.record({gateApprovalId: gate.approvalId, ...fields}));
+    if (!receipt) deny('forms_receipt_not_saved');
+  };
+  if (!receipt) await save({});
+  let widget;
+  if (!receipt.widgetSitekey) {
+    widget = await guarded(fence, () => provider.createTurnstileWidget(site, {hostname}));
+    if (!widget?.sitekey || !widget.secret) deny('turnstile_secret_required');
+    await save({widgetSitekey: widget.sitekey});
+  }
+  if (!receipt.databaseId) {
+    const database = await guarded(fence, () => provider.createCustomerD1(site, {hostname}));
+    if (!database?.id) deny('customer_d1_required');
+    await save({databaseId: database.id});
+  }
+  if (!receipt.schemaApplied) {
+    await guarded(fence, () => provider.applyCustomerSchema(site, {hostname, databaseId: receipt.databaseId}));
+    await save({schemaApplied: true});
+  }
+  if (!receipt.workerEtag) {
+    widget ??= await guarded(fence, () => provider.readTurnstileSecret(site,
+      {hostname, sitekey: receipt.widgetSitekey}));
+    if (widget?.sitekey !== receipt.widgetSitekey || !widget.secret) deny('turnstile_secret_required');
+    const worker = await guarded(fence, () => provider.deployServerVerifiedFormWorker(site, {
+      hostname, ownerEmail, sitekey: widget.sitekey, secret: widget.secret,
+      databaseId: receipt.databaseId, siteverifyUrl: review.siteverify.url,
+      maxBodyBytes: gate.maxBodyBytes, maxSubmissionsPerDay: gate.maxSubmissionsPerDay,
+      retentionDays: gate.retentionDays, gateApprovalId: gate.approvalId
+    }));
+    if (!worker?.etag) deny('server_verified_worker_required');
+    await save({workerEtag: worker.etag});
+  }
+  if (!receipt.endpoint) {
+    const published = await guarded(fence, () => provider.publishFormWorker(site, {hostname}));
+    if (!published?.endpoint) deny('server_verified_worker_required');
+    await save({endpoint: published.endpoint});
+  }
+  // Provisioned is not working: the owner's own Siteverify-passed submission is checked
+  // separately by verifyProvisionedFormAcceptance.
   return {
-    kind: 'forms', hostname, status: 'form_verified',
-    workingForm: true, widgetAloneInsufficient: true,
-    customerDatabaseId: database.id, workerId: worker.id,
+    kind: 'forms', hostname, status: 'form_provisioned_awaiting_acceptance',
+    workingForm: false, widgetAloneInsufficient: true,
+    sitekey: receipt.widgetSitekey, endpoint: receipt.endpoint,
+    customerDatabaseId: receipt.databaseId, workerEtag: receipt.workerEtag,
     gateApprovalId: gate.approvalId
   };
+}
+
+/**
+ * Owner-authorized acceptance for a provisioned form. Reads the deployed Worker's
+ * bindings and the customer's own D1 (never a public endpoint), then records
+ * acceptance on the receipt. The provider must be built with an approval callback
+ * that allows only isApprovedFormsAcceptanceRead for this receipt.
+ */
+export async function verifyProvisionedFormAcceptance({principal, site, hostname, provider, formsReceipts,
+  assertCurrentAuthorization} = {}) {
+  const owner = ownerSnapshot(principal);
+  if (typeof formsReceipts?.read !== 'function' || typeof formsReceipts.record !== 'function' ||
+      typeof provider?.verifyFormAcceptance !== 'function')
+    deny('trusted_store_required');
+  const fence = () => authorized(assertCurrentAuthorization, principal, owner, site);
+  const receipt = await guarded(fence, () => formsReceipts.read());
+  if (!receipt?.endpoint || !receipt.databaseId || !receipt.workerEtag) deny('form_not_provisioned');
+  if (typeof hostname !== 'string' || !HOST.test(hostname)) deny('forms_hostname_not_active');
+  if (!receipt.acceptedAt) {
+    const check = await guarded(fence, () => provider.verifyFormAcceptance(site, {
+      hostname, databaseId: receipt.databaseId, gateApprovalId: receipt.gateApprovalId}));
+    if (check?.workerBound !== true) deny('form_worker_binding_mismatch');
+    if (check.accepted !== true) deny('form_not_working_until_acceptance');
+    const saved = await guarded(fence, () => formsReceipts.record({
+      gateApprovalId: receipt.gateApprovalId, acceptedAt: Math.floor(Date.now() / 1000)}));
+    if (!saved?.acceptedAt) deny('forms_receipt_not_saved');
+  }
+  return Object.freeze({kind: 'forms', hostname, status: 'form_verified', workingForm: true,
+    customerDatabaseId: receipt.databaseId, gateApprovalId: receipt.gateApprovalId});
 }
 
 /**
@@ -446,7 +498,7 @@ async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate
  */
 export async function consumeStoredToolkitApproval({
   approvalId, principal, approvalStore, siteStore, provider,
-  assertCurrentAuthorization, verifyFormsCostPrivacyGate
+  assertCurrentAuthorization, verifyFormsCostPrivacyGate, formsReceipts
 } = {}) {
   const owner = ownerSnapshot(principal);
   if (!UUID.test(approvalId || '') ||
@@ -491,7 +543,7 @@ export async function consumeStoredToolkitApproval({
   try {
     await fence(site);
     const work = {provider, approvalStore, site, row, owner, verifyFormsCostPrivacyGate,
-      preflightGate, fence: () => fence(site)};
+      preflightGate, formsReceipts, fence: () => fence(site)};
     const result = row.kind === 'domain' ? await domainWork(work) :
       row.kind === 'email' ? await emailWork(work) : await formsWork(work);
     await fence(site);
