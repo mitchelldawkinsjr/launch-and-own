@@ -1,25 +1,12 @@
 # Post-launch website toolkit (#87)
 
-Owner-scoped, **read-only first** view of sites already in Launch & Own launch history.
+The first toolkit view shows retained launch history for the connected GitHub user and selected Cloudflare account. Successful records include the public address, GitHub revision and time recorded when the launch was verified. The approval fingerprint identifies the approved snapshot. It does not establish a public HTML digest or current deployment.
 
-## What shipped in this slice
+| Surface | Behavior |
+| --- | --- |
+| `GET /toolkit` | Shows up to 20 launch records and their expiry dates within the 30-day retention window. Reads display fields in one scoped query and rechecks the authorization epoch before returning them. |
+| Site editing | The browser offers the existing #30 editor for eligible generated one-page sites. Imported ZIP sites continue to use their Git workflow. |
+| Update status | The open pull request has a Merge link. Closed updates lead back to the editor. Merged updates remain in verification until canonical production SHA and exact approved HTML match. |
+| Additional capabilities | Current provider links and deployment status need verified #39 inventory. Analytics and protected preview integration follow #85 and #86. |
 
-| Surface | Path | Behavior |
-| --- | --- | --- |
-| Toolkit dashboard | `GET /toolkit` | Live URL (when verified), GitHub repo link, production SHA, approved content fingerprint, honest pending/failed/reauth labels, edit link when `can_edit` |
-| Update status copy | `/site-update-status` | Approve → **Open update to publish** → Checking → Live; closed PRs retire Merge |
-| Capability labels | Toolkit cards | Same #84 state vocabulary; history projection until #39 provider reads; verified/expiry times on cards |
-
-## Explicit non-claims
-
-- Does **not** enable Cloudflare Web Analytics, Pages PR previews, DNS, email, or paid plans.
-- Does **not** call providers on `GET /toolkit` (history-first; `summarizeOwnedToolkitSite` is for owned-site + fresh reads).
-- Does **not** replace long-term inventory after 30-day TTL (#39).
-- Does **not** auto-merge GitHub PRs; customers still click Merge once; closed PRs do not show Merge.
-- Matrix / hosted_beta promotion still needs owner-live update walkthrough (#21).
-
-## Modules
-
-- `onboarding/post-launch-toolkit.mjs` — history projections + HTML helpers
-- `pipeline/toolkit-capabilities.mjs` — shared capability states + provider-truth projection (#84)
-- Thin route wiring in `onboarding/worker.mjs` (`/toolkit` only)
+A hosted rollout needs the #21 owner edit and independent customer walkthroughs plus Domain coordination. Rollback is a repository revert.
