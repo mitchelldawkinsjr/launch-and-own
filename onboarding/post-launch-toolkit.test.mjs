@@ -18,7 +18,7 @@ test('the recorded site address accepts only managed slug shapes', () => {
 test('update publication ladder highlights merge until verified live', () => {
   const waiting = updatePublicationLadder({prStatus: 'awaiting-customer-merge'});
   assert.equal(waiting.current, 'merge');
-  assert.equal(waiting.primaryAction.label, 'Open update to publish');
+  assert.equal(waiting.primaryAction.label, 'Open the change to publish');
   assert.ok(waiting.steps.some(s => s.id === 'merge' && s.active));
 
   const publishing = updatePublicationLadder({
@@ -77,7 +77,7 @@ test('history capabilities mark ZIP sites without the editor', () => {
   assert.equal(caps.website_updates.reason, 'uploaded_source_has_no_supported_editor');
 });
 
-test('update status HTML leads with Open update to publish for open PRs', () => {
+test('update status HTML leads with Open the change to publish for open PRs', () => {
   const escape = s => String(s);
   const html = renderUpdateStatusBody({
     pr: {
@@ -89,7 +89,7 @@ test('update status HTML leads with Open update to publish for open PRs', () => 
     ticketRaw: 'ticketvalue',
     escape
   });
-  assert.match(html, /Open update to publish/);
+  assert.match(html, /Open the change to publish/);
   assert.match(html, /Publish in GitHub/);
   assert.match(html, /https:\/\/github\.com\/tester\/esp-willow-studio\/pull\/3/);
   assert.doesNotMatch(html, /reviewable pull request/i);
@@ -127,13 +127,13 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   const html = await page.text();
   assert.match(html, /Your website toolkit/);
   assert.match(html, /Willow Studio/);
-  assert.match(html, /Last verified at <time/);
-  assert.match(html, /Available in history until <time/);
+  assert.match(html, /Last checked <time/);
+  assert.match(html, /Stays on this list until <time/);
   assert.match(html, /Approval fingerprint/);
   assert.match(html, /30 days/);
-  assert.match(html, /Website address at verification <code>https:\/\/esp-willow-studio-site\.pages\.dev\//);
+  assert.match(html, /Public address when checked: <code>https:\/\/esp-willow-studio-site\.pages\.dev\//);
   assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
-  assert.match(html, /Current managed sites/);
+  assert.match(html, /Sites we found in your accounts/);
   assert.match(html, /href="https:\/\/github\.com\/tester\/esp-willow-studio"/);
   assert.match(html, /Update this website/);
   assert.match(html, /Visitor insights/);
@@ -149,7 +149,7 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   h.sqlite.prepare("UPDATE onboarding_launch_jobs SET plan_json = json_set(plan_json, '$.zip', json('{}'))").run();
   const zip = await (await toolkit()).text();
   assert.doesNotMatch(zip, /Update this website/);
-  assert.match(zip, /uploaded ZIP sites keep the GitHub workflow/i);
+  assert.match(zip, /uploaded as a ZIP are updated in GitHub/i);
   assert.match(zip, /Safe website updates/);
 
   h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_account_id = ?').run('a'.repeat(32));

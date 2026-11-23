@@ -225,7 +225,7 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   const h = zipHarness(t);
   const tenant = await connectTenant(h);
   const setup = await (await h.request('/', { cookie: tenant.cookie })).text();
-  assert(setup.indexOf('Upload a built website') < setup.indexOf('Create a site'));
+  assert(setup.indexOf('Upload a website you already built') < setup.indexOf('Create a simple website'));
   assert.equal((await upload(h, tenant, { origin: 'https://unrelated.example' })).status, 403);
   assert.equal((await upload(h, tenant, { csrf: 'wrong' })).status, 400);
   assert.equal((await upload(h, tenant, { bytes: Buffer.alloc(7 * 1024 * 1024) })).status, 413);
