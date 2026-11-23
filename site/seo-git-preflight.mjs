@@ -163,7 +163,8 @@ export async function preflightApprovedSeoGitChange(input = {}) {
   for (const path of pagePaths) target(index,path,true);
   for (const path of ['public/robots.txt','public/sitemap.xml']) target(index,path,false);
 
-  await input.assertCurrentAuthorization();
+  if (await input.assertCurrentAuthorization() !== true)
+    fail('owner_authorization_revoked');
   const rebuilt = await buildSeoReviewProposal({
     sourceKind,site,trustedSite,domainEvidence,existingPaths:files
   });
@@ -204,7 +205,8 @@ export async function preflightApprovedSeoGitChange(input = {}) {
     }));
   }
   data.assertUnchanged();
-  await input.assertCurrentAuthorization();
+  if (await input.assertCurrentAuthorization() !== true)
+    fail('owner_authorization_revoked');
   data.assertUnchanged();
   return Object.freeze({
     status:'verified-seo-review-preflight',
