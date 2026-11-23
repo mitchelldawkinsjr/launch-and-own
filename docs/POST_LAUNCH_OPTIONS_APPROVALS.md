@@ -1,6 +1,6 @@
 # Post-launch stored option requests — #88
 
-The existing `/site-options` toolkit page lets a verified owner review and store separate hostname, forwarding-email, forms, visitor-insights (Web Analytics), and scoped PR-preview requests. Each request recomputes its digest server-side; email fingerprints include the **exact external mailbox and fixed contact@ alias**. Analytics and preview rows never enable a beacon or change `preview_deployment_setting` by themselves. Preview opt-in requires acknowledging that draft links can be public. Migration `0007_option_kinds_analytics_previews.sql` expands allowed kinds. Stored rows remain review records, not authority for a Cloudflare or GitHub mutation.
+The existing `/site-options` toolkit page lets a verified owner review and store separate hostname, forwarding-email, forms, visitor-insights (Web Analytics), scoped PR-preview, SEO starter, and same-host redirect requests. Each request recomputes its digest server-side; email fingerprints include the **exact external mailbox and fixed contact@ alias**. Analytics and preview rows never enable a beacon or change `preview_deployment_setting` by themselves. SEO and redirect rows never publish HTML/robots/sitemap or create Page Rules. Preview opt-in requires acknowledging that draft links can be public. Turnstile contact forms stay Siteverify-plan-only until the separate #89 cost/privacy gate. Migrations `0007` and `0009` expand allowed kinds. Stored rows remain review records, not authority for a Cloudflare or GitHub mutation.
 
 ## Applying the reviewed domain or email
 
@@ -14,7 +14,7 @@ Email execution additionally requires a matching **applied** domain execution, c
 
 Forms remain review-only until a separate #89 cost/privacy authorization, customer D1 and server-side Siteverify Worker with independent acceptance; a widget is not a working form.
 
-Visitor insights and PR preview requests stay store-only until a later operator-approved enablement. Preview enablement also requires Access review because draft URLs can be public.
+Visitor insights, PR preview, SEO, and redirect requests stay store-only until a later operator-approved enablement. Preview enablement also requires Access review because draft URLs can be public. SEO still needs verified-origin evidence plus an owner-reviewed Git PR; redirects still need Domain-approved DNS/Page Rule configuration.
 
 ## Hosted status and release
 

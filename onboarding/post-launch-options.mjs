@@ -1,18 +1,22 @@
 // Post-launch options screen: store digest-bound domain / email / forms /
-// analytics / PR-preview approvals. Store-only unless an operator grant exists.
+// analytics / PR-preview / SEO / redirect approvals. Store-only unless an
+// operator grant exists.
 import { buildDomainApprovalReview } from '../pipeline/domain-approval-review.mjs';
 import {
   buildEmailRoutingApprovalReview, ToolkitApprovalExecutionError
 } from '../pipeline/approved-extension-consumer.mjs';
 import {
-  buildAnalyticsOptInReview, buildPreviewOptInReview
+  buildAnalyticsOptInReview, buildPreviewOptInReview,
+  buildSeoOptInReview, buildRedirectOptInReview
 } from '../pipeline/option-feature-review.mjs';
 import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 import { createD1OptionExecutionStore, isOptionExecutionConfigured, optionExecutionSchemaReady } from './option-execution-store.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
-const KINDS = new Set(['domain', 'email', 'forms', 'analytics', 'pr_previews']);
+const KINDS = new Set([
+  'domain', 'email', 'forms', 'analytics', 'pr_previews', 'seo', 'redirects'
+]);
 
 const SCHEMA_PROBE = `SELECT id, job_id, github_user_id, cloudflare_account_id, kind,
   approval_digest, payload_json, status FROM onboarding_option_approvals LIMIT 0`;
@@ -122,6 +126,27 @@ function previewReview(job, session) {
   });
 }
 
+function seoReview(job, session) {
+  return buildSeoOptInReview({
+    cloudflareAccountId: job.cloudflare_account_id,
+    githubUserId: session.github_user_id,
+    pagesProjectName: pagesProjectName(job),
+    seoConsent: true
+  });
+}
+
+function redirectReview(job, session, hostname, form) {
+  return buildRedirectOptInReview({
+    cloudflareAccountId: job.cloudflare_account_id,
+    githubUserId: session.github_user_id,
+    hostname,
+    redirectConsent: true,
+    wwwMode: form.get('wwwMode') || 'none',
+    pathFrom: form.get('pathFrom') || '',
+    pathTo: form.get('pathTo') || ''
+  });
+}
+
 function storedDomainHostname(rows) {
   const row = rows.find(item => item.kind === 'domain' && item.status === 'stored');
   if (!row) return null;
@@ -214,6 +239,40 @@ function buildReview(job, current, kind, form, rows) {
       fields: { previewConsent: 'true', acknowledgePublicPreviews: 'true' }
     };
   }
+  if (kind === 'seo') {
+    if (form.get('seoConsent') !== 'true')
+      return { error: 'Confirm the SEO consent checkbox.' };
+    const review = seoReview(job, current);
+    if (review.status !== 'awaiting_seo_opt_in' || !review.approvalDigest)
+      return { error: 'SEO request is not ready to store.' };
+    return {
+      review,
+      summary: 'SEO starter request only. No HTML, robots.txt, or sitemap changes are published.',
+      fields: { seoConsent: 'true' }
+    };
+  }
+  if (kind === 'redirects') {
+    const host = storedDomainHostname(rows);
+    if (!host) return { error: 'Save a custom domain request before redirects.' };
+    if (form.get('hostname') !== host)
+      return { error: 'Redirects must use the stored custom hostname.' };
+    if (form.get('redirectConsent') !== 'true')
+      return { error: 'Confirm the redirects consent checkbox.' };
+    const review = redirectReview(job, current, host, form);
+    if (review.status !== 'awaiting_redirect_opt_in' || !review.approvalDigest)
+      return { error: 'Enter a same-host www preference or path redirect.' };
+    return {
+      review,
+      summary: 'Same-host redirect request only. No Page Rules or DNS changes are applied.',
+      fields: {
+        hostname: host,
+        redirectConsent: 'true',
+        wwwMode: review.plan.proposed.wwwMode,
+        pathFrom: form.get('pathFrom') || '',
+        pathTo: form.get('pathTo') || ''
+      }
+    };
+  }
   return { error: 'Unknown optional feature.' };
 }
 
@@ -267,7 +326,7 @@ export function createSiteOptionsRoutes({
       : '';
     const domainHost = storedDomainHostname(rows);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, enable analytics, turn on preview builds, or create a contact form.</p>';
+    const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, enable analytics, turn on preview builds, publish SEO files, create redirects, or create a contact form.</p>';
     const stored = (row, label) => row
       ? '<p role="status">Stored ' + label + ' request. Fingerprint <code>' +
         escape(row.approval_digest.slice(0, 12)) + '…</code></p>'
@@ -330,10 +389,42 @@ export function createSiteOptionsRoutes({
         '<label><input type="checkbox" name="acknowledgePublicPreviews" value="true" required> ' +
         'I understand draft preview links can be public until Access protects them.</label>') +
       '</section>';
+    const seoSection =
+      '<section><h2>SEO starter</h2>' +
+      '<p>Save a request for canonical, Open Graph, robots.txt, and sitemap review later. No site files are changed here.</p>' +
+      stored(byKind.seo, 'SEO') +
+      button('/site-options-prepare', 'Review SEO request', current.csrf,
+        hidden(job.id, 'seo') +
+        '<label><input type="checkbox" name="seoConsent" value="true" required> ' +
+        'I want an SEO starter pack reviewed later. This does not publish SEO files.</label>') +
+      '</section>';
+    const redirectsSection =
+      '<section><h2>Redirects</h2>' +
+      (domainHost
+        ? '<p>Same-host redirects for <code>' + escape(domainHost) +
+          '</code> only. No Page Rules, Bulk Redirects, or DNS writes happen here.</p>' +
+          stored(byKind.redirects, 'redirect') +
+          button('/site-options-prepare', 'Review redirect request', current.csrf,
+            hidden(job.id, 'redirects') +
+            '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
+            '<label for="opt-www-mode">Apex / www preference</label>' +
+            '<select id="opt-www-mode" name="wwwMode">' +
+            '<option value="none">No apex/www preference</option>' +
+            '<option value="apex_to_www">Prefer www</option>' +
+            '<option value="www_to_apex">Prefer apex</option></select>' +
+            '<label for="opt-path-from">Optional path from</label>' +
+            '<input id="opt-path-from" name="pathFrom" maxlength="200" placeholder="/old">' +
+            '<label for="opt-path-to">Optional path to</label>' +
+            '<input id="opt-path-to" name="pathTo" maxlength="200" placeholder="/new">' +
+            '<label><input type="checkbox" name="redirectConsent" value="true" required> ' +
+            'I want these redirects reviewed later. This does not create redirect rules.</label>')
+        : '<p>Save a custom domain request first. Redirects need that hostname.</p>') +
+      '</section>';
     return view('Optional features for ' + job.customer_name,
       notice +
       '<p><strong>Site:</strong> <code>' + website + '</code></p>' +
       domainSection + emailSection + formsSection + analyticsSection + previewSection +
+      seoSection + redirectsSection +
       '<p><a href="/toolkit">Back to toolkit</a> · <a href="/history">Launch history</a></p>');
   }
 

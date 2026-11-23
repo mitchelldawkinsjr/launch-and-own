@@ -4,13 +4,16 @@ import { buildDomainApprovalReview } from './domain-approval-review.mjs';
 import { planCustomer } from './plan-customer.mjs';
 import { buildEmailRoutingApprovalReview } from './approved-extension-consumer.mjs';
 import {
-  buildAnalyticsOptInReview, buildPreviewOptInReview
+  buildAnalyticsOptInReview, buildPreviewOptInReview,
+  buildSeoOptInReview, buildRedirectOptInReview
 } from './option-feature-review.mjs';
 
 const ID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
-const TYPES = new Set(['domain', 'email', 'forms', 'analytics', 'pr_previews']);
+const TYPES = new Set([
+  'domain', 'email', 'forms', 'analytics', 'pr_previews', 'seo', 'redirects'
+]);
 const deny = message => {throw new StoredOptionApprovalError(message);};
 
 export class StoredOptionApprovalError extends Error {
@@ -112,6 +115,30 @@ export function validateStoredOptionApproval(raw, {
         pagesProjectName: expected.plan.pagesProjectName,
         preview_deployment_setting: expected.plan.proposed.preview_deployment_setting,
         accessPolicyRequired: true
+      };
+    } else if (raw.kind === 'seo') {
+      expected = buildSeoOptInReview({
+        githubUserId, cloudflareAccountId, pagesProjectName, seoConsent: true
+      });
+      if (expected.status !== 'awaiting_seo_opt_in') deny('invalid_seo_review');
+      normalized = {
+        pagesProjectName: expected.plan.pagesProjectName,
+        feature: 'static_seo_starter'
+      };
+    } else if (raw.kind === 'redirects') {
+      expected = buildRedirectOptInReview({
+        githubUserId, cloudflareAccountId,
+        hostname: payload?.plan?.hostname,
+        redirectConsent: true,
+        wwwMode: payload?.plan?.proposed?.wwwMode || 'none',
+        pathFrom: payload?.plan?.proposed?.pathRules?.[0]?.from || '',
+        pathTo: payload?.plan?.proposed?.pathRules?.[0]?.to || ''
+      });
+      if (expected.status !== 'awaiting_redirect_opt_in') deny('invalid_redirect_review');
+      normalized = {
+        hostname: expected.plan.hostname,
+        wwwMode: expected.plan.proposed.wwwMode,
+        pathRules: expected.plan.proposed.pathRules
       };
     } else {
       deny('owned_stored_row_required');
