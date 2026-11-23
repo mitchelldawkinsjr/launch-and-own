@@ -1,6 +1,6 @@
 # Long-term managed-site inventory: read-only backend foundation (#39)
 
-**Implementation model: GPT-6 (OpenAI). Release status: draft, unmerged, not deployed.**
+**Implementation model: GPT-6 (OpenAI). Read-only foundation awaiting hosted integration.**
 
 The existing 30-day D1 launch-job history is not a long-term site catalog. This change discovers current owner-controlled Launch & Own sites directly from the connected providers, and provides the latest immutable GitHub homepage as *untrusted source content* for an eventual customer-approved edit. It never extends 30-day retention, creates a database table, rewrites a site, enables previews/Analytics, or publishes anything.
 
