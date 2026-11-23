@@ -19,6 +19,7 @@ function harness({withJobs=true}={}){
   sqlite.exec(readFileSync(new URL('./migrations/0004_launch_jobs.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('./migrations/0005_option_approvals.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('./migrations/0006_option_executions.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0007_option_kinds_analytics_previews.sql',import.meta.url),'utf8'));
  };
  if(withJobs)migrateJobs();
  const DB={

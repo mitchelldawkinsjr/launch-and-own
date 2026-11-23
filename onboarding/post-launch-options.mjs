@@ -1,15 +1,18 @@
-// Post-launch options screen: store digest-bound domain / email / forms approvals.
-// Never calls Cloudflare or GitHub. Never writes DNS, MX, Turnstile, D1, or Workers.
+// Post-launch options screen: store digest-bound domain / email / forms /
+// analytics / PR-preview approvals. Store-only unless an operator grant exists.
 import { buildDomainApprovalReview } from '../pipeline/domain-approval-review.mjs';
 import {
   buildEmailRoutingApprovalReview, ToolkitApprovalExecutionError
 } from '../pipeline/approved-extension-consumer.mjs';
+import {
+  buildAnalyticsOptInReview, buildPreviewOptInReview
+} from '../pipeline/option-feature-review.mjs';
 import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 import { createD1OptionExecutionStore, isOptionExecutionConfigured, optionExecutionSchemaReady } from './option-execution-store.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
-const KINDS = new Set(['domain', 'email', 'forms']);
+const KINDS = new Set(['domain', 'email', 'forms', 'analytics', 'pr_previews']);
 
 const SCHEMA_PROBE = `SELECT id, job_id, github_user_id, cloudflare_account_id, kind,
   approval_digest, payload_json, status FROM onboarding_option_approvals LIMIT 0`;
@@ -96,6 +99,29 @@ function formsReviewFor(job, ownerEmail) {
   }).formsReview;
 }
 
+function pagesProjectName(job) {
+  return 'esp-' + job.site_slug + '-site';
+}
+
+function analyticsReview(job, session) {
+  return buildAnalyticsOptInReview({
+    cloudflareAccountId: job.cloudflare_account_id,
+    githubUserId: session.github_user_id,
+    pagesProjectName: pagesProjectName(job),
+    analyticsConsent: true
+  });
+}
+
+function previewReview(job, session) {
+  return buildPreviewOptInReview({
+    cloudflareAccountId: job.cloudflare_account_id,
+    githubUserId: session.github_user_id,
+    pagesProjectName: pagesProjectName(job),
+    previewConsent: true,
+    acknowledgePublicPreviews: true
+  });
+}
+
 function storedDomainHostname(rows) {
   const row = rows.find(item => item.kind === 'domain' && item.status === 'stored');
   if (!row) return null;
@@ -144,22 +170,51 @@ function buildReview(job, current, kind, form, rows) {
       fields: { hostname: host, mailbox: review.plan.mailbox }
     };
   }
-  if (form.get('formsConsent') !== 'true')
-    return { error: 'Confirm the form plan consent checkbox.' };
-  let review;
-  try {
-    review = formsReviewFor(job, form.get('ownerEmail'));
-  } catch {
-    return { error: 'Enter a valid owner email for the form plan.' };
+  if (kind === 'forms') {
+    if (form.get('formsConsent') !== 'true')
+      return { error: 'Confirm the form plan consent checkbox.' };
+    let review;
+    try {
+      review = formsReviewFor(job, form.get('ownerEmail'));
+    } catch {
+      return { error: 'Enter a valid owner email for the form plan.' };
+    }
+    if (!review || review.status === 'blocked' || !review.approvalDigest ||
+        review.workingForm !== false || review.createResources !== false)
+      return { error: 'The form plan is not ready to store.' };
+    return {
+      review,
+      summary: 'Siteverify-bound form plan. No widget, D1 database, or Worker is created.',
+      fields: { ownerEmail: form.get('ownerEmail'), formsConsent: 'true' }
+    };
   }
-  if (!review || review.status === 'blocked' || !review.approvalDigest ||
-      review.workingForm !== false || review.createResources !== false)
-    return { error: 'The form plan is not ready to store.' };
-  return {
-    review,
-    summary: 'Siteverify-bound form plan. No widget, D1 database, or Worker is created.',
-    fields: { ownerEmail: form.get('ownerEmail'), formsConsent: 'true' }
-  };
+  if (kind === 'analytics') {
+    if (form.get('analyticsConsent') !== 'true')
+      return { error: 'Confirm the visitor insights consent checkbox.' };
+    const review = analyticsReview(job, current);
+    if (review.status !== 'awaiting_analytics_opt_in' || !review.approvalDigest)
+      return { error: 'Visitor insights request is not ready to store.' };
+    return {
+      review,
+      summary: 'Visitor insights request only. No analytics beacon is enabled yet.',
+      fields: { analyticsConsent: 'true' }
+    };
+  }
+  if (kind === 'pr_previews') {
+    if (form.get('previewConsent') !== 'true')
+      return { error: 'Confirm the preview opt-in checkbox.' };
+    if (form.get('acknowledgePublicPreviews') !== 'true')
+      return { error: 'Acknowledge that draft preview links can be public.' };
+    const review = previewReview(job, current);
+    if (review.status !== 'awaiting_preview_opt_in' || !review.approvalDigest)
+      return { error: 'Preview request is not ready to store.' };
+    return {
+      review,
+      summary: 'Scoped PR preview request only. Preview builds stay off until Access is reviewed.',
+      fields: { previewConsent: 'true', acknowledgePublicPreviews: 'true' }
+    };
+  }
+  return { error: 'Unknown optional feature.' };
 }
 
 export function createSiteOptionsRoutes({
@@ -212,7 +267,7 @@ export function createSiteOptionsRoutes({
       : '';
     const domainHost = storedDomainHostname(rows);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, or create a contact form.</p>';
+    const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, enable analytics, turn on preview builds, or create a contact form.</p>';
     const stored = (row, label) => row
       ? '<p role="status">Stored ' + label + ' request. Fingerprint <code>' +
         escape(row.approval_digest.slice(0, 12)) + '…</code></p>'
@@ -255,10 +310,30 @@ export function createSiteOptionsRoutes({
         '<label><input type="checkbox" name="formsConsent" value="true" required> ' +
         'I want a separate form plan reviewed later. This does not create a working form.</label>') +
       '</section>';
+    const analyticsSection =
+      '<section><h2>Visitor insights</h2>' +
+      '<p>Save a request to enable Cloudflare Web Analytics on this Pages project later. No beacon is turned on here.</p>' +
+      stored(byKind.analytics, 'visitor insights') +
+      button('/site-options-prepare', 'Review visitor insights request', current.csrf,
+        hidden(job.id, 'analytics') +
+        '<label><input type="checkbox" name="analyticsConsent" value="true" required> ' +
+        'I want visitor insights reviewed later. This does not enable analytics yet.</label>') +
+      '</section>';
+    const previewSection =
+      '<section><h2>Private update previews</h2>' +
+      '<p>Save a request for scoped GitHub PR preview builds. Draft preview links can be public, so Access must be reviewed before enablement.</p>' +
+      stored(byKind.pr_previews, 'preview') +
+      button('/site-options-prepare', 'Review preview request', current.csrf,
+        hidden(job.id, 'pr_previews') +
+        '<label><input type="checkbox" name="previewConsent" value="true" required> ' +
+        'I want scoped preview builds reviewed later. This does not turn previews on.</label>' +
+        '<label><input type="checkbox" name="acknowledgePublicPreviews" value="true" required> ' +
+        'I understand draft preview links can be public until Access protects them.</label>') +
+      '</section>';
     return view('Optional features for ' + job.customer_name,
       notice +
       '<p><strong>Site:</strong> <code>' + website + '</code></p>' +
-      domainSection + emailSection + formsSection +
+      domainSection + emailSection + formsSection + analyticsSection + previewSection +
       '<p><a href="/toolkit">Back to toolkit</a> · <a href="/history">Launch history</a></p>');
   }
 

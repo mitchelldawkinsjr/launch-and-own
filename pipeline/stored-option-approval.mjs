@@ -3,11 +3,14 @@
 import { buildDomainApprovalReview } from './domain-approval-review.mjs';
 import { planCustomer } from './plan-customer.mjs';
 import { buildEmailRoutingApprovalReview } from './approved-extension-consumer.mjs';
+import {
+  buildAnalyticsOptInReview, buildPreviewOptInReview
+} from './option-feature-review.mjs';
 
 const ID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
-const TYPES = new Set(['domain', 'email', 'forms']);
+const TYPES = new Set(['domain', 'email', 'forms', 'analytics', 'pr_previews']);
 const deny = message => {throw new StoredOptionApprovalError(message);};
 
 export class StoredOptionApprovalError extends Error {
@@ -80,7 +83,7 @@ export function validateStoredOptionApproval(raw, {
       normalized = {
         hostname: expected.plan.hostname, mailbox: expected.plan.mailbox
       };
-    } else {
+    } else if (raw.kind === 'forms') {
       expected = planCustomer({
         name: customerName, accountId: cloudflareAccountId,
         githubOwner: githubLogin, forms: true, formsConsent: true,
@@ -93,6 +96,25 @@ export function validateStoredOptionApproval(raw, {
         name: customerName,
         ownerEmail: expected.ownerEmail
       };
+    } else if (raw.kind === 'analytics') {
+      expected = buildAnalyticsOptInReview({
+        githubUserId, cloudflareAccountId, pagesProjectName, analyticsConsent: true
+      });
+      if (expected.status !== 'awaiting_analytics_opt_in') deny('invalid_analytics_review');
+      normalized = { pagesProjectName: expected.plan.pagesProjectName, feature: 'cloudflare_web_analytics' };
+    } else if (raw.kind === 'pr_previews') {
+      expected = buildPreviewOptInReview({
+        githubUserId, cloudflareAccountId, pagesProjectName,
+        previewConsent: true, acknowledgePublicPreviews: true
+      });
+      if (expected.status !== 'awaiting_preview_opt_in') deny('invalid_preview_review');
+      normalized = {
+        pagesProjectName: expected.plan.pagesProjectName,
+        preview_deployment_setting: expected.plan.proposed.preview_deployment_setting,
+        accessPolicyRequired: true
+      };
+    } else {
+      deny('owned_stored_row_required');
     }
   } catch (error) {
     if (error instanceof StoredOptionApprovalError) throw error;

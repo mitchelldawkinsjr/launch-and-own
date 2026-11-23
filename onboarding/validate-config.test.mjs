@@ -16,7 +16,7 @@ const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches
  "onboarding_option_approvals","idx_onboarding_option_approvals_owner","idx_onboarding_option_approvals_job",
  "onboarding_option_executions","idx_option_executions_owner","idx_option_executions_job_kind"];
 const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql","0004_launch_jobs.sql",
- "0005_option_approvals.sql","0006_option_executions.sql"];
+ "0005_option_approvals.sql","0006_option_executions.sql","0007_option_kinds_analytics_previews.sql"];
 const tokenColumns=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
  "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
 const mock=(overrides={})=>{
@@ -62,7 +62,7 @@ test("remote readiness checks exact D1 metadata before read-only schema query",a
  const ready=await checkRemoteSchema({accountId,token:"test-secret",databaseId:expectedId,fetchFn:h.fetchFn});
  assert.equal(ready.status,"schema-ready");
  assert.equal(ready.tables,8);assert.equal(ready.indexes,14);assert.equal(ready.triggers,1);
- assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,6);
+ assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,7);
  assert.equal(h.calls.length,5);
  assert.equal(h.calls[0].options.method,"GET");
  assert.equal(JSON.parse(h.calls[4].options.body).sql,LAUNCH_SCHEMA_PROBE);
@@ -128,7 +128,7 @@ test("missing job authorization table or preview cleanup trigger stops readiness
 test("empty or out-of-sync Wrangler migration registry blocks remote readiness",async()=>{
  const [initial,rotation,receipts,jobs,options]=migrationNames;
  for(const migrations of [[],[initial],[initial,rotation,receipts],[initial,receipts,rotation,jobs],
-  [initial,rotation,receipts,jobs],[...migrationNames,"0006_surprise.sql"]]){
+  [initial,rotation,receipts,jobs],[...migrationNames,"0008_surprise.sql"]]){
   const h=mock({migrations});
   await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/migration ledger differs/);
   assert.equal(h.calls.length,4);
