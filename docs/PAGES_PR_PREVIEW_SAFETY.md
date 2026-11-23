@@ -18,17 +18,20 @@ The accepted Cloudflare `custom` branch policy is aligned with Domain PR #90: in
 
 `pipeline/pages-pr-preview.mjs` exports `verifyExistingPrPreview({site, consent, prNumber, deploymentId}, {githubToken, cloudflareToken, fetchFn})`. Callers MUST supply `site` and `consent` from independently verified, owner-scoped backend records. Never use arbitrary browser, model, querystring or stale 30-day receipt fields. There is **no code to store approval, enable preview builds, create a branch, merge or deploy** in this PR.
 
-The function refuses to surface a preview URL without:
+### Review outcome — metadata only (Sol 6.2 Max / #96)
 
-1. An unexpired, explicit and **separate public-exposure acknowledgement**, bound to immutable GitHub owner ID, repository ID, Cloudflare account ID, Pages project ID, PR number, head SHA and approved homepage SHA-256. A site that requires private previews is rejected.
-2. Live GitHub rechecks for authenticated user, private managed repository, exact IDs, default branch and managed source marker; live Cloudflare recheck for the correct GitHub source/project/build settings and the narrow `custom` preview policy. Disabled previews return `preview-disabled` rather than a fabricated URL.
-3. An **open same-repo PR** targeting `main`, in an existing `launch-and-own/site-<20 hex>` branch with an unchanged, separately approved exact PR head SHA.
-4. A successful non-skipped Cloudflare `preview` deployment for the same immutable Pages project ID, branch, exact commit hash and GitHub push trigger. The deployment must finish its `deploy` stage.
-5. A provider-returned immutable preview URL whose single hostname label equals `deployment.short_id` (8 hexadecimal characters), matching the project `pages.dev` suffix. Never trust a moving branch alias, custom URL, user-supplied host, HTTP URL, redirect, querystring or a nested subdomain. Read `/index.html` with a 2 MiB streaming bound, no redirects, and check the original approved HTML SHA-256 **before** showing the URL.
+The current implementation **never returns a preview URL**, never requests preview HTML, and never claims that Cloudflare Access protection or signed-in content verification occurred. The only positive result is `preview-metadata-verified-protection-pending`, with `previewUrl: null`, `protectionVerified: false`, `contentVerified: false`, and `productionVerified: false`. It is NOT a publish, protected-link, or launch approval. Client-provided `accessVerified` flags and approvals cannot upgrade this state.
 
-All provider calls are GETs, with tokens confined to provider requests. Even success returns `environment:'preview'` and `productionVerified:false`. Missing/revoked authorization and provider failures cannot be converted to a fake live or preview status.
+The read-only metadata checkpoint checks:
 
-**Important:** The read-only check cannot prevent content already public on Pages from being seen independently. An application hiding a URL is never a privacy guarantee. Independently test Cloudflare Access protection with an unauthenticated browser before treating any protected preview as confidential.
+1. A trusted, unexpired, separate consent bound to immutable GitHub user and repository, Cloudflare account and Pages project, PR number, **approved base SHA and staged head SHA**, plus approved homepage digest. The digest is retained for later protected content review, but is **not compared against any public preview in this PR**.
+2. Live GitHub authenticated owner and private managed repo. The current Cloudflare project is verified using the **shared `matchesApprovedPagesProject` matcher (#95)**, plus strict decimal-safe primitive repository IDs and `source.config.owner_id` when reported. The eventual #95 merge will strengthen the shared implementation itself.
+3. An exact `custom` branch policy: only `launch-and-own/site-*` included; exactly `main` excluded; **`pr_comments_enabled: false` explicitly observed**. These settings are exposure evidence only, not protection. Native GitHub checks and retained deployment aliases may still expose preview URLs independently of this application.
+4. Same-repo, open PR with exact approved `base.sha` and `head.sha`, unchanged live `main` and staged branch tips, and a successful same-project GitHub-triggered preview deployment at that exact head. A provider URL's immutable hostname must match the reported deployment short ID, but its URL is **neither returned nor fetched**.
+
+All provider requests are authenticated GETs. The verifier makes **no request to `pages.dev`, `/index.html` or `/`**, because an anonymous content GET is not a valid Cloudflare Access-protected browser acceptance check. Missing/revoked grants, moved heads, wrong owners, unexpected settings or deployments fail closed.
+
+**The current OAuth grants cannot independently inspect Cloudflare Access applications/policies.** No preview content can be described as protected or reviewed until a separate, owner-authorized pilot establishes Access policy and exact immutable/alias host coverage before any eligible push, checks unauthenticated denial and signed-in allowed content on the canonical `/`, verifies full approved output, and tests retained deployments. The domain policy PATCH executor (#90) stays out of any release path. **Disabling new preview builds does not delete previews already published.** See #96 for the independent acceptance plan.
 
 ## Future integration and release gates
 
@@ -36,14 +39,14 @@ All provider calls are GETs, with tokens confined to provider requests. Even suc
 2. A separately reviewed UI flow must show specific repo/account/site, preview exposure, build usage and plan limits; record an independent, CSRF-protected consent with expiry and withdrawal. No automatic approval derived from ordinary website-PR approval.
 3. Privately inspect the project's existing access restrictions *before* enabling any branch previews. Confirm owner approval for exact provider changes; do not mutate settings in #86's read-only slice. New and already-launched sites follow the same check.
 4. Only after approvals, set and verify an exact project-level opt-in rule. Never change every customer project or use `all`. Test with a separately consenting account. If privacy cannot be preserved for a customer's requirements, remain disabled.
-5. Recheck PR/project/SHA, display only a verified preview; let the owner manually merge, then use the existing **canonical production SHA + public HTML digest** verifier. Preview existence is not publication proof.
+5. Recheck PR/project/SHA and separately verified Access + authenticated canonical content before any preview link is displayed; let the owner manually merge, then use the existing **canonical production SHA + public HTML digest** verifier. Preview existence is not publication proof.
 
 **Rollback:** Restore `preview_deployment_setting='none'` using a separately reviewed and authorized provider write to stop new builds. Existing preview URLs may remain public until deleted or expired; disabling new builds does *not* retroactively protect them. For published website rollback, prefer a reviewed Git revert PR, manual merge and canonical source/HTML verification rather than a Pages-only rollback that disagrees with `main`.
 
 ## Validation and status
 
-- Focused tests: `node --test pipeline/pages-pr-preview.test.mjs` (GET-only, approval/identity/tenant, branch and SHA, unsafe config, immutable URL/SSRF, failed deployments, exact HTML digest, redirects and size limits).
+- Focused tests: `node --test pipeline/pages-pr-preview.test.mjs` (GET-only, owner_id/repository identity, approved immutable base/head, branch-policy and native comment gates, deployment linkage, malicious provider URLs, no public GET, and spoofed Access flags). Signed-in Access and canonical full-artifact digest checks remain future independent acceptance gates.
 - Repository gates: `npm test`, `npm run qa:distribution`, `npm run preflight:onboarding` and recovery QA where relevant, followed by GitHub Actions CI.
-- **Not completed:** wired standalone customer UI, enabled or verified provider preview policies, live Access enforcement, owner browser consent, screenshots, independent customer acceptance #21, #39 owner inventory, Domain #2 hosted release approval. No production account, DNS, OAuth, billing or customer data was touched.
+- **Not completed:** customer UI wiring; hosted/stored consent; any approved preview enablement; signed-in Access protection and canonical content verification; protected pilot; screenshots; independent acceptance #21; #39 inventory; Domain #2 rollout approval. No production account, DNS, OAuth, billing or customer data was touched.
 
 Model attribution: **GPT-6** authored this implementation scope and its GitHub updates; Sol 6.2 Max is the cross-agent orchestration lead.
