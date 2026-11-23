@@ -1,7 +1,9 @@
 // #88 / Agent 2: backend-only Cloudflare Pages / Email Routing provider adapter.
 // Safe by default: all writes disabled unless caller explicitly wires a separately
-// operator-authorized, single-winner execution lease. NO DNS, MX, NS, mailbox,
-// billing, Turnstile, D1 or Worker mutation endpoints are present.
+// operator-authorized, single-winner execution lease. NO DNS, MX, NS, mailbox or
+// billing endpoints. Forms staging uses the same per-request operator approval
+// for the exact Turnstile widget and dedicated customer D1.
+import {formsResourceNames, isCustomerFormsDatabaseId, CUSTOMER_FORM_SCHEMA_SQL} from './forms-provider-plan.mjs';
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const NAME = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*-site$/;
 const ZONE = /^[a-f0-9]{32}$/i;
@@ -86,7 +88,7 @@ export function createCloudflareExtensionProvider({
     if (method === 'GET') {
       if (++getCount > MAX_GETS) deny('provider_request_budget_exceeded');
     } else {
-      if (!['POST'].includes(method)) deny('unsupported_mutation');
+      if (method !== 'POST') deny('unsupported_mutation');
       if (typeof assertOperatorApprovedExecution !== 'function')
         deny('separate_execution_approval_required');
       let allowed = false;
@@ -130,10 +132,17 @@ export function createCloudflareExtensionProvider({
     if (!data || typeof data !== 'object' || Array.isArray(data) ||
         (provider === 'cloudflare' && data.success !== true))
       deny('provider_malformed_response');
-    return provider === 'cloudflare' ? data : data;
+    return data;
   }
   const cfGet = (path, opts) => request('cloudflare', 'GET', path, undefined, opts);
   const cfPost = (path, body) => request('cloudflare', 'POST', path, body);
+  const accountRoot = () => '/accounts/' + owner.cloudflareAccountId;
+  function formsTarget(site, hostname) {
+    safeSite(site, owner);
+    if (hostname !== site.pagesProjectName + '.pages.dev') deny('forms_hostname_not_active');
+    return formsResourceNames(site.pagesProjectName);
+  }
+  const exactNamed = (list, name) => list.filter(x => x?.name === name);
 
   function pagesRoot(site) {
     safeSite(site, owner);
@@ -229,6 +238,40 @@ export function createCloudflareExtensionProvider({
       if (matches.some(r => r?.zone?.tag !== zoneId) || matches.length > 1)
         deny('existing_email_rule_conflict');
       return matches[0] || null;
+    },
+    async createTurnstileWidget(site, {hostname} = {}) {
+      const names = formsTarget(site, hostname);
+      const root = accountRoot() + '/challenges/widgets';
+      if (exactNamed(safePage(await cfGet(root + '?page=1&per_page=50')), names.widget).length)
+        deny('turnstile_widget_exists_reconcile');
+      const body = {name: names.widget, domains: [hostname], mode: 'managed'};
+      const w = (await cfPost(root, body))?.result;
+      if (typeof w?.sitekey !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(w.sitekey) ||
+          w.name !== names.widget || w.mode !== 'managed' ||
+          JSON.stringify(w.domains) !== JSON.stringify([hostname]))
+        deny('turnstile_widget_unverified');
+      return {sitekey: w.sitekey};
+    },
+    async createCustomerD1(site, {hostname} = {}) {
+      const names = formsTarget(site, hostname);
+      const root = accountRoot() + '/d1/database';
+      if (exactNamed(safePage(await cfGet(root + '?name=' + encodeURIComponent(names.database) +
+          '&page=1&per_page=50')), names.database).length)
+        deny('customer_d1_exists_reconcile');
+      const db = (await cfPost(root, {name: names.database}))?.result;
+      if (!isCustomerFormsDatabaseId(db?.uuid) || db.name !== names.database)
+        deny('customer_d1_unverified');
+      return {id: db.uuid, name: names.database};
+    },
+    async applyCustomerSchema(site, {hostname, databaseId} = {}) {
+      formsTarget(site, hostname);
+      if (!isCustomerFormsDatabaseId(databaseId))
+        deny('customer_d1_unverified');
+      const out = await cfPost(accountRoot() + '/d1/database/' + databaseId + '/query',
+        {sql: CUSTOMER_FORM_SCHEMA_SQL});
+      if (!Array.isArray(out?.result) || out.result.length === 0 || out.result.some(r => r?.success !== true))
+        deny('customer_d1_schema_unverified');
+      return {databaseId};
     },
     async createEmailRoutingRule(zoneId, rule) {
       if (!verifiedZoneIds.has(zoneId) || !rule ||

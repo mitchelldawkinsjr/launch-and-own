@@ -17,7 +17,7 @@ const account = 'a'.repeat(32);
 const jobId = 'a1111111-1111-4111-8111-111111111111';
 const formsDigest = planCustomer({
   name: 'Fern', accountId: account, githubOwner: 'siteowner',
-  hostname: 'example.com', forms: true, formsConsent: true,
+  hostname: 'esp-fern-site.pages.dev', forms: true, formsConsent: true,
   ownerEmail: 'user@example.net'
 }).formsReview.approvalDigest;
 
@@ -185,7 +185,7 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
     cloudflare_account_id: account,
     approval_digest: formsDigest,
     payload_json: JSON.stringify({
-      hostname: 'example.com', name: 'Fern', ownerEmail: 'user@example.net'
+      hostname: 'esp-fern-site.pages.dev', name: 'Fern', ownerEmail: 'user@example.net'
     })
   };
   const calls = [];
@@ -238,19 +238,20 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
       },
       async createCustomerD1() {
         calls.push('d1');
-        return {id: 'd1-db'};
+        return {id: '11111111-2222-3333-4444-555555555555'};
       },
-      async deployServerVerifiedFormWorker() {
-        calls.push('worker');
-        return {id: 'worker-1'};
-      },
-      async verifyFormAcceptance() {
-        calls.push('acceptance');
-        return {
-          serverSiteverify: true, customerD1Bound: true, endToEndAccepted: true
-        };
-      }
+      async applyCustomerSchema() { calls.push('schema'); return {}; }
     },
+    formsReceipts: (() => {
+      let receipt = null;
+      return {
+        async read() { return receipt; },
+        async record({gateApprovalId, ...fields}) {
+          receipt = {gateApprovalId, ...receipt, ...fields};
+          return receipt;
+        }
+      };
+    })(),
     assertCurrentAuthorization: async () => true,
     verifyFormsCostPrivacyGate: async (args) =>
       verifyStoredFormsCostPrivacyApproval(costRow, {
@@ -263,10 +264,11 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
   };
 
   const out = await consumeStoredToolkitApproval(api);
-  assert.equal(out.workingForm, true);
+  assert.equal(out.workingForm, false);
+  assert.equal(out.status, 'form_resources_staged');
   assert.deepEqual(
-    calls.filter(c => ['turnstile', 'd1', 'worker', 'acceptance'].includes(c)),
-    ['turnstile', 'd1', 'worker', 'acceptance']
+    calls.filter(c => ['turnstile', 'd1', 'schema'].includes(c)),
+    ['turnstile', 'd1', 'schema']
   );
 
   await assert.rejects(

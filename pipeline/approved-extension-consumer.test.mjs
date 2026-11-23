@@ -23,21 +23,23 @@ const emailReview = (host = 'example.com', mailbox = 'user@example.net') =>
     cloudflareAccountId: account, githubUserId: 42, hostname: host,
     domainConsent: true, mailbox
   });
-const formsReview = () => planCustomer({
+const formsHost = 'esp-fern-site.pages.dev';
+const formsDatabaseId = '11111111-2222-3333-4444-555555555555';
+const formsReview = (hostname = formsHost) => planCustomer({
   name: 'Fern', accountId: account, githubOwner: 'siteowner',
-  hostname: 'example.com', forms: true, formsConsent: true,
+  hostname, forms: true, formsConsent: true,
   ownerEmail: 'user@example.net'
 }).formsReview;
 
 function row(kind = 'domain', payload = {}, digest) {
   const plan = kind === 'domain' ? domainReview(payload.hostname || 'example.com') :
     kind === 'email' ? emailReview(payload.hostname || 'example.com', payload.mailbox || 'user@example.net') :
-    formsReview();
+    formsReview(payload.hostname);
   return {
     id, job_id: jobId, github_user_id: 42, cloudflare_account_id: account,
     status: 'approved', kind, approval_digest: digest === undefined ? plan.approvalDigest : digest,
     payload_json: JSON.stringify({
-      hostname: 'example.com',
+      hostname: kind === 'forms' ? formsHost : 'example.com',
       ...(kind === 'email' ? {mailbox: 'user@example.net'} : {}),
       ...(kind === 'forms' ? {name: 'Fern', ownerEmail: 'user@example.net'} : {}),
       ...payload
@@ -126,14 +128,19 @@ function rig(reviewRow = row(), overrides = {}) {
       calls.push('provider.turnstile'); return {sitekey: 'widgetkey', secret: 'not-in-response'};
     },
     async createCustomerD1() {
-      calls.push('provider.d1'); return {id: 'd1-id'};
+      calls.push('provider.d1'); return {id: formsDatabaseId};
     },
-    async deployServerVerifiedFormWorker() {
-      calls.push('provider.worker'); return {id: 'worker-id'};
-    },
-    async verifyFormAcceptance() {
-      calls.push('provider.acceptance');
-      return {serverSiteverify: true, customerD1Bound: true, endToEndAccepted: true};
+    async applyCustomerSchema() { calls.push('provider.schema'); return {}; }
+  };
+  state.receipt = null;
+  const formsReceipts = {
+    async read() { calls.push('receipt.read'); return state.receipt; },
+    async record({gateApprovalId, ...fields}) {
+      calls.push('receipt.record');
+      if (state.receipt && state.receipt.gateApprovalId !== gateApprovalId) return null;
+      state.receipt = {gateApprovalId, widgetSitekey: null, databaseId: null, schemaApplied: false,
+        ...state.receipt, ...fields};
+      return state.receipt;
     }
   };
   const api = {
@@ -141,7 +148,7 @@ function rig(reviewRow = row(), overrides = {}) {
     principal: owner(),
     approvalStore: store,
     siteStore: { async readLiveSite() { calls.push('site.read'); return site(); } },
-    provider,
+    provider, formsReceipts,
     assertCurrentAuthorization: async () => {calls.push('auth.check'); return true;},
     ...overrides
   };
@@ -153,7 +160,7 @@ async function rejected(r, code, {noProvider = false, noWrites = false} = {}) {
   if (noProvider) assert.equal(r.calls.some(s => s.startsWith('provider.')), false);
   if (noWrites) assert.deepEqual(r.calls.filter(s => [
     'provider.attach','provider.createRule', 'provider.turnstile',
-    'provider.d1','provider.worker'
+    'provider.d1','provider.schema','provider.worker','provider.publish'
   ].includes(s)), []);
 }
 
@@ -360,24 +367,51 @@ test('forms have no activation from a review-only #89 plan or a mere boolean gat
   await rejected(s, 'cost_privacy_gate_required', {noProvider: true});
 });
 
-test('forms must have independent exact #89 approved row and server-side Siteverify acceptance', async () => {
+const FORM_WRITES = ['provider.turnstile', 'provider.d1', 'provider.schema'];
+
+test('forms stage resources with receipts and return an exact Worker review', async () => {
   const review = row('forms');
   const r = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
-  r.state.domain = {name: 'example.com', status: 'active'};
   const out = await consumeStoredToolkitApproval(r.api);
-  assert.equal(out.workingForm, true);
   assert.equal(out.kind, 'forms');
-  assert.deepEqual(r.calls.filter(s => ['provider.turnstile','provider.d1','provider.worker','provider.acceptance'].includes(s)),
-    ['provider.turnstile','provider.d1','provider.worker','provider.acceptance']);
+  assert.equal(out.status, 'form_resources_staged');
+  assert.equal(out.workingForm, false);
+  assert.equal(out.workerReview.readyForProviderWrite, false);
+  assert.equal(out.workerReview.bindings.find(binding => binding.name === 'DB').id, formsDatabaseId);
+  assert.deepEqual(r.calls.filter(s => FORM_WRITES.includes(s)), FORM_WRITES);
+  assert.equal(r.calls.filter(s => s === 'receipt.record').length, 4);
   assert.equal(JSON.stringify(out).includes('not-in-response'), false);
-  const deniedForm = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
-  deniedForm.state.domain = {name: 'example.com', status: 'active'};
-  deniedForm.provider.verifyFormAcceptance = async () => ({
-    serverSiteverify: false, customerD1Bound: true, endToEndAccepted: true
-  });
-  await rejected(deniedForm, 'form_not_working_until_acceptance');
-  assert.equal(deniedForm.state.finished, false);
-  assert.equal(deniedForm.calls.includes('store.fail'), true);
+  assert.equal(JSON.stringify(r.state.receipt).includes('not-in-response'), false);
+  assert.equal(r.state.finished.status, 'form_resources_staged');
+});
+
+test('interrupted forms staging resumes from receipts without recreating resources', async () => {
+  const review = row('forms');
+  const r = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
+  r.provider.applyCustomerSchema = async () => {
+    r.calls.push('provider.schema');
+    throw Object.assign(new Error('x'), {code: 'provider_temporarily_unavailable'});
+  };
+  await assert.rejects(consumeStoredToolkitApproval(r.api), e => e.code === 'provider_temporarily_unavailable');
+  assert.equal(r.calls.includes('store.fail'), true);
+  assert.deepEqual([r.state.receipt.widgetSitekey, r.state.receipt.databaseId, r.state.receipt.schemaApplied],
+    ['widgetkey', formsDatabaseId, false]);
+
+  const again = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
+  again.state.receipt = r.state.receipt;
+  const out = await consumeStoredToolkitApproval(again.api);
+  assert.equal(out.status, 'form_resources_staged');
+  assert.deepEqual(again.calls.filter(s => FORM_WRITES.includes(s)), ['provider.schema']);
+
+  const changed = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
+  changed.state.receipt = {...r.state.receipt, gateApprovalId: 'other-gate'};
+  await rejected(changed, 'forms_gate_changed_reconcile', {noWrites: true});
+  const bare = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review), formsReceipts: undefined});
+  await rejected(bare, 'forms_receipts_required', {noProvider: true});
+
+  const custom = row('forms', {hostname: 'example.com'});
+  const unsupported = rig(custom, {verifyFormsCostPrivacyGate: async () => gate(custom)});
+  await rejected(unsupported, 'forms_hostname_not_active', {noProvider: true});
 });
 
 test('forms reject approval gate with a different site or missing privacy approval', async () => {

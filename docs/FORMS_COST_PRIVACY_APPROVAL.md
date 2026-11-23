@@ -15,7 +15,7 @@ Workstream C code contract for contact-form cost, privacy, retention, abuse limi
 | `onboarding/execute-option.mjs` | Forms path stays OFF unless `OPTION_FORMS_ENABLED=true` **and** a live approved gate row exists |
 | `pipeline/customer-form-worker.mjs` | Customer D1 schema + Siteverify handler + acceptance probe ([docs](CUSTOMER_FORM_WORKER.md)) |
 
-`canActivate` / `canWrite` / `createResources` stay false on reviews. The Cloudflare extension provider still has **no** live Turnstile/D1/form-Worker create methods, so even a correctly wired gate cannot provision Cloudflare resources until Domain adds those adapters under a separate approval.
+`canActivate` / `canWrite` / `createResources` stay false on reviews. A current cost/privacy grant plus a separate operator execution grant can authorize the three staging operations described in the forms Worker guide. Worker deployment and exact owner acceptance require separate reviews. [Staging and recovery](CUSTOMER_FORM_WORKER.md)
 
 ## Gate shape
 
@@ -29,12 +29,12 @@ An approved `0008` row must bind:
 
 Budget `planDigest` values from `prepareOptionalExtensionReview` are **not** this gate.
 
-## Hosted rollout (Domain #2 — not done by this workstream)
+## Hosted rollout (Domain #2)
 
-1. Apply `0008` only after Domain approval (after `0006`/`0007` as required).
-2. Keep `OPTION_FORMS_ENABLED` unset/false until provider adapters, secret handling, and independent acceptance exist.
-3. Insert operator-approved `0008` rows out of band; never from a browser checkbox.
-4. Schedule customer-owned Turnstile → dedicated D1 → Siteverify Worker → e2e acceptance.
+1. Apply `0010` after confirming the ledger through `0009` and the dedicated onboarding D1 identity. The migration retains historical grants when an owner replaces consent.
+2. Leave `OPTION_FORMS_ENABLED` unset outside a Domain-approved pilot with an exact owner grant.
+3. Record cost/privacy grants through the operator workflow for the current consent.
+4. Review the staged Turnstile widget and dedicated D1 before separately approving Worker deployment and the owner's exact test.
 5. Independent #21 customer test remains separate.
 
 Sol coordinates under [#83](https://github.com/mitchelldawkinsjr/launch-and-own/issues/83). Parent: [#89](https://github.com/mitchelldawkinsjr/launch-and-own/issues/89).

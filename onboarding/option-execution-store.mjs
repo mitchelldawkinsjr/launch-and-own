@@ -2,6 +2,9 @@
 // This module never grants its own approvals. No browser values can create an
 // 'approved' row. An operator must authorize the exact immutable snapshot out
 // of band before this store can claim an action.
+import {isApprovedFormsMutation} from '../pipeline/forms-provider-plan.mjs';
+import {createFormsCostPrivacyGate} from './forms-cost-privacy-store.mjs';
+import {createD1FormsProvisioningStore} from './forms-provisioning-store.mjs';
 import { hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 import { readOwnedStoredOptionApproval } from './stored-option-approvals.mjs';
 
@@ -229,23 +232,53 @@ export function createD1OptionExecutionStore(env, current) {
         "JOIN onboarding_launch_jobs j ON j.id = x.job_id " +
         "WHERE x.id = ? AND x.lease_id = ? AND x.status = 'applying' " +
         "AND x.authorization_epoch = ? AND o.status = 'stored' " +
+        "AND (x.kind != 'forms' OR x.expires_at > ?) " +
         "AND o.job_id = x.job_id AND o.github_user_id = x.github_user_id " +
         "AND o.cloudflare_account_id = x.cloudflare_account_id AND o.kind = x.kind " +
         "AND o.approval_digest = x.approval_digest " +
         "AND j.status = 'live' AND j.expires_at > ? " +
         "AND j.repository_id = x.repository_id AND j.pages_project_id = x.pages_project_id " +
         "AND j.expected_commit_sha = x.expected_commit_sha"
-      ).bind(id, lease, current.authorization_epoch, stamp()).first();
+      ).bind(id, lease, current.authorization_epoch, stamp(), stamp()).first();
       if (!row) return false;
     }
     return true;
   }
+
+  // Receipts exist only for the claimed forms execution; recording requires the live lease.
+  function provisioning() {
+    if (!pending || pending.raw.kind !== 'forms' || !claims.has(pending.raw.id)) return null;
+    return createD1FormsProvisioningStore(env, current,
+      {optionApprovalId: pending.raw.option_approval_id, jobId: pending.raw.job_id});
+  }
+  const formsReceipts = Object.freeze({
+    async read() { return await provisioning()?.read() ?? null; },
+    async record(fields) {
+      if (!await assertCurrentAuthorization()) return null;
+      return await provisioning()?.record(fields) ?? null;
+    }
+  });
 
   async function assertOperatorApprovedExecution({provider, method, path, requestBody}) {
     if (provider !== 'cloudflare' || method !== 'POST' ||
         !pending || !claims.has(pending.raw.id) ||
         !await assertCurrentAuthorization()) return false;
     const x = pending.raw, p = pending.reviewed.normalizedPayload;
+    if (x.kind === 'forms') {
+      const site = pending.reviewed.currentSite;
+      let gate = null;
+      try {
+        gate = await createFormsCostPrivacyGate(env, current)({jobId: x.job_id,
+          owner: {githubUserId: current.github_user_id, githubLogin: current.github_login,
+            cloudflareAccountId: current.cloudflare_account_id},
+          site, formsDigest: x.approval_digest});
+      } catch { return false; }
+      // Read the receipt fresh: each write is bound to its own step and the recorded D1.
+      const receipt = await provisioning()?.read();
+      return isApprovedFormsMutation({method, path, requestBody, gate, receipt,
+        accountId: x.cloudflare_account_id, pagesProjectName: site.pagesProjectName, hostname: p.hostname}) &&
+        await assertCurrentAuthorization();
+    }
     if (x.kind === 'domain') {
       return path === '/accounts/' + x.cloudflare_account_id +
         '/pages/projects/' + pending.reviewed.currentSite.pagesProjectName + '/domains' &&
@@ -271,6 +304,6 @@ export function createD1OptionExecutionStore(env, current) {
   return Object.freeze({
     approvalStore,
     siteStore: {readLiveSite: ({jobId}) => liveSite(jobId)},
-    assertCurrentAuthorization, assertOperatorApprovedExecution
+    assertCurrentAuthorization, assertOperatorApprovedExecution, formsReceipts
   });
 }

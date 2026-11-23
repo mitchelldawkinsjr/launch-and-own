@@ -637,6 +637,11 @@ async function applyApprovedOption(request,env,current){
       return fail('That option has no currently authorized activation grant.',403);
     throw error;
   }
+  if(result.kind==='forms')return view('Contact form setup',
+    '<p>Your Turnstile widget and dedicated database are ready for Worker review. Publishing the form and testing a submission need separate approval.</p>'+
+    '<p>Worker <code>'+escape(result.workerReview.scriptName)+'</code></p>'+
+    '<p>Code SHA-256 <code>'+escape(result.workerReview.moduleSha256)+'</code></p>'+
+    '<p><a href="/toolkit">Back to toolkit</a></p>');
   const label=result.kind==='domain'
     ?result.status==='attached_active'
       ?'The custom hostname is active on your Pages project.'
