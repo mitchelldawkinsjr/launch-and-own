@@ -4,6 +4,7 @@
 // separate release gate (#86/#96).
 import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
 import { isManagedRepositoryDescription } from './managed-site-repository.mjs';
+import { classifyPreviewPolicy } from './pages-preview-policy.mjs';
 // This module NEVER enables previews, publishes content, creates PRs, or trusts a URL
 // supplied by the browser. Call it only with server-verified site inventory and a
 // server-persisted, separately confirmed per-PR approval receipt.
@@ -13,7 +14,6 @@ const ACCOUNT = /^[a-f0-9]{32}$/;
 const UPDATE_BRANCH = /^launch-and-own\/site-[a-f0-9]{20}$/;
 const DEPLOYMENT_ID = /^[a-zA-Z0-9-]{8,64}$/;
 const enc = encodeURIComponent;
-const approvedInclude = 'launch-and-own/site-*';
 function sameGitHubId(value, expected) {
   // Mirror the strict positive, safe primitive-ID rule in #95 until it merges.
   const valid = v => (typeof v === 'number' || (typeof v === 'string' && /^[1-9]\d*$/.test(v))) &&
@@ -148,16 +148,9 @@ export async function verifyExistingPrPreview(input, {
       repo?.default_branch !== 'main' || !isManagedRepositoryDescription(repo?.description, slug))
     return denied('blocked-github-ownership');
   if (!validateProject(project, s)) return denied('blocked-pages-project-identity');
-  const cfg = project.source.config;
-  if (cfg.preview_deployment_setting === 'none') return denied('preview-disabled');
-  if (cfg.preview_deployment_setting !== 'custom' ||
-      !Array.isArray(cfg.preview_branch_includes) ||
-      cfg.preview_branch_includes.length !== 1 || cfg.preview_branch_includes[0] !== approvedInclude ||
-      !Array.isArray(cfg.preview_branch_excludes) ||
-      cfg.preview_branch_excludes.length !== 1 ||
-      cfg.preview_branch_excludes[0] !== 'main' ||
-      cfg.pr_comments_enabled !== false)
-    return denied('blocked-unsafe-preview-policy');
+  const {state: policy} = classifyPreviewPolicy(project);
+  if (policy === 'off') return denied('preview-disabled');
+  if (policy !== 'scoped') return denied('blocked-unsafe-preview-policy');
   const branch = pr?.head?.ref;
   if (pr?.state !== 'open' || pr?.number !== prNumber ||
       pr?.base?.ref !== 'main' || pr?.base?.sha !== c.approvedBaseSha ||
