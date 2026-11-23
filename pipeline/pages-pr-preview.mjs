@@ -1,4 +1,9 @@
-// Read-only verification of an already-existing, consented Cloudflare Pages PR preview.
+// GPT-6 / #86. Read-only metadata inspection of an existing, owner-approved
+// Pages preview. Never return or fetch a preview URL or assert Access protection.
+// Provider-backed protection plus signed-in canonical '/' verification is a
+// separate release gate (#86/#96).
+import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
+import { isManagedRepositoryDescription } from './managed-site-repository.mjs';
 // This module NEVER enables previews, publishes content, creates PRs, or trusts a URL
 // supplied by the browser. Call it only with server-verified site inventory and a
 // server-persisted, separately confirmed per-PR approval receipt.
@@ -7,9 +12,14 @@ const DIGEST = /^[a-f0-9]{64}$/;
 const ACCOUNT = /^[a-f0-9]{32}$/;
 const UPDATE_BRANCH = /^launch-and-own\/site-[a-f0-9]{20}$/;
 const DEPLOYMENT_ID = /^[a-zA-Z0-9-]{8,64}$/;
-const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const enc = encodeURIComponent;
 const approvedInclude = 'launch-and-own/site-*';
+function sameGitHubId(value, expected) {
+  // Mirror the strict positive, safe primitive-ID rule in #95 until it merges.
+  const valid = v => (typeof v === 'number' || (typeof v === 'string' && /^[1-9]\\d*$/.test(v))) &&
+    Number.isSafeInteger(Number(v)) && Number(v) > 0;
+  return valid(value) && valid(expected) && String(Number(value)) === String(Number(expected));
+}
 
 function denied(code) { return { status: code, previewUrl: null, productionVerified: false }; }
 function required(input) {
@@ -31,27 +41,21 @@ function required(input) {
       c.githubUserId !== s.githubUserId || c.githubRepositoryId !== s.githubRepositoryId ||
       c.cloudflareAccountId !== s.cloudflareAccountId || c.pagesProjectId !== s.pagesProjectId ||
       c.prNumber !== input.prNumber || !SHA.test(c.approvedHeadSha || '') ||
+      !SHA.test(c.approvedBaseSha || '') ||
       !DIGEST.test(c.approvedHtmlSha256 || '') ||
       !Number.isSafeInteger(c.expiresAt) || c.expiresAt <= Math.floor(Date.now() / 1000)) return false;
   return true;
 }
-function managedDescription(desc, slug) {
-  if (desc === `Launch & Own managed site: ${slug}` || desc === `Elite Site Pipeline managed site: ${slug}`) return true;
-  return typeof desc === 'string' &&
-    new RegExp(`^Launch & Own managed site: ${slug} \\[job:[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\\]$`).test(desc);
-}
 function validateProject(project, site) {
   const cfg = project?.source?.config;
-  return project?.id === site.pagesProjectId && project?.name === site.pagesProjectName &&
-    project?.subdomain === site.pagesProjectName + '.pages.dev' &&
-    project?.production_branch === 'main' && project?.source?.type === 'github' &&
-    cfg?.owner?.toLowerCase() === site.githubOwner.toLowerCase() &&
-    String(cfg?.repo_id) === String(site.githubRepositoryId) &&
-    cfg?.repo_name === site.githubRepositoryName && cfg?.production_deployments_enabled !== false &&
-    project?.uses_functions !== true &&
-    !project?.build_config?.build_command &&
-    ['', '/', null, undefined].includes(project?.build_config?.root_dir) &&
-    ['public', '/public'].includes(project?.build_config?.destination_dir);
+  // Reuse the shared #95-approved project matcher. These explicit ID fences
+  // apply even before #95's stronger implementation is merged into main.
+  return matchesApprovedPagesProject(project, {
+    name: site.pagesProjectName, owner: site.githubOwner, ownerId: site.githubUserId,
+    repositoryName: site.githubRepositoryName, repositoryId: site.githubRepositoryId,
+    branch: 'main', projectId: site.pagesProjectId
+  }) && sameGitHubId(cfg?.repo_id, site.githubRepositoryId) &&
+    (cfg?.owner_id == null || sameGitHubId(cfg.owner_id, site.githubUserId));
 }
 function safeImmutableUrl(raw, projectName, deploymentShortId) {
   if (typeof raw !== 'string') return null;
@@ -81,34 +85,10 @@ async function getJson(fetchFn, url, token, {cloudflare = false} = {}) {
     throw Error('Cloudflare preview read was not verified');
   return cloudflare ? payload.result : payload;
 }
-async function htmlSha256(fetchFn, url) {
-  const response = await fetchFn(url + '/index.html', {method: 'GET', redirect: 'manual', headers: {accept: 'text/html'}});
-  if (response.status !== 200 || !response.headers?.get('content-type')?.toLowerCase().startsWith('text/html'))
-    return null;
-  const length = Number(response.headers.get('content-length'));
-  if (Number.isFinite(length) && length > MAX_HTML_BYTES) return null;
-  if (!response.body || typeof response.body.getReader !== 'function') return null;
-  const reader = response.body.getReader();
-  const chunks = []; let size = 0;
-  try {
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_HTML_BYTES) return null;
-      chunks.push(value);
-    }
-  } finally { await reader.cancel().catch(() => {}); }
-  const bytes = new Uint8Array(size); let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
-    b => b.toString(16).padStart(2, '0')).join('');
-}
-
 /**
  * Provider records are re-fetched using active owner-scoped grants; no resource
  * writes are performed. `site` and `consent` MUST come from trusted backend state,
- * NEVER request fields or a model response. Returns no URL until every check passes.
+ * NEVER request fields or a model response. Never returns a preview URL or claims content/Access protection.
  * This is not a preview-enablement action or a canonical production verifier.
  */
 export async function verifyExistingPrPreview(input, {githubToken, cloudflareToken, fetchFn = fetch} = {}) {
@@ -129,7 +109,7 @@ export async function verifyExistingPrPreview(input, {githubToken, cloudflareTok
       repo?.id !== s.githubRepositoryId || repo?.owner?.id !== s.githubUserId ||
       repo?.owner?.login?.toLowerCase() !== s.githubOwner.toLowerCase() ||
       repo?.name !== s.githubRepositoryName || repo?.private !== true ||
-      repo?.default_branch !== 'main' || !managedDescription(repo?.description, slug))
+      repo?.default_branch !== 'main' || !isManagedRepositoryDescription(repo?.description, slug))
     return denied('blocked-github-ownership');
   if (!validateProject(project, s)) return denied('blocked-pages-project-identity');
   const cfg = project.source.config;
@@ -140,15 +120,23 @@ export async function verifyExistingPrPreview(input, {githubToken, cloudflareTok
       !Array.isArray(cfg.preview_branch_excludes) ||
       cfg.preview_branch_excludes.length !== 1 ||
       cfg.preview_branch_excludes[0] !== 'main' ||
-      cfg.pr_comments_enabled === true)
+      cfg.pr_comments_enabled !== false)
     return denied('blocked-unsafe-preview-policy');
   const branch = pr?.head?.ref;
   if (pr?.state !== 'open' || pr?.number !== prNumber ||
-      pr?.base?.ref !== 'main' || pr?.base?.repo?.id !== s.githubRepositoryId ||
+      pr?.base?.ref !== 'main' || pr?.base?.sha !== c.approvedBaseSha ||
+      pr?.base?.repo?.id !== s.githubRepositoryId ||
+      (pr?.base?.repo?.owner?.id != null && pr.base.repo.owner.id !== s.githubUserId) ||
       pr?.head?.repo?.id !== s.githubRepositoryId ||
+      (pr?.head?.repo?.owner?.id != null && pr.head.repo.owner.id !== s.githubUserId) ||
       !UPDATE_BRANCH.test(branch || '') || pr?.head?.sha !== c.approvedHeadSha)
     return denied('blocked-pr-or-revision');
-  const ghBranch = await getJson(fetchFn, ghRoot + '/branches/' + enc(branch), githubToken);
+  const [baseBranch, ghBranch] = await Promise.all([
+    getJson(fetchFn, ghRoot + '/branches/main', githubToken),
+    getJson(fetchFn, ghRoot + '/branches/' + enc(branch), githubToken)
+  ]);
+  if (baseBranch?.commit?.sha !== c.approvedBaseSha)
+    return denied('blocked-pr-base-moved');
   if (ghBranch?.commit?.sha !== c.approvedHeadSha)
     return denied('blocked-pr-head-moved');
   const deployment = await getJson(fetchFn, cfRoot + '/deployments/' + enc(deploymentId), cloudflareToken, {cloudflare: true});
@@ -161,13 +149,15 @@ export async function verifyExistingPrPreview(input, {githubToken, cloudflareTok
       deployment?.deployment_trigger?.metadata?.commit_hash !== c.approvedHeadSha ||
       deployment?.deployment_trigger?.metadata?.commit_dirty === true)
     return denied('preview-not-verified');
-  const url = safeImmutableUrl(deployment.url, s.pagesProjectName, deployment.short_id);
-  if (!url) return denied('blocked-preview-url');
-  const observedHtmlSha256 = await htmlSha256(fetchFn, url);
-  if (observedHtmlSha256 !== c.approvedHtmlSha256)
-    return denied('blocked-preview-html-mismatch');
-  return {status: 'preview-verified', previewUrl: url,
-    deploymentId, githubHeadSha: c.approvedHeadSha,
-    htmlSha256: observedHtmlSha256, environment: 'preview', productionVerified: false,
-    note: 'Public preview only; the PR has not been merged and production is not verified.'};
+  if (!safeImmutableUrl(deployment.url, s.pagesProjectName, deployment.short_id))
+    return denied('blocked-preview-url');
+  // Never access /index.html anonymously. Authenticated canonical '/' review and
+  // independently observed Access policy/host protection are not in current scopes.
+  return {
+    status: 'preview-metadata-verified-protection-pending',
+    previewUrl: null, deploymentId, githubBaseSha: c.approvedBaseSha,
+    githubHeadSha: c.approvedHeadSha, environment: 'preview',
+    protectionVerified: false, contentVerified: false, productionVerified: false,
+    note: 'Deployment metadata only; access protection and signed-in canonical content have not been verified.'
+  };
 }
