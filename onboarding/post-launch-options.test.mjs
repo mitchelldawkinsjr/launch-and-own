@@ -281,3 +281,74 @@ test('analytics and preview opt-ins store without enabling provider settings', a
     /pages\/projects|analytics|preview_deployment/i.test(c.url)
   ).length, 0);
 });
+test('SEO and redirect opt-ins store without publishing files or Page Rules', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const { tenant, id } = await liveSite(h, t);
+
+  const page = await (await h.request('/site-options?id=' + id, { cookie: tenant.cookie })).text();
+  assert.match(page, /SEO starter/);
+  assert.match(page, /Save a custom domain request first\. Redirects need that hostname/);
+
+  const seoPrep = await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'seo', seoConsent: 'true'
+  });
+  assert.equal(seoPrep.status, 200);
+  const seoDigest = (await seoPrep.text()).match(/name="digest" value="([a-f0-9]{64})"/)?.[1];
+  assert.ok(seoDigest);
+  assert.equal((await post(h, '/site-options-approve', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'seo', seoConsent: 'true', digest: seoDigest
+  })).status, 303);
+
+  assert.equal((await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'redirects',
+    hostname: 'www.example.com', redirectConsent: 'true', wwwMode: 'apex_to_www'
+  })).status, 400);
+
+  const domainPrep = await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'domain', hostname: 'www.example.com'
+  });
+  const domainDigest = (await domainPrep.text()).match(/name="digest" value="([a-f0-9]{64})"/)?.[1];
+  assert.equal((await post(h, '/site-options-approve', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'domain', hostname: 'www.example.com', digest: domainDigest
+  })).status, 303);
+
+  const redirectPrep = await post(h, '/site-options-prepare', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'redirects',
+    hostname: 'www.example.com', redirectConsent: 'true',
+    wwwMode: 'apex_to_www', pathFrom: '/old', pathTo: '/new'
+  });
+  assert.equal(redirectPrep.status, 200);
+  const redirectHtml = await redirectPrep.text();
+  assert.match(redirectHtml, /No Page Rules|redirect request only/i);
+  const redirectDigest = redirectHtml.match(/name="digest" value="([a-f0-9]{64})"/)?.[1];
+  assert.ok(redirectDigest);
+  assert.equal((await post(h, '/site-options-approve', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'redirects',
+    hostname: 'www.example.com', redirectConsent: 'true',
+    wwwMode: 'apex_to_www', pathFrom: '/old', pathTo: '/new', digest: redirectDigest
+  })).status, 303);
+
+  const job = jobRow(h);
+  const owner = {
+    jobId: id,
+    githubUserId: job.github_user_id,
+    githubLogin: job.github_login,
+    cloudflareAccountId: job.cloudflare_account_id,
+    customerName: job.customer_name,
+    pagesProjectName: 'esp-' + job.site_slug + '-site'
+  };
+  const seoRow = h.sqlite.prepare(
+    'SELECT * FROM onboarding_option_approvals WHERE job_id = ? AND kind = ?'
+  ).get(id, 'seo');
+  const redirectRow = h.sqlite.prepare(
+    'SELECT * FROM onboarding_option_approvals WHERE job_id = ? AND kind = ?'
+  ).get(id, 'redirects');
+  assert.equal(validateStoredOptionApproval(seoRow, owner).canActivate, false);
+  assert.equal(
+    validateStoredOptionApproval(redirectRow, owner).normalizedPayload.wwwMode,
+    'apex_to_www'
+  );
+  assert.equal(JSON.parse(seoRow.payload_json).canWrite, false);
+  assert.equal(JSON.parse(redirectRow.payload_json).plan.proposed.premiumWafIncluded, false);
+});
