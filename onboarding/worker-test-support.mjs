@@ -18,6 +18,7 @@ function harness({withJobs=true}={}){
  const migrateJobs=()=>{
   sqlite.exec(readFileSync(new URL('./migrations/0004_launch_jobs.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('./migrations/0005_option_approvals.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0006_option_executions.sql',import.meta.url),'utf8'));
  };
  if(withJobs)migrateJobs();
  const DB={
@@ -45,7 +46,7 @@ function harness({withJobs=true}={}){
  };
  const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',GH_APP_SLUG:'launch-and-own',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
  const calls=[];
- const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,failPagesOnce:false,
+ const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,customDomain:null,failPagesOnce:false,
   failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42,
   updateBranch:null,updateHtml:null,updatePr:null,updateFileWrites:0,denyPullRequests:false};
  const fetchFn=async(url,opts={})=>{
@@ -155,6 +156,16 @@ function harness({withJobs=true}={}){
       :new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});
+  if(url===pages+'/esp-willow-studio-site/domains/www.example.com' && opts.method!=='POST')
+    return resourceState.customDomain
+      ?Response.json({success:true,result:resourceState.customDomain})
+      :new Response('{}',{status:404});
+  if(url===pages+'/esp-willow-studio-site/domains' && opts.method==='POST'){
+    const body=JSON.parse(opts.body);
+    if(body.name!=='www.example.com')throw Error('Unexpected domain attachment');
+    resourceState.customDomain={name:body.name,status:'pending'};
+    return Response.json({success:true,result:resourceState.customDomain},{status:201});
+  }
   if((url===pages||url.startsWith(pages+'?')) && (opts.method||'GET')==='GET'){
     const listed=resourceState.pages
       ?[{id:resourceState.pages.id,name:resourceState.pages.name}]:[];
