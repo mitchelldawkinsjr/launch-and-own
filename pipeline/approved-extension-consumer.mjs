@@ -77,10 +77,10 @@ function checkedSite(raw, row, owner) {
   });
 }
 
-function checkedHostname(raw) {
+function checkedHostname(raw, {allowPagesDev = false} = {}) {
   if (typeof raw !== 'string' || raw !== raw.trim()) deny('hostname_required');
   const value = lower(raw);
-  if (!HOST.test(value) || value.length > 253 || value.endsWith('.pages.dev') ||
+  if (!HOST.test(value) || value.length > 253 || (!allowPagesDev && value.endsWith('.pages.dev')) ||
       /\.(?:localhost|local|internal|invalid|test)$/.test(value))
     deny('hostname_required');
   return value;
@@ -108,7 +108,9 @@ function reviewedDomain(row, owner, {withMailbox = false} = {}) {
 }
 
 function reviewedForms(row, site, owner) {
-  const host = checkedHostname(row.payload.hostname);
+  const host = checkedHostname(row.payload.hostname, {allowPagesDev: true});
+  if (host.endsWith('.pages.dev') && host !== site.pagesProjectName + '.pages.dev')
+    deny('forms_site_mismatch');
   if (!mailbox(row.payload.ownerEmail) || typeof row.payload.name !== 'string' ||
       !row.payload.name.trim() || row.payload.name.length > 100)
     deny('forms_consent_payload_invalid');
@@ -144,12 +146,19 @@ async function authorized(assertCurrentAuthorization, principal, owner, site) {
     deny('authorization_changed');
 }
 
-async function livePagesAndRepo(provider, site) {
+async function guarded(fence, call) {
+  await fence();
+  const result = await call();
+  await fence();
+  return result;
+}
+
+async function livePagesAndRepo(provider, site, fence) {
   if (typeof provider?.readPagesProject !== 'function' ||
       typeof provider?.readGithubRepository !== 'function')
     deny('provider_read_fence_required');
-  const project = await provider.readPagesProject(site);
-  const repo = await provider.readGithubRepository(site);
+  const project = await guarded(fence, () => provider.readPagesProject(site));
+  const repo = await guarded(fence, () => provider.readGithubRepository(site));
   if (repo?.id !== site.repositoryId || repo?.private !== true ||
       repo?.owner?.id !== site.githubUserId ||
       lower(repo?.owner?.login) !== lower(site.githubLogin) ||
@@ -191,16 +200,16 @@ function validGate(gate, row, site) {
     gate.maxBodyBytes <= 65536;
 }
 
-async function domainWork({provider, site, row, owner}) {
+async function domainWork({provider, site, row, owner, fence}) {
   const {hostname} = reviewedDomain(row, owner);
-  const existing = await provider.readPagesDomain(site, hostname);
+  const existing = await guarded(fence, () => provider.readPagesDomain(site, hostname));
   if (existing && existing.name !== hostname) deny('pages_domain_conflict');
   if (!existing) {
     if (typeof provider.attachPagesDomain !== 'function') deny('domain_permission_required');
-    const attached = await provider.attachPagesDomain(site, {name: hostname});
+    const attached = await guarded(fence, () => provider.attachPagesDomain(site, {name: hostname}));
     if (attached?.name !== hostname) deny('pages_attach_unverified');
   }
-  const verified = await provider.readPagesDomain(site, hostname);
+  const verified = await guarded(fence, () => provider.readPagesDomain(site, hostname));
   if (!verified || verified.name !== hostname ||
       !['active', 'pending', 'initializing'].includes(verified.status))
     deny('pages_attach_unverified');
@@ -211,14 +220,14 @@ async function domainWork({provider, site, row, owner}) {
   };
 }
 
-async function emailWork({provider, approvalStore, site, row, owner}) {
+async function emailWork({provider, approvalStore, site, row, owner, fence}) {
   const {hostname, mailbox: dest} = reviewedDomain(row, owner, {withMailbox: true});
   if (typeof approvalStore.readAppliedDomain !== 'function')
     deny('applied_domain_row_required');
-  const applied = await approvalStore.readAppliedDomain({
+  const applied = await guarded(fence, () => approvalStore.readAppliedDomain({
     jobId: row.jobId, githubUserId: owner.githubUserId,
     cloudflareAccountId: owner.cloudflareAccountId, hostname
-  });
+  }));
   if (applied?.status !== 'applied' || applied.job_id !== row.jobId ||
       applied.github_user_id !== owner.githubUserId ||
       applied.cloudflare_account_id !== owner.cloudflareAccountId ||
@@ -228,7 +237,7 @@ async function emailWork({provider, approvalStore, site, row, owner}) {
     digest: lower(applied.approval_digest),
     payload: JSON.parse(applied.payload_json || '{}')
   }, owner);
-  const onProject = await provider.readPagesDomain(site, hostname);
+  const onProject = await guarded(fence, () => provider.readPagesDomain(site, hostname));
   if (!verifiedPagesDomain(onProject, hostname))
     deny('domain_not_active_on_owned_pages');
   if (typeof provider.readOwnedZone !== 'function' ||
@@ -237,20 +246,20 @@ async function emailWork({provider, approvalStore, site, row, owner}) {
       typeof provider.readEmailRoutingRule !== 'function' ||
       typeof provider.createEmailRoutingRule !== 'function')
     deny('email_permissions_required');
-  const zone = await provider.readOwnedZone(site, hostname);
+  const zone = await guarded(fence, () => provider.readOwnedZone(site, hostname));
   if (!sameZone(zone, hostname, owner.cloudflareAccountId))
     deny('owned_zone_required');
-  const settings = await provider.readEmailRoutingSettings(zone.id);
+  const settings = await guarded(fence, () => provider.readEmailRoutingSettings(zone.id));
   if (settings?.enabled !== true || settings?.status !== 'ready')
     deny('email_routing_dns_not_ready');
-  const destination = await provider.readVerifiedDestination(owner.cloudflareAccountId, dest);
+  const destination = await guarded(fence, () => provider.readVerifiedDestination(owner.cloudflareAccountId, dest));
   if (lower(destination?.email) !== lower(dest) ||
       typeof destination?.verified !== 'string' ||
       !Number.isFinite(Date.parse(destination.verified)))
     deny('verified_existing_destination_required');
   // Deliberately fixed alias: the existing domain review digest does not include arbitrary local-parts.
   const alias = 'contact@' + hostname;
-  const rule = await provider.readEmailRoutingRule(zone.id, alias);
+  const rule = await guarded(fence, () => provider.readEmailRoutingRule(zone.id, alias));
   if (rule && (!rule.enabled ||
       !Array.isArray(rule.actions) || rule.actions.length !== 1 ||
       rule.actions[0].type !== 'forward' ||
@@ -258,12 +267,12 @@ async function emailWork({provider, approvalStore, site, row, owner}) {
       lower(rule.actions[0].value[0]) !== lower(dest)))
     deny('existing_email_rule_conflict');
   if (!rule) {
-    const added = await provider.createEmailRoutingRule(zone.id, {
+    const added = await guarded(fence, () => provider.createEmailRoutingRule(zone.id, {
       name: 'Launch & Own contact forwarding for ' + hostname,
       enabled: true, source: 'api',
       matchers: [{type: 'literal', field: 'to', value: alias}],
       actions: [{type: 'forward', value: [dest]}]
-    });
+    }));
     if (!added?.id || added.enabled !== true)
       deny('email_rule_unverified');
   }
@@ -274,15 +283,20 @@ async function emailWork({provider, approvalStore, site, row, owner}) {
   };
 }
 
-async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate}) {
+async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate, fence, preflightGate}) {
   const {hostname, ownerEmail, review} = reviewedForms(row, site, owner);
   if (typeof verifyFormsCostPrivacyGate !== 'function')
     deny('cost_privacy_gate_required');
-  const gate = await verifyFormsCostPrivacyGate({
+  const gate = await guarded(fence, () => verifyFormsCostPrivacyGate({
     jobId: row.jobId, owner, site, formsDigest: row.digest
-  });
-  if (!validGate(gate, row, site)) deny('cost_privacy_gate_required');
-  const onProject = await provider.readPagesDomain(site, hostname);
+  }));
+  if (!validGate(gate, row, site) ||
+      gate.approvalId !== preflightGate?.approvalId ||
+      gate.retentionDays !== preflightGate.retentionDays ||
+      gate.maxSubmissionsPerDay !== preflightGate.maxSubmissionsPerDay ||
+      gate.maxBodyBytes !== preflightGate.maxBodyBytes)
+    deny('cost_privacy_gate_changed');
+  const onProject = await guarded(fence, () => provider.readPagesDomain(site, hostname));
   if (hostname !== site.pagesProjectName + '.pages.dev' &&
       !verifiedPagesDomain(onProject, hostname))
     deny('forms_hostname_not_active');
@@ -294,25 +308,25 @@ async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate
   // The provider adapter is solely responsible for idempotent scoped resource names,
   // D1 schema, secret placement, server-only Siteverify, quota checks and rollback.
   // Never return or log secrets. Unknown #89 gate means none of these methods run.
-  const widget = await provider.createTurnstileWidget(site, {
+  const widget = await guarded(fence, () => provider.createTurnstileWidget(site, {
     hostname, jobId: row.jobId, formDigest: row.digest
-  });
+  }));
   if (!widget?.sitekey || !widget.secret) deny('turnstile_secret_required');
-  const database = await provider.createCustomerD1(site, {
+  const database = await guarded(fence, () => provider.createCustomerD1(site, {
     jobId: row.jobId, gateApprovalId: gate.approvalId,
     retentionDays: gate.retentionDays
-  });
+  }));
   if (!database?.id) deny('customer_d1_required');
-  const worker = await provider.deployServerVerifiedFormWorker(site, {
+  const worker = await guarded(fence, () => provider.deployServerVerifiedFormWorker(site, {
     hostname, ownerEmail, sitekey: widget.sitekey, secret: widget.secret,
     databaseId: database.id, siteverifyUrl: review.siteverify.url,
     maxBodyBytes: gate.maxBodyBytes, maxSubmissionsPerDay: gate.maxSubmissionsPerDay,
     retentionDays: gate.retentionDays, gateApprovalId: gate.approvalId
-  });
+  }));
   if (!worker?.id) deny('server_verified_worker_required');
-  const accepted = await provider.verifyFormAcceptance(site, {
+  const accepted = await guarded(fence, () => provider.verifyFormAcceptance(site, {
     hostname, workerId: worker.id, databaseId: database.id, sitekey: widget.sitekey
-  });
+  }));
   if (accepted?.serverSiteverify !== true || accepted?.customerD1Bound !== true ||
       accepted?.endToEndAccepted !== true)
     deny('form_not_working_until_acceptance');
@@ -365,22 +379,25 @@ export async function consumeStoredToolkitApproval({
   if (row.kind === 'forms') reviewedForms(row, site, owner);
   // Independent cost/privacy store gate; forms can never claim resources with
   // the current review-only #89 plan alone.
+  let preflightGate = null;
   if (row.kind === 'forms') {
     if (typeof verifyFormsCostPrivacyGate !== 'function')
       deny('cost_privacy_gate_required');
-    const gate = await verifyFormsCostPrivacyGate({
+    const gate = await guarded(() => fence(site), () => verifyFormsCostPrivacyGate({
       jobId: row.jobId, owner, site, formsDigest: row.digest
-    });
+    }));
     if (!validGate(gate, row, site)) deny('cost_privacy_gate_required');
+    preflightGate = gate;
   }
   await fence(site);
-  await livePagesAndRepo(provider, site);
+  await livePagesAndRepo(provider, site, () => fence(site));
   await fence(site);
   if (await approvalStore.claimApproved(row) !== true)
     deny('approval_already_claimed_or_changed');
   try {
     await fence(site);
-    const work = {provider, approvalStore, site, row, owner, verifyFormsCostPrivacyGate};
+    const work = {provider, approvalStore, site, row, owner, verifyFormsCostPrivacyGate,
+      preflightGate, fence: () => fence(site)};
     const result = row.kind === 'domain' ? await domainWork(work) :
       row.kind === 'email' ? await emailWork(work) : await formsWork(work);
     await fence(site);
