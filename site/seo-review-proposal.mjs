@@ -106,21 +106,29 @@ export async function buildSeoReviewProposal({
 } = {}) {
   if (!SITE_TYPES.has(sourceKind)) return deny('manual-review-required',
     'Imported ZIP and other customer-authored files cannot be modified automatically');
-  if (!validTrustedSite(trustedSite)) return deny('blocked-site-identity',
+  // Copy all trust-bearing inputs before the first async digest, so an async
+  // account/source switch can never silently retarget the resulting plan.
+  const identity = trustedSite && typeof trustedSite === 'object'
+    ? Object.freeze({...trustedSite}) : trustedSite;
+  const evidence = domainEvidence && typeof domainEvidence === 'object'
+    ? Object.freeze({...domainEvidence}) : domainEvidence;
+  if (!validTrustedSite(identity)) return deny('blocked-site-identity',
     'Verified owned site, project and exact source revision are required');
-  if (!evidenceMatches(trustedSite, domainEvidence)) return deny('blocked-domain-evidence',
+  if (!evidenceMatches(identity, evidence)) return deny('blocked-domain-evidence',
     'Fresh matching domain ownership evidence is required for canonical URLs');
   if (!Array.isArray(existingPaths) || existingPaths.some(p => typeof p !== 'string'))
     return deny('blocked-file-inventory', 'Exact existing file paths must be reviewed');
-  const existing = new Set(existingPaths);
+  const existingSnapshot = Object.freeze([...existingPaths]);
+  const existing = new Set(existingSnapshot);
   if (existingPaths.length !== existing.size ||
       existing.has('public/robots.txt') || existing.has('public/sitemap.xml'))
     return deny('blocked-existing-seo-file',
       'Existing SEO control files must be reviewed separately before replacement');
 
   // This only renders a new proposal; no existing live/customer file is patched.
-  const origin = canonicalOrigin(domainEvidence.origin);
-  const pages = generatedPages(sourceKind, site);
+  const origin = canonicalOrigin(evidence.origin);
+  const normalizedSite = normalizeSite(site);
+  const pages = generatedPages(sourceKind, normalizedSite);
   const files = [];
   const urls = [];
   for (const page of pages) {
@@ -147,15 +155,29 @@ export async function buildSeoReviewProposal({
   }
   const manifest = files.map(f => [f.path, f.action, f.beforeSha256, f.afterSha256]);
   const proposalSha256 = await hash(JSON.stringify([
-    'launch-and-own-seo-review-v1', sourceKind, trustedSite.githubUserId,
-    trustedSite.githubRepositoryId, trustedSite.cloudflareAccountId,
-    trustedSite.pagesProjectId, trustedSite.pagesProjectName,
-    trustedSite.expectedBaseSha, origin, manifest
+    'launch-and-own-seo-review-v1', sourceKind, identity.githubUserId,
+    identity.githubRepositoryId, identity.cloudflareAccountId,
+    identity.pagesProjectId, identity.pagesProjectName,
+    identity.expectedBaseSha, origin, manifest
   ]));
+  // A revoked/changing context cannot authorize a proposal started earlier.
+  // The eventual hosted adapter must also revalidate its live auth epoch.
+  let siteUnchanged = false;
+  try { siteUnchanged = JSON.stringify(normalizeSite(site)) === JSON.stringify(normalizedSite); }
+  catch { /* malformed input after async work must fail closed */ }
+  const sameFields = (actual, snapshot) => Boolean(actual && snapshot &&
+    Object.keys(snapshot).every(key => actual[key] === snapshot[key]));
+  if (!siteUnchanged || !sameFields(trustedSite, identity) ||
+      !sameFields(domainEvidence, evidence) ||
+      existingPaths.length !== existingSnapshot.length ||
+      existingPaths.some((path, i) => path !== existingSnapshot[i]) ||
+      !evidenceMatches(identity, evidence))
+    return deny('blocked-review-context-changed',
+      'The source, owner, domain evidence or file inventory changed during review');
   return Object.freeze({
     status: 'review-required', reason: 'No existing file is changed until owner approval and Git PR verification',
     files: Object.freeze(files), proposalSha256, canonicalOrigin: origin,
-    expectedBaseSha: trustedSite.expectedBaseSha, publicationVerified: false,
+    expectedBaseSha: identity.expectedBaseSha, publicationVerified: false,
     requiresOwnerApproval: true, requiresVerifiedGitUpdate: true
   });
 }
