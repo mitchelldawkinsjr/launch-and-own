@@ -673,3 +673,43 @@ test('pressing Run due launch steps after the job already advanced shows the rev
   assert.notEqual(o.status,303);
  }finally{globalThis.fetch=originalFetch}
 });
+
+
+test('connection explainer icons remain interactive and truthful through both provider OAuth steps',async()=>{
+  const h=harness();globalThis.fetch=h.fetchFn;
+  try{
+    const start=await h.request('/');
+    const startHtml=await start.text();
+    assert.equal(start.status,200);
+    assert.match(start.headers.get('content-security-policy'),/default-src 'none'/);
+    assert.match(start.headers.get('cache-control'),/no-store/);
+    assert.equal((startHtml.match(/class="provider-icon provider-icon-/g)||[]).length,2);
+    assert.equal((startHtml.match(/<details>/g)||[]).length,2);
+    assert.match(startHtml,/href="\/connect\/github">Connect GitHub<\/a>/);
+    assert.doesNotMatch(startHtml,/href="\/connect\/cloudflare"/);
+    assert.match(startHtml,/Both offer free options for simple sites within plan limits/);
+    assert.doesNotMatch(startHtml,/<script|src="https:\/\/cdn\./);
+
+    const {sessionCookie}=await bootstrap(h);
+    const afterGithub=await (await h.request('/',{cookie:sessionCookie})).text();
+    assert.match(afterGithub,/GitHub connected: tester/);
+    assert.match(afterGithub,/href="\/connect\/cloudflare">Connect Cloudflare<\/a>/);
+    assert.doesNotMatch(afterGithub,/href="\/connect\/github"/);
+    assert.match(afterGithub,/Click either icon to learn more/);
+
+    await connectCloudflare(h,sessionCookie);
+    const afterCloudflare=await (await h.request('/',{cookie:sessionCookie})).text();
+    assert.match(afterCloudflare,/Cloudflare connected — choose your hosting account/);
+    assert.doesNotMatch(afterCloudflare,/href="\/connect\/cloudflare"/);
+    const csrf=csrfFrom(afterCloudflare);
+    const choose=await h.request('/account',{
+      method:'POST',cookie:sessionCookie,body:form({csrf,accountId})
+    });
+    assert.equal(choose.status,303);
+    const selected=await (await h.request('/',{cookie:sessionCookie})).text();
+    assert.match(selected,/Cloudflare connected — hosting account selected/);
+    assert.equal((selected.match(/<summary /g)||[]).length,2);
+    assert.match(selected,/Preview my website/);
+    assert.doesNotMatch(selected,/href="\/connect\/cloudflare"/);
+  }finally{globalThis.fetch=originalFetch}
+});
