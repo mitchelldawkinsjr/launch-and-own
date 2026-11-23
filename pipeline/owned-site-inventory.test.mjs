@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {discoverOwnedManagedSites, readCurrentManagedHomepage, ManagedSiteInventoryError}
   from './owned-site-inventory.mjs';
+import { summarizeOwnedToolkitSite } from './toolkit-capabilities.mjs';
 
 const accountId = 'a'.repeat(32), otherAccount = 'b'.repeat(32);
 const head = 'c'.repeat(40), movedHead = 'd'.repeat(40);
@@ -338,6 +339,56 @@ test('non-base64/oversize/binary homepage refuses automatic editing or migration
     const m = fake(); change(m.f);
     await assert.rejects(m.source(), expectCode('current_source_requires_review'));
   }
+});
+
+test('owner discovery record is a valid #84 current-site capability reference', async () => {
+  const m = fake();
+  const {sites} = await m.read();
+  assert.equal(sites.length, 1);
+  assert.equal(sites[0].productionBranch, 'main');
+  assert(sites[0].siteId.length <= 128);
+  const result = summarizeOwnedToolkitSite({
+    viewer: {githubUserId: identity.githubUserId, githubLogin: identity.githubLogin,
+      cloudflareAccountId: identity.cloudflareAccountId},
+    reference: sites[0], repository: m.f.repo,
+    pagesAccountId: identity.cloudflareAccountId, pagesProject: m.f.project
+  });
+  assert.equal(result?.siteId, sites[0].siteId);
+  assert.equal(result?.capabilities.web_analytics.state, 'manual_setup');
+  assert.equal(result?.deployment.verifiedUrl, null,
+    'ownership discovery alone cannot verify the public site');
+});
+
+test('second source read uses current updated main HTML, not original launch copy', async () => {
+  const m = fake();
+  const first = await m.source();
+  const revisedHtml = '<!doctype html><html><body>First merged update preserved</body></html>';
+  m.f.branch.commit.sha = movedHead;
+  m.f.content.content = Buffer.from(revisedHtml, 'utf8').toString('base64');
+  m.f.content.size = Buffer.byteLength(revisedHtml);
+  m.f.project.canonical_deployment.deployment_trigger.metadata.commit_hash = movedHead;
+  const second = await m.source();
+  assert.equal(first.baseCommitSha, head);
+  assert.equal(first.html, html);
+  assert.equal(second.baseCommitSha, movedHead);
+  assert.equal(second.html, revisedHtml);
+  assert.notEqual(first.homepageHtmlSha256, second.homepageHtmlSha256);
+  assert.equal(second.editMode, 'approved_migration_required',
+    'content correctness does not silently authorize unreviewed form editing');
+  assert(m.calls.every(x => x.options.method === 'GET'));
+});
+
+test('revocation inside async provider JSON parse prevents even a verified owner result', async () => {
+  const m = fake();
+  m.custom['/user'] = async () => ({
+    status: 200, ok: true,
+    json: async () => {
+      m.revoke();
+      return m.f.user;
+    }
+  });
+  await assert.rejects(m.read(), expectCode('authorization_changed'));
+  assert.equal(m.calls.length, 1);
 });
 
 test('the old site needs a separate approved config migration; no source or provider writes occur', async () => {
