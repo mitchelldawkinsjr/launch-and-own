@@ -77,7 +77,7 @@
         "Undeployed prototype only (Worker returns 503 unless Domain sets BRIDGE_DEPLOYMENT=approved)",
         "Domain must create dedicated bridge D1, apply migrations, set matching BRIDGE_TICKET_KEY on bridge+onboarding, set BRIDGE_ORIGIN, smoke-deploy (docs/DOMAIN_MCP_BRIDGE_HANDOFF.md)",
         "Hosted /agent-link E2E against an approved bridge host still outstanding",
-        "Exact HTML digests and independent consenting-user QA still required (#43)"
+        "Create-draft digests use exact renderSite HTML; update-draft re-render and independent consenting-user QA still required (#43)"
       ]
     },
     "claude_plugin": {

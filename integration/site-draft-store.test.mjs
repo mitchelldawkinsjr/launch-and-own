@@ -66,6 +66,18 @@ test('prepare_site freezes a digest and approval handoff never returns tokens', 
   const prepared = await call(h, token, 'prepare_site', {site_spec: spec});
   assert.equal(prepared.status, 200);
   assert.equal(prepared.body.preview_sha256, previewDigestFromSpec(spec));
+  assert.match(prepared.body.preview_sha256, /^[a-f0-9]{64}$/);
+  // Digest must track exact homepage HTML, not site_spec JSON.
+  const {createHash} = await import('node:crypto');
+  const {renderSite} = await import('../site/render-site.mjs');
+  const html = renderSite({
+    name: spec.name, tagline: spec.headline, about: spec.about,
+    services: spec.services, theme: spec.theme, contactEmail: ''
+  });
+  assert.equal(prepared.body.preview_sha256,
+    createHash('sha256').update(html, 'utf8').digest('hex'));
+  assert.notEqual(prepared.body.preview_sha256,
+    createHash('sha256').update(JSON.stringify(spec)).digest('hex'));
   assert.equal(prepared.body.operation, 'create');
 
   const preview = await call(h, token, 'get_exact_preview', {draft_id: prepared.body.draft_id});

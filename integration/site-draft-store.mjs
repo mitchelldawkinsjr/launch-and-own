@@ -1,13 +1,15 @@
 /**
  * Tenant-scoped site inventory + immutable draft/preview store (memory adapter).
- * Digests are deterministic over normalized site_spec JSON — not a production
- * HTML renderer. Future adapters must store exact Worker-rendered bytes.
+ * Create-draft digests are SHA-256 of exact homepage HTML from site/render-site.mjs
+ * (same renderer as onboarding one-page previews). Update drafts still digest
+ * change JSON until a full post-change artifact can be re-rendered.
  */
 import {createHash, randomBytes} from 'node:crypto';
 import {
   BridgeContractError, assertOwnedRecord, assertPreparedDraft,
   humanApprovalHandoff
 } from './tool-contract.mjs';
+import {renderSite} from '../site/render-site.mjs';
 
 const deny = code => { throw new BridgeContractError(code); };
 
@@ -24,16 +26,22 @@ function ownerFields(scope) {
   };
 }
 
+/** Map bridge site_spec → Worker renderSite input; hash exact UTF-8 HTML bytes. */
 export function previewDigestFromSpec(siteSpec) {
-  const payload = JSON.stringify({
-    name: siteSpec.name,
-    headline: siteSpec.headline,
-    about: siteSpec.about,
-    services: siteSpec.services,
-    contactEmail: siteSpec.contactEmail || null,
-    theme: siteSpec.theme || null
-  });
-  return createHash('sha256').update(payload).digest('hex');
+  let html;
+  try {
+    html = renderSite({
+      name: siteSpec.name,
+      tagline: siteSpec.headline,
+      about: siteSpec.about,
+      services: siteSpec.services,
+      contactEmail: siteSpec.contactEmail || '',
+      theme: siteSpec.theme || 'ocean'
+    });
+  } catch {
+    deny('invalid_arguments');
+  }
+  return createHash('sha256').update(html, 'utf8').digest('hex');
 }
 
 export class MemorySiteDraftStore {
