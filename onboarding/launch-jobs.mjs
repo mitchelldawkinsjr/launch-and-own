@@ -114,7 +114,7 @@ const deletable = `(${UNCLAIMED} AND (NOT (${RUNNABLE}) OR NOT ${HAS_APPROVAL}))
 
 export async function listOwnedJobs(env, session, time) {
   const result = await env.DB.prepare(`SELECT j.id, j.customer_name, j.site_slug, j.updated_at,
-      j.error_code, ${statusColumn},
+      j.expires_at, j.expected_commit_sha, j.approval_digest, j.error_code, ${statusColumn},
       CASE WHEN j.status='live' AND j.production_branch='main'
           AND j.repository_id IS NOT NULL AND j.repository_id > 0
           AND json_type(j.plan_json,'$.site')='object'
@@ -125,6 +125,15 @@ export async function listOwnedJobs(env, session, time) {
     FROM onboarding_launch_jobs j WHERE ${OWNED} ORDER BY j.updated_at DESC LIMIT 20`)
     .bind(time, time, time, time, time, ...ownerBindings(session, time)).all();
   return result.results;
+}
+
+export async function hasCurrentOwnerSession(env, session, time) {
+  const active = await env.DB.prepare(`SELECT 1 FROM onboarding_sessions
+    WHERE id_hash = ? AND authorization_epoch = ? AND github_user_id = ?
+      AND cloudflare_account_id = ? AND github_token_ct IS NOT NULL
+      AND cloudflare_token_ct IS NOT NULL AND expires_at > ?`)
+    .bind(session.hash, session.authorization_epoch, ...ownerBindings(session, time)).first();
+  return Boolean(active);
 }
 
 export async function getOwnedJob(env, session, id, time) {
