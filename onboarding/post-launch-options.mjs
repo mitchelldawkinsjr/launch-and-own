@@ -301,7 +301,7 @@ export function createSiteOptionsRoutes({
       '</section>';
     const formsSection =
       '<section><h2>Contact form</h2>' +
-      '<p>Reviews a Siteverify-bound form plan only. No Turnstile widget, D1 database, or Worker is created.</p>' +
+      '<p>Reviews a Siteverify-bound form plan only. #89 cost/privacy approval, Turnstile, customer D1, and a form Worker stay off.</p>' +
       stored(byKind.forms, 'form') +
       button('/site-options-prepare', 'Review form request', current.csrf,
         hidden(job.id, 'forms') +

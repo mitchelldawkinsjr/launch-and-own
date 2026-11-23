@@ -242,6 +242,9 @@ test('forms cannot activate even with stored consent and an operator execution r
   operatorGrant(h,row);
   assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id})).status,403);
   assert.equal(providerWrites(h).length,0);
+  h.env.OPTION_FORMS_ENABLED='true';
+  assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id})).status,403);
+  assert.equal(providerWrites(h).length,0);
 });
 
 test('missing CSRF and altered request data never trigger provider calls',async t=>{
