@@ -47,6 +47,11 @@ function rig({writes = false, override = {}} = {}) {
       return Response.json(page([{id:zoneId,name:'example.com',status:'active',account:{id:account}}]));
     if (path.endsWith('/zones/'+zoneId+'/email/routing'))
       return Response.json(page({enabled:true,status:'ready'}));
+    if (path.endsWith('/zones/'+zoneId+'/dns_records'))
+      return Response.json(accountList([1,2,3].map((n,i)=>({
+        type:'MX', name:'www.example.com',content:'route'+n+'.mx.cloudflare.net',
+        priority:10+i*10
+      }))));
     if (path.endsWith('/email/routing/addresses'))
       return Response.json(accountList([{email:'existing@example.net', verified:'2026-11-22T00:00:00Z'}]));
     if (path.endsWith('/accounts/'+account+'/email/routing/rules'))
@@ -99,6 +104,12 @@ test('named owner-approved writes only attach approved Pages domain or create Em
   assert.equal(zone.id,zoneId);
   const settings=await provider.readEmailRoutingSettings(zoneId);
   assert.equal(settings.status,'ready');
+  const records=await provider.readRoutingMxRecords(zoneId,'www.example.com');
+  assert.equal(records.length,3);
+  const mxRead=calls.filter(c=>c.path==='/client/v4/zones/'+zoneId+'/dns_records');
+  assert.equal(mxRead.length,1);
+  assert.equal(new URLSearchParams(mxRead[0].search).get('type'),'MX');
+  assert.equal(new URLSearchParams(mxRead[0].search).get('name.exact'),'www.example.com');
   const destination=await provider.readVerifiedDestination(account,'existing@example.net');
   assert.ok(destination.verified);
   assert.equal(await provider.readEmailRoutingRule(zoneId,'contact@www.example.com'),null);
@@ -201,6 +212,27 @@ test('wrong-zone account and incomplete zone pagination never authorize Email Ro
     })
   }});
   await fail(partial.provider.readOwnedZone(site(),'www.example.com'),'provider_list_incomplete');
+});
+
+test('exact receiving hostname MX read is owner-zone-scoped, GET-only and paginated', async () => {
+  const {provider,calls}=rig({writes:false});
+  await fail(provider.readRoutingMxRecords(zoneId,'www.example.com'),'owned_zone_required');
+  await provider.readOwnedZone(site(),'www.example.com');
+  const mx=await provider.readRoutingMxRecords(zoneId,'www.example.com');
+  assert.equal(mx.length,3);
+  assert.equal(calls.filter(c=>c.path.endsWith('/dns_records')).every(c=>c.method==='GET'),true);
+  await fail(provider.readRoutingMxRecords('c'.repeat(32),'www.example.com'),'owned_zone_required');
+  await fail(provider.readRoutingMxRecords(zoneId,'bad..hostname'),'valid_hostname_required');
+  assert.equal(calls.some(c=>c.method!=='GET'),false);
+  const partial=rig({override:{
+    ['/client/v4/zones/'+zoneId+'/dns_records']:()=>Response.json({
+      ...accountList([{
+        type:'MX',name:'www.example.com',content:'route1.mx.cloudflare.net',priority:10
+      }]),result_info:{page:1,count:1,total_count:4}
+    })
+  }});
+  await partial.provider.readOwnedZone(site(),'www.example.com');
+  await fail(partial.provider.readRoutingMxRecords(zoneId,'www.example.com'),'provider_list_incomplete');
 });
 
 test('routing rule must be single literal recipient and single forwarding action', async () => {

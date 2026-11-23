@@ -201,6 +201,13 @@ function harness({withJobs=true}={}){
     return page([{id:zoneId,name:'example.com',status:'active',account:{id:accountId}}]);
   if(parsed.pathname==='/client/v4/zones/'+zoneId+'/email/routing'&&opts.method!=='POST')
     return page({enabled:true,status:'ready'});
+  if(parsed.pathname==='/client/v4/zones/'+zoneId+'/dns_records'&&opts.method==='GET'&&
+      parsed.searchParams.get('type')==='MX') {
+    const hostname=parsed.searchParams.get('name.exact');
+    return accountPage(resourceState.routingMxRecords ?? [1,2,3].map((n,i)=>({
+      type:'MX',name:hostname,content:'route'+n+'.mx.cloudflare.net',priority:10+i*10
+    })));
+  }
   if(parsed.pathname==='/client/v4/accounts/'+accountId+'/email/routing/addresses'&&opts.method!=='POST')
     return accountPage([{email:'existing@example.net',verified:'2026-11-22T01:00:00Z'}]);
   if(parsed.pathname==='/client/v4/accounts/'+accountId+'/email/routing/rules'&&opts.method!=='POST')

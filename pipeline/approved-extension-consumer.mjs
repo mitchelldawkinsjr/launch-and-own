@@ -233,6 +233,24 @@ function sameZone(zone, host, accountId) {
     !zone.name.endsWith('.pages.dev');
 }
 
+function exactHostnameMxReady(records, hostname) {
+  // Cloudflare Email Routing requires three MX records at the EXACT
+  // receiving address hostname. A zone-apex "ready" status proves nothing
+  // about a subdomain, and MX records on other hostnames cannot be reused.
+  const required = new Set([
+    'route1.mx.cloudflare.net', 'route2.mx.cloudflare.net', 'route3.mx.cloudflare.net'
+  ]);
+  if (!Array.isArray(records) || records.length !== required.size) return false;
+  for (const record of records) {
+    if (record?.type !== 'MX' || lower(record.name) !== hostname ||
+        !Number.isSafeInteger(record.priority) || record.priority < 0 ||
+        record.priority > 65535 || typeof record.content !== 'string') return false;
+    const target = lower(record.content).replace(/\.$/, '');
+    if (!required.delete(target)) return false;
+  }
+  return required.size === 0;
+}
+
 function validGate(gate, row, site) {
   // A read-only #89 review, digest by itself, checkbox, or client flag is NEVER an approval.
   // Future verifier must load a separately approved, account/job/revision-bound D1 row.
@@ -295,6 +313,7 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
     deny('domain_not_active_on_owned_pages');
   if (typeof provider.readOwnedZone !== 'function' ||
       typeof provider.readEmailRoutingSettings !== 'function' ||
+      typeof provider.readRoutingMxRecords !== 'function' ||
       typeof provider.readVerifiedDestination !== 'function' ||
       typeof provider.readEmailRoutingRule !== 'function' ||
       typeof provider.createEmailRoutingRule !== 'function')
@@ -305,6 +324,12 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
   const settings = await guarded(fence, () => provider.readEmailRoutingSettings(zone.id));
   if (settings?.enabled !== true || settings?.status !== 'ready')
     deny('email_routing_dns_not_ready');
+  // Subdomain mail is explicitly enabled separately by Cloudflare. Read
+  // exact-host DNS for a complete three-target MX set; never "enable"
+  // routing or mutate the user's existing business mail configuration.
+  const mx = await guarded(fence, () => provider.readRoutingMxRecords(zone.id, hostname));
+  if (!exactHostnameMxReady(mx, hostname))
+    deny('email_hostname_mx_not_ready');
   const destination = await guarded(fence, () => provider.readVerifiedDestination(owner.cloudflareAccountId, dest));
   if (lower(destination?.email) !== lower(dest) ||
       typeof destination?.verified !== 'string' ||
@@ -322,6 +347,7 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
       !Array.isArray(rule.actions[0].value) || rule.actions[0].value.length !== 1 ||
       lower(rule.actions[0].value[0]) !== lower(dest)))
     deny('existing_email_rule_conflict');
+  let createdId = null;
   if (!rule) {
     const added = await guarded(fence, () => provider.createEmailRoutingRule(zone.id, {
       name: 'Launch & Own contact forwarding for ' + hostname,
@@ -331,7 +357,19 @@ async function emailWork({provider, approvalStore, site, row, owner, fence}) {
     }));
     if (!added?.id || added.enabled !== true)
       deny('email_rule_unverified');
+    createdId = added.id;
   }
+  const verified = await guarded(fence, () => provider.readEmailRoutingRule(zone.id, alias));
+  if (!verified?.id || (createdId !== null && verified.id !== createdId) ||
+      verified.enabled !== true || verified.zone?.tag !== zone.id ||
+      !Array.isArray(verified.matchers) || verified.matchers.length !== 1 ||
+      verified.matchers[0]?.type !== 'literal' || verified.matchers[0]?.field !== 'to' ||
+      lower(verified.matchers[0]?.value) !== alias ||
+      !Array.isArray(verified.actions) || verified.actions.length !== 1 ||
+      verified.actions[0]?.type !== 'forward' ||
+      !Array.isArray(verified.actions[0]?.value) || verified.actions[0].value.length !== 1 ||
+      lower(verified.actions[0].value[0]) !== lower(dest))
+    deny('email_rule_unverified');
   return {
     kind: 'email', hostname, alias, mailbox: dest,
     zoneId: zone.id, status: 'routing_rule_recorded',

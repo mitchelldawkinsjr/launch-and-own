@@ -189,6 +189,18 @@ export function createCloudflareExtensionProvider({
       if (!verifiedZoneIds.has(zoneId)) deny('owned_zone_required');
       return (await cfGet('/zones/' + zoneId + '/email/routing'))?.result;
     },
+    async readRoutingMxRecords(zoneId, hostname) {
+      if (!verifiedZoneIds.has(zoneId)) deny('owned_zone_required');
+      const host = exactHost(hostname);
+      // An apex Email Routing "ready" setting does NOT mean mail for
+      // contact@www.example.com will work. Cloudflare configures subdomain
+      // routing separately, with MX records on that exact hostname.
+      // GET only. DNS Read may need additional opt-in scope; a 403 denies
+      // execution rather than silently creating an unusable forwarding rule.
+      return safePage(await cfGet('/zones/' + zoneId +
+        '/dns_records?type=MX&name.exact=' + encodeURIComponent(host) +
+        '&page=1&per_page=50'));
+    },
     async readVerifiedDestination(accountId, email) {
       if (accountId !== owner.cloudflareAccountId ||
           typeof email !== 'string' || email.length > 90 || !MAILBOX.test(email))
