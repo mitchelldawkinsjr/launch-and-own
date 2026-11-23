@@ -361,7 +361,7 @@ async function launchHistory(env,current){
     const live=item.display_status==='live'?`<p>Verified site: <a href="${escape(website)}">${escape(website)}</a></p>`:'';
     const action=item.can_restore?button('/restore','Review and reapprove this website',current.csrf,launchIdField(item.id)):'';
     const deletion=item.can_delete?button('/delete-launch-history','Delete history entry',current.csrf,launchIdField(item.id)):'';
-    const update=item.display_status==='live'&&jobs.some(job=>job.id===item.id)?
+    const update=item.can_edit?
       '<p><a href="/site-update?id='+encodeURIComponent(item.id)+'">Edit this website (reviewable GitHub PR)</a></p>':'';
     const diagnostic=item.error_code?`<p>Last result: <code>${escape(item.error_code)}</code></p>`:'';
     return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${live}${update}${action}${deletion}</section>`;

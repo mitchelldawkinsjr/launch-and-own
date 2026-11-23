@@ -39,7 +39,12 @@ test('checked-in matrix is valid and owner beta is not independent acceptance', 
 });
 
 test('PRs, merged ZIPs, and local rehearsals cannot be advertised as hosted', () => {
-  rejects(m => { m.surfaces.site_updates.access = 'hosted_beta'; }, /PR or merged code does not constitute a hosted release/);
+  rejects(m => {
+    m.surfaces.site_updates.implementation = 'merged';
+    m.surfaces.site_updates.access = 'hosted_beta';
+  }, /PR or merged code does not constitute a hosted release/);
+  rejects(m => { m.surfaces.site_updates.access = 'hosted_beta'; },
+    /hosted beta claim requires observed owner-live/);
   rejects(m => { m.surfaces.browser_zip.implementation = 'merged'; m.surfaces.browser_zip.access = 'public'; }, /code does not constitute a hosted release/);
 });
 

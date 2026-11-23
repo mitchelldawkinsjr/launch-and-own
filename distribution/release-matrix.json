@@ -42,14 +42,14 @@
     },
     "site_updates": {
       "label": "Owner: approved post-launch edits",
-      "implementation": "in_pr",
+      "implementation": "deployed",
       "access": "not_available",
       "verification": "ci_only",
       "evidence": [
         "https://github.com/mitchelldawkinsjr/launch-and-own/pull/31"
       ],
       "blockers": [
-        "Draft PR #31, Domain-approved deployment window, owner-approved edit live verification (#21)"
+        "Code merged and Worker deployable; owner-live edit walkthrough still required before hosted_beta (#21)"
       ]
     },
     "portable_skill": {

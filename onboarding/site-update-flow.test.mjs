@@ -254,4 +254,3 @@ test('non-editable generated site variants never show an update link',async()=>{
   }finally{globalThis.fetch=originalFetch}
  }
 });
->>>>>>> 776757c (Cover unsupported multi-page and form-enabled site editor visibility)
