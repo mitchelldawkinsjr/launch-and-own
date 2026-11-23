@@ -221,10 +221,21 @@ export function createD1OptionExecutionStore(env, current) {
             live.pagesProjectId !== pending.raw.pages_project_id))) return false;
     }
     for (const [id, lease] of claims) {
+      // Re-evaluate the currently stored review even *after* acquiring the
+      // lease. A re-reviewed/overwritten 0005 row revokes an in-flight write.
       const row = await env.DB.prepare(
-        "SELECT id FROM onboarding_option_executions WHERE id = ? AND lease_id = ? " +
-        "AND status = 'applying' AND authorization_epoch = ?"
-      ).bind(id, lease, current.authorization_epoch).first();
+        "SELECT x.id FROM onboarding_option_executions x " +
+        "JOIN onboarding_option_approvals o ON o.id = x.option_approval_id " +
+        "JOIN onboarding_launch_jobs j ON j.id = x.job_id " +
+        "WHERE x.id = ? AND x.lease_id = ? AND x.status = 'applying' " +
+        "AND x.authorization_epoch = ? AND o.status = 'stored' " +
+        "AND o.job_id = x.job_id AND o.github_user_id = x.github_user_id " +
+        "AND o.cloudflare_account_id = x.cloudflare_account_id AND o.kind = x.kind " +
+        "AND o.approval_digest = x.approval_digest " +
+        "AND j.status = 'live' AND j.expires_at > ? " +
+        "AND j.repository_id = x.repository_id AND j.pages_project_id = x.pages_project_id " +
+        "AND j.expected_commit_sha = x.expected_commit_sha"
+      ).bind(id, lease, current.authorization_epoch, stamp()).first();
       if (!row) return false;
     }
     return true;
