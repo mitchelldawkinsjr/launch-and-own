@@ -147,6 +147,7 @@ test('existing SEO files cannot be silently overwritten, duplicates also denied'
  for(const existingPaths of [
   ['public/robots.txt'],['public/sitemap.xml'],
   ['public/index.html','public/robots.txt'],
+  ['public/ROBOTS.TXT'],['Public/Sitemap.xml'],
   ['public/index.html','public/index.html']
  ]){
   const result=await proposal({existingPaths});
@@ -188,6 +189,25 @@ test('escaped user copy stays safe in all new head tags; no invented business fa
  assert(!html.includes('google-analytics'));
 });
 
+test('mid-hash owner, domain, source and file-inventory edits fail closed',async()=>{
+ for(const change of [
+  state=>state.identity.githubRepositoryId=7777,
+  state=>state.evidence.origin='https://attacker.example',
+  state=>state.evidence.expiresAt=0,
+  state=>state.site.about='Different copy during review',
+  state=>state.existingPaths.push('public/robots.txt')
+ ]){
+  const state={identity:{...trustedSite},evidence:{...domainEvidence},site:{...site},
+    existingPaths:['public/index.html']};
+  const pending=proposal({trustedSite:state.identity,domainEvidence:state.evidence,
+    site:state.site,existingPaths:state.existingPaths});
+  change(state);
+  const result=await pending;
+  assert.equal(result.status,'blocked-review-context-changed');
+  assert.deepEqual(result.files,[]);
+  assert.equal(result.proposalSha256,null);
+ }
+});
 test('invalid renderer input fails instead of laundering unsafe website fields',async()=>{
  await assert.rejects(proposal({site:{...site,contactEmail:'javascript:alert(1)'}}));
  await assert.rejects(proposal({site:{...site,theme:'unsafe'}}));
