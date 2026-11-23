@@ -204,6 +204,35 @@ test('email cannot create a rule before matching domain execution is applied',as
   assert.equal(providerWrites(h).length,before);
 });
 
+test('applied domain and separate verified mailbox grant create exactly one contact forwarding rule',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId}=await live(h,t);
+  const domain=await store(h,tenant,jobId,'domain',{hostname:host});
+  operatorGrant(h,domain);
+  const attached=await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id});
+  assert.equal(attached.status,200);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_option_executions WHERE id=?')
+    .get(id).status,'applied');
+  h.resourceState.customDomain.status='active'; // DNS/TLS activation is external/manual, never mutated by app.
+  const email=await store(h,tenant,jobId,'email',{
+    hostname:host,mailbox:'existing@example.net'
+  });
+  operatorGrant(h,email,otherId);
+  const routed=await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id:otherId});
+  assert.equal(routed.status,200);
+  assert.match(await routed.text(),/Email Routing alias was recorded/);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_option_executions WHERE id=?')
+    .get(otherId).status,'applied');
+  const ruleWrites=h.calls.filter(c=>c.method==='POST'&&/\/zones\/[a-f0-9]{32}\/email\/routing\/rules$/.test(c.url));
+  assert.equal(ruleWrites.length,1);
+  assert.equal(h.resourceState.emailRules.length,1);
+  const rule=h.resourceState.emailRules[0];
+  assert.deepEqual(rule.matchers,[{type:'literal',field:'to',value:'contact@'+host}]);
+  assert.deepEqual(rule.actions,[{type:'forward',value:['existing@example.net']}]);
+  assert.equal(h.calls.some(c=>c.method!=='GET'&&/\/dns_records|\/mx(?:\/|$)/i.test(c.url)),false);
+  assert.equal(providerWrites(h).length,2);
+});
+
 test('forms cannot activate even with stored consent and an operator execution row (#89)',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const {tenant,jobId}=await live(h,t);
