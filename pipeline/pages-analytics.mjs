@@ -64,11 +64,12 @@ function unavailable(state, reason) {
  *   Invoked before the GET and again after the provider read/JSON await.
  * cloudflareAccessToken: refreshed, backend-only OAuth access token
  *
- * Returned data is a safe customer-facing projection, never raw provider data.
+ * The default projection is safe to show to a customer. Backend review callers
+ * can opt in to the verified identity snapshot used for this exact provider GET.
  */
 export async function readPagesAnalyticsStatus({
   site, principal, cloudflareAccessToken, assertCurrentAuthorization, fetchFn = fetch
-}) {
+}, {includeReviewBinding = false} = {}) {
   const trusted = snapshotIdentity(site, principal);
   if (typeof assertCurrentAuthorization !== 'function')
     return unavailable('blocked_permission_or_plan', 'authorization_fence_required');
@@ -157,6 +158,7 @@ export async function readPagesAnalyticsStatus({
     projectDashboardUrl: 'https://dash.cloudflare.com/' + trusted.cloudflareAccountId +
       '/pages/view/' + trusted.pagesProjectName,
     // Global dashboard routes are not independently verified for this account.
-    analyticsDashboardUrl: null
+    analyticsDashboardUrl: null,
+    ...(includeReviewBinding === true ? {reviewBinding: trusted} : {})
   };
 }
