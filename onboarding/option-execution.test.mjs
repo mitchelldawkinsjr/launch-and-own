@@ -148,6 +148,18 @@ test('another owner and stale replaced approval cannot activate a domain',async 
   assert.equal(providerWrites(h).length,0);
 });
 
+test('a changed live GitHub main SHA denies execution before any provider write or claim',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId}=await live(h,t);
+  const row=await store(h,tenant,jobId,'domain',{hostname:host});
+  operatorGrant(h,row);
+  h.resourceState.headSha='f'.repeat(40);
+  assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id})).status,400);
+  assert.equal(providerWrites(h).length,0);
+  assert.equal(h.sqlite.prepare('SELECT status FROM onboarding_option_executions WHERE id = ?')
+    .get(id).status,'approved');
+});
+
 test('only one concurrent claimant can transition approved -> applying',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const {tenant,jobId}=await live(h,t);
