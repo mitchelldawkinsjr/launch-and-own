@@ -78,4 +78,4 @@ Thin ChatGPT packaging notes (still instructions-only): [`clients/chatgpt/README
 
 ## Next implementation slice for #43
 
-Domain creates bridge D1 + hostname, applies migrations, sets matching `BRIDGE_TICKET_KEY` on bridge **and** onboarding, sets onboarding `BRIDGE_ORIGIN`, smoke-deploys with `BRIDGE_DEPLOYMENT=not_approved`, then exercises `/agent-link` end-to-end. Flip approved only with owner authorization. Create-draft digests already use exact `renderSite` HTML SHA-256; update drafts still need post-change re-render. Run independent consenting-user QA, then orchestration may promote `shared_mcp_api`.
+Hosted bridge Worker is live at `https://mcp.360web.cloud` (`BRIDGE_DEPLOYMENT=approved`, metadata `deployed_gated`). Onboarding has matching ticket key + `BRIDGE_ORIGIN`. Remaining: consenting-user `/agent-link` E2E, real MCP OAuth client registration (replace provisional audience/resource), update-draft re-render, independent QA (#21), then orchestration may promote `shared_mcp_api` access.

@@ -12,7 +12,7 @@ This document is the **operator checklist** to take the in-repo MCP bridge from 
 | Memory adapters | `*-store.mjs` | Test-only |
 | D1 schema + adapters | `integration/migrations/`, `d1-agent-token-store.mjs`, `d1-owner-link-store.mjs`, `d1-site-draft-store.mjs`, `d1-job-publication-store.mjs` | Ready in repo; Domain creates DB + applies migrations |
 | Worker entry | `integration/bridge-worker.mjs` | Returns **503** unless `BRIDGE_DEPLOYMENT=approved` |
-| Wrangler | `integration/wrangler.bridge.jsonc` | `workers_dev: false`; D1 binding placeholder |
+| Wrangler | `integration/wrangler.bridge.jsonc` | Hosted at `mcp.360web.cloud`; D1 `384a87b9-…08465` |
 | Browser link consume | `POST /mcp/link/browser` | Accepts **sealed onboarding ticket** only |
 
 ## Hard safety rules
@@ -25,27 +25,16 @@ This document is the **operator checklist** to take the in-repo MCP bridge from 
 
 ## Domain operator steps
 
-### A. Create infrastructure (Cloudflare)
+### A–B. Infrastructure + smoke (done 2026-11-22)
 
-1. Create D1 database `launch-and-own-mcp-bridge` in the same account as onboarding.
-2. Put the real `database_id` into `integration/wrangler.bridge.jsonc` → `d1_databases[0].database_id` (replace `REPLACE_WITH_BRIDGE_D1_ID`).
-3. Apply migrations:  
-   `cd integration && npx wrangler d1 migrations apply launch-and-own-mcp-bridge --remote -c wrangler.bridge.jsonc`
-4. Choose a hostname (proposal: `mcp.360web.cloud` or `bridge.360web.cloud`). Add custom domain / route; keep `workers_dev` and preview URLs **false**.
-5. Create secrets (32-byte hex each, distinct from onboarding `TOKEN_ENCRYPTION_KEY` where noted):
-   - `BRIDGE_TICKET_KEY` — seals browser link tickets (must match the key onboarding will use to **mint** tickets)
-   - Optional later: agent token signing material if you replace opaque DB tokens
-6. Set vars only after approval window:
-   - `ONBOARDING_ORIGIN=https://onboard.360web.cloud`
-   - `BRIDGE_ORIGIN=https://<chosen-host>`
-   - `BRIDGE_DEPLOYMENT=not_approved` for the first deploy smoke; flip to `approved` only after smoke + owner OK
+1. ~~Create D1~~ `launch-and-own-mcp-bridge` → `384a87b9-8f7c-4477-acbd-29d0c5d08465`
+2. ~~Migrations applied~~ (`0001_bridge.sql` remote)
+3. ~~Hostname~~ `https://mcp.360web.cloud` (custom domain; `workers_dev` false)
+4. ~~Secrets~~ matching `BRIDGE_TICKET_KEY` on bridge + onboarding Workers
+5. ~~Onboarding var~~ `BRIDGE_ORIGIN=https://mcp.360web.cloud`
+6. Smoke (redacted): `not_approved` → metadata/tools **503**; `approved` → metadata **200**, tools without bearer **401**, forged `{ticket,verified}` → **400** `invalid_link_challenge`; `/agent-link` serves connect prompt; onboarding `/health` ok
 
-### B. First deploy smoke (still not customer-facing)
-
-1. Deploy Worker from `integration/` with wrangler using `wrangler.bridge.jsonc`.
-2. Confirm `GET https://<host>/.well-known/oauth-protected-resource` returns **503** while `not_approved`, then **200** only after approved flag.
-3. Confirm `POST /mcp/tools/call` without bearer → 401; with forged link body → no link mutation.
-4. Record redacted evidence on #43 (no secrets).
+Customer matrix access remains **`not_available`** until consenting-user `/agent-link` E2E + OAuth client registration + #21/#55 review.
 
 ### C. Browser link mint (onboarding)
 
