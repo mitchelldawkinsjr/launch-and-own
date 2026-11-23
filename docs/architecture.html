@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- Interactive architecture of Launch & Own. Open this file in a browser; it is self-contained apart from Google Fonts (falls back to system fonts offline). Keep it in sync when the flow changes. -->
+<!-- Interactive architecture of Launch & Own. Open this file in a browser; it is self-contained apart from Google Fonts (falls back to system fonts offline). Keep it in sync when the launch, automation pipeline, or post-launch toolkit flow changes. -->
 <title>Launch &amp; Own Architecture</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -120,14 +120,15 @@ svg.focus .edge:not(.is-on) path{opacity:.18}
   <header>
     <div class="eyebrow">Launch &amp; Own · onboard.360web.cloud</div>
     <h1>How a customer goes from "describe it" to owning a live website</h1>
-    <p class="lede">Each column is a separate system. Step through the journey to see which parts work together at each moment, or click any box to see what it does and where it lives in the repo. Everything the customer ends up with sits in the green column, inside their own accounts.</p>
+    <p class="lede">Each column is a separate system. The blue <strong>automation pipeline</strong> runs durable launch jobs, verifies exact production, and later powers the owner toolkit without inventing live status. Step through launch, post-launch, or background flows — or click any box for the repo path. Everything the customer keeps sits in the green column, in their own accounts.</p>
   </header>
 
   <section class="player" aria-label="Journey steps">
     <div class="player-top">
       <div class="modes" role="group" aria-label="Which flow to show">
         <button class="btn" id="mode-journey" aria-pressed="true">Customer journey</button>
-        <button class="btn" id="mode-anytime" aria-pressed="false">Anytime flows</button>
+        <button class="btn" id="mode-post" aria-pressed="false">Post-launch toolkit</button>
+        <button class="btn" id="mode-anytime" aria-pressed="false">Automation &amp; ops</button>
         <button class="btn" id="mode-all" aria-pressed="false">Show everything</button>
       </div>
       <div class="nav">
@@ -140,7 +141,7 @@ svg.focus .edge:not(.is-on) path{opacity:.18}
   </section>
 
   <div class="stage">
-    <div class="diagram"><svg id="svg" viewBox="0 0 1200 760" role="img" aria-label="Architecture diagram"></svg></div>
+    <div class="diagram"><svg id="svg" viewBox="0 0 1200 900" role="img" aria-label="Architecture diagram"></svg></div>
     <aside class="panel" id="panel" aria-live="polite"></aside>
   </div>
 
@@ -155,8 +156,8 @@ svg.focus .edge:not(.is-on) path{opacity:.18}
   <section class="trust" aria-label="Safety rules built into the system">
     <div><h3>The customer approves publication</h3><p>Previews use private product storage. Launch &amp; Own creates resources in the customer's GitHub and Cloudflare accounts after approval.</p></div>
     <div><h3>Live means the exact approved revision</h3><p>A launch is marked live only when Cloudflare serves the GitHub commit SHA and HTML hash that were approved.</p></div>
-    <div><h3>Tokens never leave the service</h3><p>Provider tokens are AES-GCM encrypted in D1, refreshed automatically, deleted on sign-out, and revoked at GitHub and Cloudflare.</p></div>
-    <div><h3>Updates never touch live directly</h3><p>Approved edits arrive as a pull request in the customer's repo. The customer merges it; nothing is merged for them.</p></div>
+    <div><h3>Automation never invents “live”</h3><p>The durable job runner, cron resume, toolkit history, and provider inventory keep pending / unverified / reconnect states honest. Inventory discovery does not mint public live links.</p></div>
+    <div><h3>Updates never touch live directly</h3><p>Approved edits arrive as a pull request. Status is Approve → Merge in GitHub → Checking → Live. Closed PRs retire the Merge CTA.</p></div>
   </section>
 </div>
 
@@ -173,47 +174,55 @@ const N={
   browser:{lane:"you",y:110,t:"Customer",s:"onboard.360web.cloud",
     d:"A nontechnical customer in any browser. They never paste API keys or passwords; every permission goes through GitHub's and Cloudflare's own consent screens.",where:"—"},
   home:{lane:"lo",y:110,t:"Setup page",s:"GET /",
-    d:"Shows connection status, the account picker, and the choice to upload a built site or create a homepage once ZIP preview is configured.",where:"onboarding/worker.mjs"},
+    d:"Shows connection status, the account picker, upload or create choices, and — when both providers are ready — a link to Your website toolkit.",where:"onboarding/worker.mjs"},
   signin:{lane:"lo",y:210,t:"Sign-in handlers",s:"/connect/* · /oauth/*",
     d:"Starts each provider sign-in with a one-time state and PKCE code, then exchanges the returned code for tokens on the callback. Rejects reused or forged state.",where:"onboarding/worker.mjs, pipeline/github-app-oauth.mjs, pipeline/cloudflare-oauth.mjs"},
   design:{lane:"lo",y:320,t:"Upload or design",s:"/upload · /preview",
     d:"Validates the customer's built static ZIP, or renders a homepage from their details. The upload preview serves the original files with a short-lived credential on a separate origin per bundle.",where:"onboarding/website-zip.mjs, onboarding/zip-preview-worker.mjs, site/render-site.mjs"},
   approve:{lane:"lo",y:420,t:"Review & approve",s:"/review · /approve",
     d:"Shows the website preview and exact publish targets. The approval digest binds the generated HTML or the uploaded file paths and content hashes to the customer's launch plan.",where:"onboarding/worker.mjs, onboarding/launch-jobs.mjs"},
-  runner:{lane:"lo",y:520,t:"Launch job runner",s:"durable, leased",
-    d:"Executes an approved launch step by step with leases and idempotent retries, so a crash or timeout resumes safely instead of duplicating work.",where:"onboarding/launch-jobs.mjs, onboarding/run-launch-jobs.mjs, pipeline/provision-site.mjs"},
-  verify:{lane:"lo",y:620,t:"Deployment check",s:"/verify",
-    d:"Reads the Pages deployment and the public HTML. Marks the launch live only when the commit SHA and HTML hash match what was approved.",where:"pipeline/verify-site.mjs"},
-  cron:{lane:"lo",y:715,t:"Every 5 minutes",s:"cron */5",
-    d:"Background schedule: resumes interrupted launches, re-checks pending deployments, and deletes expired sign-ins, sessions and receipts.",where:"onboarding/worker.mjs (scheduled)"},
+  runner:{lane:"lo",y:520,t:"Automation pipeline",s:"durable jobs · leased",
+    d:"The shared automation pipeline runs approved launches step by step with leases and idempotent retries. A crash or timeout resumes the same job instead of duplicating repos or Pages projects. Later the same verification machinery checks customer-merged updates.",where:"onboarding/launch-jobs.mjs, onboarding/run-launch-jobs.mjs, pipeline/provision-site.mjs"},
+  verify:{lane:"lo",y:620,t:"Deployment check",s:"/verify · update status",
+    d:"Reads the Pages deployment and the public HTML. Marks live only when the commit SHA and HTML hash match what was approved. Update status reuses this check after a manual GitHub merge — it does not start a first build.",where:"pipeline/verify-site.mjs, onboarding/site-update-flow.mjs"},
+  toolkit:{lane:"lo",y:720,t:"Website toolkit",s:"GET /toolkit",
+    d:"Owner dashboard after launch: 30-day history cards with #84 capability states (hosting, updates, analytics, previews…), verified/expiry times, and #30 edit links when eligible. Soft-loads one page of current managed sites without inventing live URLs.",where:"onboarding/post-launch-toolkit.mjs, onboarding/toolkit-current-sites.mjs, pipeline/toolkit-capabilities.mjs"},
+  sourceInspect:{lane:"lo",y:810,t:"Source fingerprint",s:"GET /toolkit/source",
+    d:"Opens a short-lived AES-GCM ownership ticket minted only from server inventory, re-reads GitHub public/index.html, and shows SHA fingerprints + editMode. Raw homepage HTML never enters the onboarding origin.",where:"onboarding/toolkit-current-sites.mjs, pipeline/owned-site-inventory.mjs"},
+  cron:{lane:"lo",y:880,t:"Every 5 minutes",s:"cron */5",
+    d:"Background schedule for the automation pipeline: resumes interrupted launches, re-checks pending deployments, and deletes expired sign-ins, sessions and receipts.",where:"onboarding/worker.mjs (scheduled)"},
   sessions:{lane:"db",y:210,t:"Sessions",s:"encrypted tokens · 1 h",
-    d:"GitHub identity, selected Cloudflare account, and AES-GCM-encrypted access and refresh tokens. Expires after an hour or on sign-out.",where:"migrations 0001, 0002"},
+    d:"GitHub identity, selected Cloudflare account, and AES-GCM-encrypted access and refresh tokens. Expires after an hour or on sign-out. Authorization epoch fences inventory and sealed tickets.",where:"migrations 0001, 0002"},
   artifacts:{lane:"db",y:285,t:"Website uploads",s:"private R2 bucket",
     d:"Holds the validated files and their SHA-256 manifest. The draft lifecycle expires after one day and an approved bundle lasts through the 30-day recovery window.",where:"onboarding/zip-artifacts.mjs"},
   launches:{lane:"db",y:370,t:"Launch plans",s:"preview → approved",
     d:"The customer's site content, the generated plan and its approval digest. Preview rows are never sent to providers.",where:"migration 0001 (onboarding_launches)"},
   jobs:{lane:"db",y:520,t:"Launch jobs",s:"queued → live",
-    d:"Durable job records with status queued, pending_deployment, needs_reauthorization, failed or live, plus leases that keep two runners from acting at once.",where:"migration 0004"},
+    d:"Durable job records with status queued, pending_deployment, needs_reauthorization, failed or live, plus leases that keep two runners from acting at once. This is the automation pipeline's source of truth.",where:"migration 0004"},
   receipts:{lane:"db",y:620,t:"Launch receipts",s:"30-day history",
-    d:"Token-free history of approved launches so a customer can return after their session ends, reconnect, and reapprove a paused launch.",where:"migration 0003, onboarding/launch-receipts.mjs"},
+    d:"Token-free history of approved launches so a customer can return after their session ends, reconnect, and reapprove a paused launch. Not long-term inventory — that is #39 provider discovery.",where:"migration 0003, onboarding/launch-receipts.mjs"},
+  tickets:{lane:"db",y:720,t:"Sealed site tickets",s:"AES-GCM · 15 min",
+    d:"Server-minted managed-site references bound to session hash and authorization epoch. Used for /toolkit/source. Browser-supplied ownership JSON is rejected.",where:"onboarding/toolkit-current-sites.mjs"},
   ghauth:{lane:"gh",y:210,t:"GitHub consent",s:"app: launch-and-own",
     d:"Public GitHub App. Permissions: Repository creation, Contents and Pull requests (write), Metadata (read). Exact callback only; user tokens expire after 8 hours with refresh.",where:"github.com/apps/launch-and-own"},
   ghapi:{lane:"gh",y:470,t:"GitHub API",s:"repos · contents · pulls",
-    d:"Creates and updates the private repo under the customer's authorization. A ZIP import publishes all approved files in one commit with a conditional branch-head check.",where:"pipeline/provision-site.mjs, pipeline/provision-imported-site.mjs"},
+    d:"Creates and updates the private repo under the customer's authorization. A ZIP import publishes all approved files in one commit with a conditional branch-head check. Toolkit source inspect re-reads public/index.html GET-only.",where:"pipeline/provision-site.mjs, pipeline/provision-imported-site.mjs, pipeline/owned-site-inventory.mjs"},
   cfauth:{lane:"cf",y:210,t:"Cloudflare consent",s:"public, verified client",
     d:"Public OAuth client verified for onboard.360web.cloud. Scopes: Account Settings Read, Pages Read, Pages Write, offline_access.",where:"dash.cloudflare.com → OAuth clients"},
   ai:{lane:"cf",y:320,t:"AI drafting",s:"optional · off",
     d:"If enabled, only the business name and description are sent to draft copy. The contact email is never sent. Not configured in the current beta.",where:"onboarding/worker.mjs (/draft)"},
   cfapi:{lane:"cf",y:470,t:"Cloudflare API",s:"accounts · pages",
-    d:"Called with the customer's own token: list accounts for the picker, create the Pages project connected to the new repo, and read deployments for verification.",where:"pipeline/provision-site.mjs, pipeline/verify-site.mjs"},
+    d:"Called with the customer's own token: list accounts for the picker, create the Pages project connected to the new repo, and read deployments for verification. Toolkit inventory lists Pages projects GET-only.",where:"pipeline/provision-site.mjs, pipeline/verify-site.mjs, pipeline/owned-site-inventory.mjs"},
+  inventory:{lane:"cf",y:720,t:"Current site discovery",s:"#39 inventory page",
+    d:"Bounded GET of esp-*-site Pages projects the owner controls today. Reports GitHub main SHA and dashboard links. publicationVerified stays false until a separate public HTML check.",where:"pipeline/owned-site-inventory.mjs"},
   build:{lane:"cf",y:590,t:"Pages build",s:"Workers & Pages app",
     d:"Cloudflare's own GitHub integration pulls the repo and publishes it. It is a separate install from the Launch & Own app and must be allowed to read the new private repo.",where:"Customer's GitHub installations"},
   repo:{lane:"own",y:470,t:"Private repository",s:"esp-<name>",
     d:"The customer owns the private repository. It holds the uploaded website or generated homepage under public/ and serves as the source for Pages.",where:"github.com/<customer>/esp-<name>"},
   site:{lane:"own",y:590,t:"Live website",s:"esp-<name>-site.pages.dev",
     d:"The public website on the customer's Cloudflare Pages project, serving the exact approved revision. Low or no cost on Cloudflare's free tier.",where:"https://esp-<name>-site.pages.dev"},
-  prs:{lane:"own",y:700,t:"Update pull requests",s:"customer merges",
-    d:"Approved edits arrive on a feature branch as a pull request. Merging it triggers a new Pages build; nothing is merged automatically.",where:"github.com/<customer>/esp-<name>/pulls"}
+  prs:{lane:"own",y:810,t:"Update pull requests",s:"customer merges",
+    d:"Approved edits arrive on a feature branch as a pull request. Merging it triggers a new Pages build; nothing is merged automatically. Toolkit update status leads with Open update to publish.",where:"github.com/<customer>/esp-<name>/pulls"}
 };
 const E=[
   ["browser","home","opens site"],
@@ -227,9 +236,14 @@ const E=[
   ["runner","cfapi","create Pages project"],["cfapi","build","connect repo"],["repo","build","source",false,"back"],["build","site","publish"],
   ["verify","cfapi","read deployment"],["verify","site","hash live HTML"],["verify","jobs","mark live"],
   ["browser","site","visits their site"],
-  ["design","ghapi","update branch"],["ghapi","prs","open PR"],["prs","repo","customer merges",false,"back"],
+  ["browser","toolkit","opens toolkit"],["toolkit","jobs","history cards"],["toolkit","inventory","discover sites"],
+  ["inventory","cfapi","list Pages"],["inventory","ghapi","read repos"],["toolkit","tickets","mint ticket"],
+  ["tickets","sourceInspect","open ticket"],["sourceInspect","ghapi","read index.html"],
+  ["browser","design","edit site"],["design","ghapi","update branch"],["ghapi","prs","open PR"],["prs","repo","customer merges",false,"back"],
+  ["verify","prs","check merge"],["verify","site","hash after merge"],
   ["cron","runner","resume"],["cron","sessions","purge expired"],["cron","receipts","purge expired"],["runner","verify","re-check"],
-  ["home","sessions","delete session"],["home","ghauth","revoke grant"],["home","cfauth","revoke token"],["browser","approve","approve click"]
+  ["home","sessions","delete session"],["home","ghauth","revoke grant"],["home","cfauth","revoke token"],["browser","approve","approve click"],
+  ["home","toolkit","toolkit link"]
 ];
 const ek=(a,b,l)=>a+">"+b+">"+l;
 const JOURNEY=[
@@ -266,17 +280,31 @@ const JOURNEY=[
   {k:"10",title:"Verify the exact revision",nodes:["verify","cfapi","site","jobs"],edges:[["verify","cfapi","read deployment"],["verify","site","hash live HTML"],["verify","jobs","mark live"]],
    what:"The service confirms the production deployment is the approved commit and the public HTML matches the approved hash. Only then is it called live.",
    sees:"\"Public website deployment verified\".",stores:"Job status live."},
-  {k:"End",title:"They own a live website",nodes:["browser","site","repo"],edges:[["browser","site","visits their site"]],
-   what:"The customer has a public website and its source in their own accounts. They can sign out, revoke access, or leave, and both keep working.",
-   sees:"Their live URL and their private repository.",stores:"Only the token-free receipt, for 30 days.",end:true}
+  {k:"End",title:"They own a live website",nodes:["browser","site","repo","toolkit","home"],edges:[["browser","site","visits their site"],["home","toolkit","toolkit link"]],
+   what:"The customer has a public website and its source in their own accounts. The website toolkit becomes the post-launch home: history, capabilities, and current managed-site discovery — without claiming unproven live status.",
+   sees:"Their live URL, private repository, and a link to Your website toolkit.",stores:"Token-free receipt for 30 days; automation pipeline job marked live.",end:true}
+];
+const POST=[
+  {k:"Toolkit",title:"Open the website toolkit",nodes:["browser","toolkit","jobs","sessions"],edges:[["browser","toolkit","opens toolkit"],["toolkit","jobs","history cards"]],
+   what:"After connecting both providers, GET /toolkit loads owned launch-job history (bounded display query), rechecks the session epoch, and labels each site with #84 capability states. History is not long-term inventory.",
+   sees:"Previously verified cards, capability details, Update this website when #30-eligible.",stores:"No provider writes; read-only D1 history fields."},
+  {k:"Inventory",title:"Discover current managed sites",nodes:["toolkit","inventory","cfapi","ghapi","sessions"],edges:[["toolkit","inventory","discover sites"],["inventory","cfapi","list Pages"],["inventory","ghapi","read repos"]],
+   what:"The same page soft-loads one #39 provider inventory page using grants already refreshed by the history guard. Epoch is pinned; revoke during discovery returns reconnect without rendering captured history.",
+   sees:"Current managed sites with GitHub and Pages dashboard links; Publication unverified.",stores:"Nothing durable — discovery is live provider evidence only."},
+  {k:"Inspect",title:"Inspect GitHub source fingerprint",nodes:["toolkit","tickets","sourceInspect","ghapi"],edges:[["toolkit","tickets","mint ticket"],["tickets","sourceInspect","open ticket"],["sourceInspect","ghapi","read index.html"]],
+   what:"Inventory mints a 15-minute AES-GCM ticket for each discovered site. /toolkit/source re-reads public/index.html and shows SHA fingerprints plus editMode=approved_migration_required. Raw HTML stays out of the onboarding origin.",
+   sees:"Homepage SHA-256, Git blob SHA, and a clear non-editor message.",stores:"Only the short-lived sealed ticket until it expires."},
+  {k:"Update",title:"Safe website update ladder",nodes:["browser","design","ghapi","prs","repo","verify","site"],edges:[["browser","design","edit site"],["design","ghapi","update branch"],["ghapi","prs","open PR"],["prs","repo","customer merges"],["verify","prs","check merge"],["verify","site","hash after merge"]],
+   what:"Eligible one-page sites use the #30 editor: exact preview → approve → feature branch PR. Status copy is Approve → Open update to publish → Checking → Live. Closed-without-merge retires Merge. Live requires merged SHA + public HTML digest.",
+   sees:"Open update to publish linking to their GitHub PR, then Verified live after merge.",stores:"Review/status tickets; no auto-merge."}
 ];
 const ANYTIME=[
-  {k:"Update",title:"Request a website update",nodes:["browser","design","ghapi","prs","repo","build","site"],edges:[["browser","design","business details"],["design","ghapi","update branch"],["ghapi","prs","open PR"],["prs","repo","customer merges"],["repo","build","source"],["build","site","publish"]],
-   what:"An approved edit is written to a feature branch and opened as a pull request, based on the exact current commit. When the customer merges it, Pages rebuilds the live site.",
-   sees:"A pull request in their own repo to review and merge.",stores:"Nothing is merged or pushed to the live branch for them."},
+  {k:"Pipeline",title:"Automation pipeline runs a job",nodes:["jobs","runner","ghapi","cfapi","repo","build","verify","site"],edges:[["jobs","runner","lease job"],["runner","ghapi","create repo + commit"],["runner","cfapi","create Pages project"],["repo","build","source"],["build","site","publish"],["runner","verify","re-check"]],
+   what:"The automation pipeline is the durable launch runner: lease a queued job, create or resume the private repo and Pages project, wait for Cloudflare's build, then verify exact commit + public HTML before marking live. Retries are idempotent.",
+   sees:"Progress on the review page (queued → publishing → live).",stores:"Job status, expected commit SHA, leases."},
   {k:"Background",title:"Every 5 minutes",nodes:["cron","runner","verify","sessions","receipts","jobs"],edges:[["cron","runner","resume"],["jobs","runner","lease job"],["runner","verify","re-check"],["cron","sessions","purge expired"],["cron","receipts","purge expired"]],
-   what:"The schedule resumes launches interrupted by a timeout, re-checks deployments still building, and deletes expired sign-ins, sessions and receipts. If a token can't be refreshed, the job waits as needs_reauthorization.",
-   sees:"Nothing; progress appears on the review page.",stores:"Updated job status; expired data removed."},
+   what:"Cron feeds the same automation pipeline: resume interrupted launches, re-check deployments still building, and delete expired sign-ins, sessions and receipts. Failed token refresh parks the job as needs_reauthorization.",
+   sees:"Nothing; progress appears on the review or toolkit pages.",stores:"Updated job status; expired data removed."},
   {k:"Disconnect",title:"Sign out and revoke",nodes:["browser","home","sessions","ghauth","cfauth"],edges:[["home","sessions","delete session"],["home","ghauth","revoke grant"],["home","cfauth","revoke token"]],
    what:"Sign-out deletes the session first, then asks GitHub and Cloudflare to revoke Launch & Own's access. If a provider can't confirm, the customer is told to check their connected apps.",
    sees:"\"You are signed out\" with the revocation result.",stores:"Session and tokens deleted. Repo and site stay with the customer."}
@@ -293,7 +321,7 @@ for(const [id,cls] of [["arr","marker-idle"],["arr-on","marker-on"]]){
   el("path",{d:"M0,0 L10,5 L0,10 z",class:cls},m);
 }
 LANES.forEach(l=>{
-  el("rect",{x:l.x-96,y:8,width:192,height:744,rx:12,style:`fill:var(${l.bg})`});
+  el("rect",{x:l.x-96,y:8,width:192,height:884,rx:12,style:`fill:var(${l.bg})`});
   el("rect",{x:l.x-96,y:8,width:192,height:4,rx:2,style:`fill:var(${l.tone})`});
   const t=el("text",{x:l.x,y:36,"text-anchor":"middle",class:"lane-title",style:`fill:var(${l.tone})`});t.textContent=l.title;
   const s=el("text",{x:l.x,y:52,"text-anchor":"middle",class:"lane-sub"});s.textContent=l.sub;
@@ -333,7 +361,12 @@ const pin=(id,label,cls)=>{const {x,y}=pos(id);const g=el("g",{class:"pin "+cls}
 pin("browser","START","start");pin("site","END","end");
 
 let mode="journey",idx=0,picked=null;
-const listFor=()=>mode==="anytime"?ANYTIME:JOURNEY;
+const listFor=()=>mode==="post"?POST:mode==="anytime"?ANYTIME:JOURNEY;
+const modeKicker=()=>{
+  if(mode==="journey"){const s=listFor()[idx];return s.start?"Where the customer starts":s.end?"Where the customer ends":"Step "+s.k+" of the launch";}
+  if(mode==="post")return "Post-launch owner toolkit";
+  return "Automation & ops";
+};
 const chips=document.getElementById("chips"),panel=document.getElementById("panel");
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
@@ -350,35 +383,36 @@ function renderChips(){
 function render(){
   document.getElementById("count").textContent=mode==="all"?"—":`${idx+1} / ${listFor().length}`;
   document.getElementById("prev").disabled=mode==="all";document.getElementById("next").disabled=mode==="all";
-  ["journey","anytime","all"].forEach(m=>document.getElementById("mode-"+m).setAttribute("aria-pressed",m===mode));
+  ["journey","post","anytime","all"].forEach(m=>document.getElementById("mode-"+m).setAttribute("aria-pressed",m===mode));
   Object.values(nodeEls).forEach(g=>g.classList.remove("is-on","is-picked"));
   Object.values(edgeEls).forEach(g=>{g.classList.remove("is-on");g.firstChild.setAttribute("marker-end","url(#arr)")});
   if(mode==="all"){svg.classList.remove("focus");renderChips();if(picked)return showNode(picked);return showOverview();}
   const s=listFor()[idx];svg.classList.add("focus");
-  s.nodes.forEach(n=>nodeEls[n].classList.add("is-on"));
+  s.nodes.forEach(n=>nodeEls[n]?.classList.add("is-on"));
   s.edges.forEach(([a,b,l])=>{const g=edgeEls[ek(a,b,l)];if(g){g.classList.add("is-on");g.firstChild.setAttribute("marker-end","url(#arr-on)")}});
-  if(picked)nodeEls[picked].classList.add("is-picked");
+  if(picked)nodeEls[picked]?.classList.add("is-picked");
   renderChips();
   if(picked)return showNode(picked);
-  panel.innerHTML=`<div class="kicker">${mode==="journey"?(s.start?"Where the customer starts":s.end?"Where the customer ends":"Step "+esc(s.k)+" of the launch"):"Can happen anytime"}</div>
+  panel.innerHTML=`<div class="kicker">${esc(modeKicker())}</div>
    <h2>${esc(s.title)}</h2><p>${esc(s.what)}</p>
    <dl class="facts"><div><dt>Customer sees</dt><dd>${esc(s.sees)}</dd></div><div><dt>Stored or created</dt><dd>${esc(s.stores)}</dd></div>
    <div><dt>Parts involved</dt><dd>${s.nodes.map(n=>`<span class="tag">${esc(N[n].t)}</span>`).join(" ")}</dd></div></dl>
    <p class="hint">Use Next, the arrow keys, or click a box for its details.</p>`;
 }
 function showOverview(){
-  panel.innerHTML=`<div class="kicker">Overview</div><h2>Six systems, one owner at the end</h2>
-   <p>The blue service orchestrates. The purple database remembers progress and encrypted tokens. GitHub and Cloudflare do the real work using the customer's own permissions, and everything that results lands in the green column.</p>
-   <dl class="facts"><div><dt>Runs on</dt><dd>The onboarding Worker uses dedicated D1. ZIP previews add a separate Worker and private R2 storage.</dd></div>
+  panel.innerHTML=`<div class="kicker">Overview</div><h2>Six systems, one automation pipeline, one owner</h2>
+   <p>The blue service runs the <strong>automation pipeline</strong> (durable launch jobs → provision → exact verify) and the post-launch toolkit (history + #39 inventory + sealed source inspect). Purple D1 remembers progress and encrypted tokens. GitHub and Cloudflare do the real work with the customer's permissions; results land in the green column.</p>
+   <dl class="facts"><div><dt>Runs on</dt><dd>Onboarding Worker + dedicated D1. ZIP previews add a separate Worker and private R2.</dd></div>
+   <div><dt>Post-launch</dt><dd><code>/toolkit</code> and <code>/toolkit/source</code> are GET-only owner surfaces. Hosted rollout still needs Domain release gates.</dd></div>
    <div><dt>Customer cost</dt><dd>Free GitHub and Cloudflare tiers cover a basic site.</dd></div></dl>`;
 }
 function showNode(id){
   const n=N[id],lane=LANES.find(l=>l.id===n.lane);
   Object.values(nodeEls).forEach(g=>g.classList.remove("is-picked"));nodeEls[id].classList.add("is-picked");
-  const steps=JOURNEY.filter(s=>s.nodes.includes(id)).map(s=>s.k);
+  const steps=[...JOURNEY,...POST,...ANYTIME].filter(s=>s.nodes.includes(id)).map(s=>s.k);
   panel.innerHTML=`<div class="kicker">${esc(lane.title)}</div><h2>${esc(n.t)}</h2><p>${esc(n.d)}</p>
    <dl class="facts"><div><dt>Label</dt><dd class="mono">${esc(n.s)}</dd></div><div><dt>Where it lives</dt><dd class="mono">${esc(n.where)}</dd></div>
-   <div><dt>Used in journey steps</dt><dd>${steps.length?steps.map(k=>`<span class="tag">${esc(k)}</span>`).join(" "):"Only in anytime flows"}</dd></div></dl>
+   <div><dt>Used in steps</dt><dd>${steps.length?steps.map(k=>`<span class="tag">${esc(k)}</span>`).join(" "):"Shown in overview only"}</dd></div></dl>
    <button class="btn" id="back-step">Back to the step</button>`;
   document.getElementById("back-step").onclick=()=>{picked=null;render()};
 }
@@ -386,6 +420,7 @@ function pickNode(id){picked=picked===id?null:id;render()}
 function go(d){if(mode==="all")return;const L=listFor().length;idx=Math.max(0,Math.min(L-1,idx+d));picked=null;render()}
 document.getElementById("prev").onclick=()=>go(-1);document.getElementById("next").onclick=()=>go(1);
 document.getElementById("mode-journey").onclick=()=>{mode="journey";idx=0;picked=null;render()};
+document.getElementById("mode-post").onclick=()=>{mode="post";idx=0;picked=null;render()};
 document.getElementById("mode-anytime").onclick=()=>{mode="anytime";idx=0;picked=null;render()};
 document.getElementById("mode-all").onclick=()=>{mode="all";picked=null;render()};
 document.addEventListener("keydown",e=>{if(e.target.closest("input,textarea"))return;if(e.key==="ArrowRight")go(1);if(e.key==="ArrowLeft")go(-1)});
