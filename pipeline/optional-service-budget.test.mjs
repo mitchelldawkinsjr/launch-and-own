@@ -131,11 +131,14 @@ test('unknown aggregate usage/permission is a blocker, not a zero-usage guess',a
 });
 
 test('Paid account must receive a separate price/billing review',async()=>{
- const result=await plan({accountEvidence:{...accountEvidence,workersPlan:'paid'},
-  requests:[reqWorkers,reqD1,reqKV,reqR2]});
+ const result=await plan({accountEvidence:{...accountEvidence,workersPlan:'paid',
+  r2SubscriptionActive:true},requests:[reqWorkers,reqD1,reqKV,reqR2]});
  assert(result.services.every(s=>s.state==='paid_cost_review_required'));
  assert(result.services.every(s=>s.costEstimateUsd===null&&s.readyForActivation===false));
  assert.equal(result.costEstimateUsd,null);
+ const withoutR2Activation=await plan({accountEvidence:{...accountEvidence,workersPlan:'paid'},
+   requests:[reqR2]});
+ assert.equal(withoutR2Activation.services[0].state,'subscription_activation_required');
 });
 
 test('tenant, repository and Cloudflare account mismatches fail closed',async()=>{
