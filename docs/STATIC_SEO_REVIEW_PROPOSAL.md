@@ -9,7 +9,7 @@ The exported buildSeoReviewProposal function generates an immutable, determinist
 - Single-page: public/index.html with verified-origin canonical, Open Graph title/description/type/URL, and Twitter summary card metadata.
 - Four-page: per-page canonical and Open Graph URLs for /, /about/, /services/ and /contact/ (verified origin required).
 - public/robots.txt and public/sitemap.xml with the corresponding routes. The helper refuses any existing robots/sitemap file collision.
-- An exact plan with the original rendered-page SHA-256, proposed-page SHA-256, every proposed file byte, and a manifest SHA-256 that binds the whole proposal to expected base Git SHA, site identities and canonical origin.
+- An exact plan with each expected rendered-source SHA-256, proposed-page SHA-256 and proposed file byte. The manifest SHA-256 binds the plan to the expected base Git SHA, site identities and canonical origin. A future verifier compares the expected rendered-source digests with the actual pinned bytes.
 
 Results explicitly carry status=review-required, publicationVerified=false and requiresOwnerApproval=true. No API request, GitHub PR, Cloudflare setting, DNS, domain/TLS, billing or deployment changes are performed. This PR never alters the default renderers or existing approved files.
 
@@ -35,7 +35,7 @@ Custom domain registration, redirects, Email Routing, Turnstile forms, customer 
 
 ## API contract and release status
 
-Call buildSeoReviewProposal with sourceKind, site, trustedSite, domainEvidence and existingPaths. It returns files containing path, action, beforeSha256, afterSha256 and complete proposed bytes, plus proposalSha256. It never applies those changes. The unverified or inconsistent account/domain path returns an empty plan with a blocked status.
+Call buildSeoReviewProposal with sourceKind, site, trustedSite, domainEvidence and the explicit existingPaths from the pinned Git tree. The inventory must include every generated page. It returns files containing path, action, beforeSha256, afterSha256 and complete proposed bytes, plus proposalSha256. Missing or inconsistent evidence returns an empty plan with a blocked status.
 
 Tests: node --test site/seo-review-proposal.test.mjs; npm test; npm run qa:distribution; npm run preflight:onboarding.
 

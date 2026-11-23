@@ -23,7 +23,9 @@ const domainEvidence = Object.freeze({
   pagesProjectName:'esp-willow-site',sourceSha:sha,
   checkedAt:now-60,expiresAt:now+3600
 });
-const input = {sourceKind:'generated-one-page',site,trustedSite,domainEvidence};
+const homePaths = ['public/index.html'];
+const multiPaths = [...homePaths, 'public/about/index.html', 'public/services/index.html', 'public/contact/index.html'];
+const input = {sourceKind:'generated-one-page',site,trustedSite,domainEvidence,existingPaths:homePaths};
 const proposal = updates=>buildSeoReviewProposal({...input,...updates});
 const digest = text=>createHash('sha256').update(text).digest('hex');
 
@@ -63,7 +65,7 @@ test('single generated site: deterministic exact proposed HTML and robots/sitema
 });
 
 test('four-page bundle: correct clean-route canonical URL on all pages',async()=>{
- const result=await proposal({sourceKind:'generated-multi-page',site:{...site,layout:'multi-page'}});
+ const result=await proposal({sourceKind:'generated-multi-page',site:{...site,layout:'multi-page'},existingPaths:multiPaths});
  assert.equal(result.status,'review-required');
  assert.equal(result.files.length,6);
  const routes=['/','/about/','/services/','/contact/'];
@@ -158,6 +160,17 @@ test('existing SEO files cannot be silently overwritten, duplicates also denied'
  assert.equal((await proposal({existingPaths:[42]})).status,'blocked-file-inventory');
 });
 
+test('absent or incomplete source inventory cannot authorize an artifact proposal',async()=>{
+ for (const context of [
+  {existingPaths:undefined}, {existingPaths:[]}, {existingPaths:['public/Index.html']},
+  {sourceKind:'generated-multi-page',existingPaths:multiPaths.slice(0, -1)}
+ ]) {
+  const result = await proposal(context);
+  assert.equal(result.status,'blocked-file-inventory');
+  assert.deepEqual(result.files,[]);
+ }
+});
+
 test('proposal digest binds origin, current base, mode and every output byte',async()=>{
  const first=await proposal();
  const otherDomain=await proposal({domainEvidence:{...domainEvidence,origin:'https://willow-two.example'}});
@@ -165,12 +178,20 @@ test('proposal digest binds origin, current base, mode and every output byte',as
  const otherBase=await proposal({trustedSite:{...trustedSite,expectedBaseSha:otherRevision},
   domainEvidence:{...domainEvidence,sourceSha:otherRevision}});
  const otherPage=await proposal({site:{...site,about:'Verified new story'}});
- const multi=await proposal({sourceKind:'generated-multi-page'});
+ const multi=await proposal({sourceKind:'generated-multi-page',existingPaths:multiPaths});
  for(const result of [otherDomain,otherBase,otherPage,multi]){
   assert.equal(result.status,'review-required');
   assert.notEqual(result.proposalSha256,first.proposalSha256);
  }
  assert.equal((await proposal()).proposalSha256,first.proposalSha256);
+});
+
+test('supported renderer input survives entity expansion in title and description',async()=>{
+ const result=await proposal({site:{...site,name:'Studio '+'&'.repeat(60),about:'A & B & C & D & '.repeat(10)}});
+ assert.equal(result.status,'review-required');
+ const html=result.files[0].content;
+ assert(html.includes('content="Studio '+'&amp;'.repeat(60)+' | Welcome"'));
+ assert.match(html,/<meta property="og:description" content="A &amp; B &amp; C &amp; D &amp;/);
 });
 
 test('escaped user copy stays safe in all new head tags; no invented business facts',async()=>{

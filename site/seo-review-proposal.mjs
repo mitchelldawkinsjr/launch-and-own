@@ -58,8 +58,9 @@ function evidenceMatches(site, evidence) {
     Boolean(canonicalOrigin(evidence.origin));
 }
 function headInfo(html) {
-  const title = /<title>([^<]{1,200})<\/title>/i.exec(html)?.[1];
-  const desc = /<meta name="description" content="([^"]{1,300})">/i.exec(html)?.[1];
+  // The renderer bounds text before escaping, which can expand an entity to six bytes.
+  const title = /<title>([^<]+)<\/title>/i.exec(html)?.[1];
+  const desc = /<meta name="description" content="([^"]+)">/i.exec(html)?.[1];
   if (!title || !desc || (html.match(/<title>/gi) || []).length !== 1 ||
       (html.match(/<meta name="description"/gi) || []).length !== 1 ||
       (html.match(/<\/head>/gi) || []).length !== 1)
@@ -102,7 +103,7 @@ function generatedPages(sourceKind, site) {
  * Imported/customer ZIP files are never automatically transformed.
  */
 export async function buildSeoReviewProposal({
-  sourceKind, site, trustedSite, domainEvidence, existingPaths = []
+  sourceKind, site, trustedSite, domainEvidence, existingPaths
 } = {}) {
   if (!SITE_TYPES.has(sourceKind)) return deny('manual-review-required',
     'Imported ZIP and other customer-authored files cannot be modified automatically');
@@ -131,6 +132,8 @@ export async function buildSeoReviewProposal({
   const origin = canonicalOrigin(evidence.origin);
   const normalizedSite = normalizeSite(site);
   const pages = generatedPages(sourceKind, normalizedSite);
+  if (pages.some(page => !existingSnapshot.includes(page.path)))
+    return deny('blocked-file-inventory', 'The current source inventory must include every generated page');
   const files = [];
   const urls = [];
   for (const page of pages) {
