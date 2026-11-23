@@ -12,7 +12,7 @@ Official current docs:
 - https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/get/
 - https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/deployments/methods/get/
 
-The supported Cloudflare `custom` branch rule may include ONLY `launch-and-own/site-*`, with no exclusions or automatic PR comments. **This alone does not protect privacy:** every matching branch can become publicly viewable, including before a specific PR consent. Prevent creation of eligible branches until owner privacy choice and project policy are verified. Enforce Cloudflare Access for confidentiality-sensitive cases *before* enabling previews, or keep them completely off.
+The accepted Cloudflare `custom` branch policy is aligned with Domain PR #90: include exactly `launch-and-own/site-*`, **exclude exactly `main`**, with no extra branch patterns or automatic PR comments. **This alone does not protect privacy:** every matching branch can become publicly viewable, including before a specific PR consent. Prevent creation of eligible branches until owner privacy choice and project policy are verified. Enforce Cloudflare Access for confidentiality-sensitive cases *before* enabling previews, or keep them completely off.
 
 ## Implemented read-only contract
 
