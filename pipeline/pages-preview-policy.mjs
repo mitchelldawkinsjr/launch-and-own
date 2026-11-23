@@ -100,7 +100,7 @@ export async function planPreviewPolicy(project, expected, action) {
   const target = targetConfig(action);
   const c = project.source.config;
   // Same writable fields provisioning sends, so a replace-style PATCH cannot drop the Git link.
-  // shortcut: PATCH semantics for source.config not yet exercised live; trial on an owner test project before any caller ships.
+  // Live trial 2026-11-22 confirmed Pages merges source.config (docs/PAGES_PR_PREVIEWS.md).
   const config = {owner: c.owner, repo_name: c.repo_name, production_branch: 'main',
     production_deployments_enabled: true, ...target};
   const plan = {

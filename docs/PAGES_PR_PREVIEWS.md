@@ -45,8 +45,8 @@ From the [Pages limits](https://developers.cloudflare.com/pages/platform/limits/
 
 ## Release gates (before any caller exists)
 
-- [ ] Trial PATCH semantics on an **owner test project**. The plan resends the writable Git fields provisioning uses, so a replace-style PATCH can't drop the Git link. This hasn't been run against the live API yet.
-- [ ] Owner and Domain approval for the trial write, then orchestration review (#83).
+- [x] Owner-approved live trial (2026-11-22) on owner QA project `esp-qa-willow-owner-live-b13-site`: `none` → `enable_scoped` → verified `scoped` → `disable` → verified `off`. Cloudflare **merges** `source.config`: `owner`, `repo_id`, `pr_comments_enabled`, `deployments_enabled`, `path_includes` and the production settings were unchanged, and `matchesApprovedPagesProject` stayed true throughout. The production site still returned 200. The only difference left behind is cosmetic: after disable, `preview_branch_includes` reads `[]` instead of the original `["*"]`, which has no effect while the setting is `none`.
+- [ ] Orchestration review (#83).
 - [ ] UI/route: #87 dashboard card or #30 update page, coordinated with `onboarding/worker.mjs` owners.
 - [ ] Disable path tested live. Explain that already-built preview URLs keep working until those deployments are deleted.
 - [ ] Never switch provisioning from `none` to `all`.
