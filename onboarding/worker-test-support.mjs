@@ -189,6 +189,24 @@ function harness({withJobs=true}={}){
      canonical_deployment:{id:'deploy-success',environment:'production',latest_stage:{name:'deploy',status:'success'},deployment_trigger:{metadata:{commit_hash:GENERATED_SHA}}}};
     return Response.json({success:true,result:resourceState.pages},{status:201});
   }
+  // Owned-zone + pre-existing ready email routing mocks. No MX/DNS mutation handler.
+  const parsed=new URL(url);
+  const zoneId='b'.repeat(32);
+  const page=result=>Response.json({success:true,result,
+    result_info:{page:1,total_pages:1}});
+  if(parsed.pathname==='/client/v4/zones'&&parsed.searchParams.get('account.id')===accountId)
+    return page([{id:zoneId,name:'example.com',status:'active',account:{id:accountId}}]);
+  if(parsed.pathname==='/client/v4/zones/'+zoneId+'/email/routing'&&opts.method!=='POST')
+    return page({enabled:true,status:'ready'});
+  if(parsed.pathname==='/client/v4/accounts/'+accountId+'/email/routing/addresses'&&opts.method!=='POST')
+    return page([{email:'existing@example.net',verified:'2026-11-22T01:00:00Z'}]);
+  if(parsed.pathname==='/client/v4/accounts/'+zoneId+'/email/routing/rules'&&opts.method!=='POST')
+    return page(resourceState.emailRules||[]);
+  if(parsed.pathname==='/client/v4/zones/'+zoneId+'/email/routing/rules'&&opts.method==='POST'){
+    const rule={...JSON.parse(opts.body),id:'rule-1'};
+    resourceState.emailRules=[rule];
+    return page(rule);
+  }
   if(url==='https://esp-willow-studio-site.pages.dev/')return new Response(resourceState.publicHtml??resourceState.homepageHtml,{status:200,headers:{'content-type':'text/html'}});
   throw Error('unmocked external request: '+url);
  };
