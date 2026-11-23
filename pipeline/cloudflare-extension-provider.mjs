@@ -141,6 +141,12 @@ export function createCloudflareExtensionProvider({
         encodeURIComponent(owner.githubLogin) + '/' +
         encodeURIComponent(site.repositoryName));
     },
+    async readGithubBranchHead(site) {
+      safeSite(site, owner);
+      return await request('github', 'GET', '/repos/' +
+        encodeURIComponent(owner.githubLogin) + '/' +
+        encodeURIComponent(site.repositoryName) + '/branches/main');
+    },
     async readPagesDomain(site, hostname) {
       const host = exactHost(hostname);
       return (await cfGet(pagesRoot(site) + '/domains/' +
