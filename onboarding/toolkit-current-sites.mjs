@@ -8,7 +8,8 @@ import {
   ManagedSiteInventoryError
 } from '../pipeline/owned-site-inventory.mjs';
 import {hasCurrentOwnerSession} from './launch-jobs.mjs';
-import {getFreshAccessToken} from './token-lifecycle.mjs';
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 export function ownerPrincipalFromSession(session) {
   if (!session || !Number.isSafeInteger(session.github_user_id) || session.github_user_id < 1 ||
@@ -22,17 +23,19 @@ export function ownerPrincipalFromSession(session) {
   });
 }
 
-export function createOwnerAuthorizationFence(env, session, time) {
+export function createOwnerAuthorizationFence(env, session, clock = nowSeconds) {
   const expected = ownerPrincipalFromSession(session);
   if (!expected) {
     return async () => false;
   }
+  const selected = Object.freeze({hash: session.hash, authorization_epoch: session.authorization_epoch,
+    github_user_id: expected.githubUserId, cloudflare_account_id: expected.cloudflareAccountId});
   return async (frozen) => {
     if (!frozen || frozen.githubUserId !== expected.githubUserId ||
         frozen.githubLogin !== expected.githubLogin ||
         frozen.cloudflareAccountId !== expected.cloudflareAccountId)
       return false;
-    return hasCurrentOwnerSession(env, session, time);
+    return hasCurrentOwnerSession(env, selected, clock());
   };
 }
 
@@ -41,10 +44,7 @@ export function createOwnerAuthorizationFence(env, session, time) {
  *   {status:'unavailable', code:string}>}
  */
 export async function loadCurrentManagedSitesPage(env, session, {
-  page = 1,
-  time = Math.floor(Date.now() / 1000),
-  fetchFn = fetch,
-  tokenFetch = getFreshAccessToken
+  page = 1, clock = nowSeconds, fetchFn = fetch, githubAccessToken, cloudflareAccessToken
 } = {}) {
   const principal = ownerPrincipalFromSession(session);
   if (!principal)
@@ -53,32 +53,14 @@ export async function loadCurrentManagedSitesPage(env, session, {
     return {status: 'unavailable', code: 'invalid_inventory_page'};
 
   try {
-    const checkSession = async () => {
-      if (!await hasCurrentOwnerSession(env, session, time))
-        throw new ManagedSiteInventoryError('authorization_changed');
-    };
-    const fencedFetch = async (url, options = {}) => {
-      await checkSession();
-      return await fetchFn(url, {
-        ...options,
-        signal: options.signal ?? AbortSignal.timeout(10000)
-      });
-    };
-    const githubAccessToken = await tokenFetch({
-      env, session, provider: 'github', fetchFn: fencedFetch
-    });
-    const cloudflareAccessToken = await tokenFetch({
-      env, session, provider: 'cloudflare', fetchFn: fencedFetch
-    });
     const inventory = await discoverOwnedManagedSites({
       page,
       principal,
       githubAccessToken,
       cloudflareAccessToken,
-      assertCurrentAuthorization: createOwnerAuthorizationFence(env, session, time),
-      fetchFn: fencedFetch
+      assertCurrentAuthorization: createOwnerAuthorizationFence(env, session, clock),
+      fetchFn
     });
-    await checkSession();
     return {
       status: 'ok',
       page: inventory.page,
