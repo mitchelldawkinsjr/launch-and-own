@@ -245,7 +245,7 @@ function exactHostnameMxReady(records, hostname) {
     if (record?.type !== 'MX' || lower(record.name) !== hostname ||
         !Number.isSafeInteger(record.priority) || record.priority < 0 ||
         record.priority > 65535 || typeof record.content !== 'string') return false;
-    const target = lower(record.content).replace(/\\.$/, '');
+    const target = lower(record.content).replace(/\.$/, '');
     if (!required.delete(target)) return false;
   }
   return required.size === 0;
