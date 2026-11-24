@@ -77,6 +77,10 @@ function harness({withJobs=true}={}){
       app_slug:'launch-and-own',
       account:{login:'tester',type:'User'},
       permissions:{repository_creation:'write',contents:'write',metadata:'read',pull_requests:'write'}
+    },{
+      app_slug:'cloudflare-workers-and-pages',
+      account:{login:'tester',type:'User'},
+      permissions:{administration:'write',contents:'write',metadata:'read',pull_requests:'write'}
     }]});
   }
   if(url==='https://api.github.com/applications/Iv1.example/grant'){
@@ -92,11 +96,22 @@ function harness({withJobs=true}={}){
       Response.json({access_token:'cf_secret_example',token_type:'bearer',expires_in:180,refresh_token:'cf_initial_refresh'}):
       Response.json({access_token:'cf_secret_example',token_type:'bearer'});
   }
-  if(url.includes('/accounts?page=1'))return Response.json({success:true,result:[{id:accountId,name:'Demo Account'}]});
+  if(url.includes('/accounts?page=1')){
+    if(resourceState.cloudflareRevoked)return new Response(null,{status:403});
+    return Response.json({success:true,result:[{id:accountId,name:'Demo Account'},{id:'f'.repeat(32),name:'Alt Account'}]});
+  }
   const acct=url.match(/\/accounts\/([a-f0-9]{32})$/);
   if(acct){
     if(resourceState.cloudflareRevoked)return new Response(null,{status:403});
     return Response.json({success:true,result:{id:acct[1],name:'Demo Account'}});
+  }
+  const pagesList=url.match(/\/accounts\/([a-f0-9]{32})\/pages\/projects(?:\?|$)/);
+  if(pagesList&&(opts.method||'GET')==='GET'&&!url.includes('/pages/projects/')){
+    if(resourceState.cloudflareRevoked)return new Response(null,{status:401});
+    const listed=resourceState.pages&&pagesList[1]===accountId
+      ?[{id:resourceState.pages.id,name:resourceState.pages.name}]:[];
+    return Response.json({success:true,result:listed,result_info:{
+      page:1,per_page:3,total_pages:listed.length?1:0,total_count:listed.length}});
   }
   const root='https://api.github.com/repos/tester/esp-willow-studio';
   const pages='https://api.cloudflare.com/client/v4/accounts/'+accountId+'/pages/projects';
@@ -186,12 +201,6 @@ function harness({withJobs=true}={}){
     if(body.name!=='www.example.com')throw Error('Unexpected domain attachment');
     resourceState.customDomain={name:body.name,status:'pending'};
     return Response.json({success:true,result:resourceState.customDomain},{status:201});
-  }
-  if((url===pages||url.startsWith(pages+'?')) && (opts.method||'GET')==='GET'){
-    const listed=resourceState.pages
-      ?[{id:resourceState.pages.id,name:resourceState.pages.name}]:[];
-    return Response.json({success:true,result:listed,result_info:{
-      page:1,per_page:3,total_pages:listed.length?1:0,total_count:listed.length}});
   }
   if(url===pages && opts.method==='POST'){
     if(resourceState.pagesError)return Response.json({success:false},{status:resourceState.pagesError});
