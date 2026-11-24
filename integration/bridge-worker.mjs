@@ -115,5 +115,3 @@ export default {
     return createBridgeFetch(host)(request);
   }
 };
-
-export {RESOURCE_METADATA_PATH};
