@@ -6,6 +6,7 @@ import {
 } from '../pipeline/github-app-installation.mjs';
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,verifyCloudflarePagesAccess} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
+import {ProviderRequestError} from '../pipeline/provider-errors.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
 import {normalizeSite,renderSite} from '../site/render-site.mjs';
 import {draftSiteFromBrief,aiDraftConfigured} from '../site/draft-site.mjs';
@@ -28,6 +29,8 @@ import {bridgeLaunchStatus,importBridgeDraft} from './bridge-draft-review.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 import {providerConnectionCards,providerHelpCss} from './provider-connection-help.mjs';
+import {connectPagesAccess,getPagesAccess,removePagesAccess,PagesAccessChanged} from './pages-access.mjs';
+import {isPagesAccessError,pagesAccessLink,pagesAccessPath,renderPagesAccess} from './pages-access-view.mjs';
 import {
   loadCurrentManagedSitesPage,renderCurrentSitesSection,
   inspectSealedManagedSource,renderCurrentSourcePage
@@ -189,9 +192,9 @@ async function accountOptions(env,current){
   return data.result.filter(a=>typeof a.id==='string'&&/^[a-f\d]{32}$/i.test(a.id)).map(a=>({id:a.id,name:String(a.name||a.id)}));
 }
 async function home(env,current,notice){
-  const disconnectNotice=notice==='unconfirmed'?'<p role="alert">You are signed out here, but GitHub or Cloudflare may still show Launch &amp; Own as connected. Open your account settings on those sites and remove access if you want a full disconnect.</p>':notice==='complete'?'<p role="status">You are signed out, and Launch &amp; Own access was removed from the connected accounts.</p>':'';
+  const disconnectNotice=notice==='unconfirmed'?'<p role="alert">You are signed out here, but GitHub or Cloudflare may still show Launch &amp; Own as connected. Open your account settings on those sites and remove access if you want a full disconnect.</p>':notice==='complete'?'<p role="status">You are signed out, and GitHub and Cloudflare confirmed that Launch &amp; Own OAuth access was removed.</p>':'';
   const zipEnabled=zipPreviewConfigured(env);
-  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Create a simple site here, or upload one you already built. Your site will live in your own GitHub and Cloudflare accounts.':'Create a simple website that lives in your own GitHub and Cloudflare accounts.'}</p><p>Nothing is published until you review a preview and approve it.</p>${providerConnectionCards()}<small>We never ask for API tokens or passwords.</small>`);
+  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Create a simple site here, or upload one you already built. Your site will live in your own GitHub and Cloudflare accounts.':'Create a simple website that lives in your own GitHub and Cloudflare accounts.'}</p><p>Nothing is published until you review a preview and approve it.</p>${providerConnectionCards()}<small>Sign in on GitHub and Cloudflare. Keep credentials out of chat.</small>`);
   let appInstalled=false;
   try{
     const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
@@ -239,7 +242,7 @@ async function home(env,current,notice){
   const next=ready?
     '<section><h2>Create a simple website</h2><p>Fill in your business details, then preview the page. You will approve it in a separate step before anything goes live. After the site is live, you can save optional domain, email, and form requests from your toolkit; that does not change DNS or create a form by itself.</p>'+
     button('/preview','Preview my website',current.csrf,siteFields)+'</section>':'';
-  const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Your launches</a></p>':'';
+  const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Your launches</a> · '+pagesAccessLink+'</p>':'';
   const cloudflareLine=connected
     ?(current.cloudflare_account_id?'Cloudflare connected · hosting account selected':'Cloudflare connected · choose your hosting account next')
     :'Cloudflare not connected yet';
@@ -253,11 +256,13 @@ async function toolkit(env,current,request){
   const cards=await loadToolkitCards(env,current,now());
   const page=Number(new URL(request.url).searchParams.get('page')||'1');
   const inventory=await loadCurrentManagedSitesPage(env,current,{page,...grants});
-  if(['authorization_changed','github_reauthorization_required','cloudflare_reauthorization_required',
+  if(['authorization_changed','github_reauthorization_required',
     'provider_reauthorization_required'].includes(inventory.code)||!await hasCurrentOwnerSession(env,current,now()))
     return fail('Reconnect your accounts to view your website toolkit.',401);
   return renderToolkitPage(cards,current,{view,escape},{
-    currentInventoryHtml:renderCurrentSitesSection(inventory,{escape})
+    currentInventoryHtml:['cloudflare_reauthorization_required','cloudflare_permission_denied'].includes(inventory.code)
+      ? '<p>Cloudflare Pages access is unavailable. '+pagesAccessLink+' to verify your sites.</p>'
+      : renderCurrentSitesSection(inventory,{escape})
   });
 }
 async function toolkitSource(env,current,request){
@@ -266,24 +271,66 @@ async function toolkitSource(env,current,request){
   const params=new URL(request.url).searchParams;
   const ticket=params.get('ticket');
   const inspection=await inspectSealedManagedSource(env,current,ticket,{check:params.get('check')||'deployment'});
-  if(['authorization_changed','github_reauthorization_required','cloudflare_reauthorization_required',
+  if(['authorization_changed','github_reauthorization_required',
     'provider_reauthorization_required'].includes(inspection.code)||!await hasCurrentOwnerSession(env,current,now()))
     return fail('Reconnect your accounts to view your website toolkit.',401);
+  if(['cloudflare_reauthorization_required','cloudflare_permission_denied'].includes(inspection.code))
+    return view('Site toolkit','<p>Cloudflare Pages access is unavailable. '+pagesAccessLink+' to check this site.</p>',401);
   return renderCurrentSourcePage(inspection,{view,escape},ticket);
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
-  if(!current.cloudflare_token_ct)throw Error('Connect Cloudflare before selecting an account');
+  if(!current.cloudflare_token_ct||data.getAll('accountId').length!==1)throw Error('Select a connected Cloudflare account');
   const accountId=data.get('accountId')?.toLowerCase();
   const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   await verifyCloudflareAccount({accessToken:token,accountId});
-  await verifyCloudflarePagesAccess({accessToken:token,accountId});
+  let pagesDenied=false;
+  try{
+    await verifyCloudflarePagesAccess({accessToken:token,accountId,strict:true});
+  }catch(error){
+    if(!(error instanceof ProviderRequestError)||!error.authorizationLost)throw error;
+    pagesDenied=true;
+  }
   const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET
     authorization_epoch=authorization_epoch+(cloudflare_account_id IS NOT ?), cloudflare_account_id=?
     WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
     .bind(accountId,accountId,current.hash,current.authorization_epoch,now()).first();
   if(!updated)throw Error('Cloudflare authorization changed while selecting the account');
-  return redirect('/');
+  return redirect(pagesDenied?pagesAccessPath:'/');
+}
+
+async function pagesAccessPage(env,current,problem){
+  if(!current?.cloudflare_account_id)return fail('Select your Cloudflare account first.',401);
+  return renderPagesAccess(current,await getPagesAccess(env,current),{view,escape,button},problem);
+}
+
+async function setPagesAccess(request,env,current){
+  await limitAttempts(request,env);
+  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
+  if(data.size!==3||data.getAll('mode').length!==1||data.getAll('token').length!==1)
+    return fail('Choose Pages access and enter a Cloudflare API token.');
+  await assertHistoryAccess(env,current);
+  try{
+    if(!await connectPagesAccess(env,current,{token:data.get('token'),mode:data.get('mode')}))
+      return await pagesAccessPage(env,current,{message:'Enter a valid Pages API token and choose its access mode.',status:400});
+  }catch(error){
+    if(error instanceof PagesAccessChanged)return fail('Pages access changed. Reopen your connection and try again.',409);
+    if(!(error instanceof ProviderRequestError))throw error;
+    return await pagesAccessPage(env,current,{
+      message:'Cloudflare could not read Pages for this account. Check the token’s account, Pages permission, and expiration. '+error.code,
+      status:error.retryable?503:400
+    });
+  }
+  return redirect(pagesAccessPath);
+}
+
+async function clearPagesAccess(request,env,current){
+  const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
+  const accessId=data.get('accessId');
+  if(!current.cloudflare_account_id||data.size!==2||!isLaunchId(accessId))
+    return fail('Open your Pages connection and try again.');
+  await removePagesAccess(env,current,accessId);
+  return redirect(pagesAccessPath);
 }
 async function draft(request,env,current){
   await limitAttempts(request,env);
@@ -412,7 +459,8 @@ async function launchHistory(env,current){
     const update=item.can_edit?
       '<p><a href="/site-update?id='+encodeURIComponent(item.id)+'">Update this website</a></p>':'';
     const diagnostic=item.error_code?`<p>Last result code: <code>${escape(item.error_code)}</code> (share this if you need help)</p>`:'';
-    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${live}${update}${action}${deletion}</section>`;
+    const pagesHelp=isPagesAccessError(item.error_code)?'<p>'+pagesAccessLink+' to continue this launch.</p>':'';
+    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${pagesHelp}${live}${update}${action}${deletion}</section>`;
   }).join('');
   return view('Your launches','<p>This list keeps launches for 30 days after you first approve them. Your live website and its private files stay in your accounts even if a row drops off this list. If a launch paused, reconnect and continue it from here.</p>'+
     (cards||'<p>No launches yet for this GitHub and Cloudflare pair.</p>')+
@@ -472,13 +520,16 @@ async function getLaunch(env,current,id){
       j.approval_digest AS saved_digest,
       j.status AS job_status, j.expected_commit_sha, j.error_code AS job_error,
       j.attempts, j.next_attempt_at,
-      a.session_hash AS authorizing_session, a.authorization_epoch AS approved_epoch
+      a.session_hash AS authorizing_session, c.mode AS approved_pages_mode,
+      CASE WHEN a.pages_access_id IS NULL THEN a.authorization_epoch ELSE c.authorization_epoch END AS approved_epoch
     FROM onboarding_launches p
     LEFT JOIN onboarding_launch_jobs j ON j.id=p.job_id AND j.github_user_id=?
       AND j.cloudflare_account_id=p.cloudflare_account_id AND j.expires_at>?
     LEFT JOIN onboarding_launch_job_sessions a ON a.job_id=j.id
+    LEFT JOIN onboarding_pages_access c ON c.session_hash=a.session_hash AND c.access_id=a.pages_access_id
+      AND c.account_id=j.cloudflare_account_id AND c.expires_at>?
     WHERE p.id=? AND p.session_hash=? AND p.cloudflare_account_id=? AND lower(p.github_login)=lower(?)`)
-    .bind(current.github_user_id,time,id,current.hash,current.cloudflare_account_id,current.github_login).first();
+    .bind(current.github_user_id,time,time,id,current.hash,current.cloudflare_account_id,current.github_login).first();
   return item?.job_id&&!item.saved_digest?null:item;
 }
 
@@ -523,6 +574,8 @@ async function review(env,current,id){
   if(!item)return fail('This launch request is not accessible.',404);
   const {slug,digest,zip}=await itemSnapshot(item,current);
   const website='https://esp-'+slug+'-site.pages.dev';
+  const pagesAccess=item.status==='preview'?await getPagesAccess(env,current):null;
+  const verifyExisting=pagesAccess?.mode==='read';
   const statusLabel={
     preview:'Ready for your approval',
     queued:'Creating your site',
@@ -535,7 +588,9 @@ async function review(env,current,id){
     `<p><strong>GitHub account:</strong> ${escape(item.github_login)}</p>`+
     `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
     `<p><strong>Public website address:</strong> ${escape(website)}</p>`+
-    `<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>`+
+    (verifyExisting
+      ? '<p>With your approval, Launch &amp; Own will check the existing Pages project and verify that it published the exact version you reviewed.</p>'
+      : '<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>')+
     `<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> installed with access to that private folder. <a href="https://github.com/settings/installations">Review your GitHub app installs</a> if publishing gets stuck.</p>`;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open the exact preview</a> (new tab)</p>';
   let status=item.status;
@@ -547,24 +602,36 @@ async function review(env,current,id){
       const manifest=await readZipManifest(env.ZIP_ARTIFACTS,zip,item.job_id?'approved':'draft');
       fileList=`<details><summary>Files included in this launch</summary><ul>${manifest.map(file=>`<li><code>${escape(file.path)}</code></li>`).join('')}</ul></details>`;
     }
-    controls=button('/approve','Approve and create website',current.csrf,launchIdField(id)+
-      '<input type="hidden" name="digest" value="'+escape(digest)+'">');
+    if(verifyExisting&&!item.expected_commit_sha){
+      output='<p>This launch needs its private GitHub files first. '+pagesAccessLink+' with Pages Edit to create them and launch.</p>';
+    }else{
+      const accessField=pagesAccess?'<input type="hidden" name="pagesAccessId" value="'+escape(pagesAccess.access_id)+'">':'';
+      controls=button('/approve',verifyExisting?'Approve and verify existing project':'Approve and create website',current.csrf,
+        launchIdField(id)+accessField+'<input type="hidden" name="digest" value="'+escape(digest)+'">');
+    }
   }else{
     const bound=item.authorizing_session===current.hash&&item.approved_epoch===current.authorization_epoch;
     status=item.job_status??'needs_reauthorization';
     if(!bound&&['queued','pending_deployment'].includes(status))status='needs_reauthorization';
     if(status==='queued'){
-      output='<p>We are creating your private files and public site. Refresh this page for the latest status.</p>';
+      output=item.approved_pages_mode==='read'
+        ?'<p>We are checking the Pages project you created in Cloudflare.</p>'
+        :'<p>We are creating your private files and public site. Refresh this page for the latest status.</p>';
       controls=button('/launch','Continue launch',current.csrf,launchIdField(id));
     }
     if(status==='pending_deployment'){
-      output='<p>Cloudflare is publishing the version you approved. This often finishes in a few minutes.</p>';
+      output=item.approved_pages_mode==='read'
+        ?'<p>Waiting for the approved production version. Check the deployment in your Cloudflare dashboard and return here to verify it.</p>'
+        :'<p>Cloudflare is publishing the version you approved. This often finishes in a few minutes.</p>';
       controls=button('/verify','Check if it is live',current.csrf,launchIdField(id));
     }
     if(['failed','needs_reauthorization'].includes(status)){
       output='<p>This launch paused. <a href="/history">Open your launches</a> to reconnect and continue when you are ready.</p>';
-      if(typeof item.job_error==='string'&&item.job_error.startsWith('cloudflare_pages_http_401'))
-        output+='<p role="alert">Cloudflare blocked Pages access for this grant. In Cloudflare open <strong>My Profile → Connected Applications</strong>, revoke Launch &amp; Own, then <a href="/connect/cloudflare">reconnect Cloudflare</a>, pick the same account, and continue again. Also confirm that account allows public OAuth apps under Members → Settings.</p>';
+      if(isPagesAccessError(item.job_error))
+        output+='<p role="alert">The account connection and Pages permission are separate. '+pagesAccessLink+' to continue.</p>';
+      if(item.job_error==='cloudflare_pages_dashboard_setup_required')
+        output+=`<p>In your <a href="https://dash.cloudflare.com/${escape(current.cloudflare_account_id)}/workers-and-pages" rel="noreferrer">Cloudflare dashboard</a>,
+          create <code>${escape('esp-'+slug+'-site')}</code> from the private GitHub repository listed above, with <code>public</code> as the output directory and an empty build command. Then return to Your launches to verify it.</p>`;
     }
     if(item.job_error)output+=`<p>Last result code: <code>${escape(item.job_error)}</code></p>`;
     if(item.attempts>0&&['queued','pending_deployment'].includes(status)&&item.next_attempt_at>now()){
@@ -591,6 +658,12 @@ async function approve(request,env,current,context){
   if(!item||item.status!=='preview')throw Error('This launch is not awaiting approval');
   const snapshot=await itemSnapshot(item,current);
   if(data.getAll('digest').length!==1||data.get('digest')!==snapshot.digest)throw Error('Review the current website preview again');
+  const pagesAccess=await getPagesAccess(env,current);
+  const pagesAccessId=pagesAccess?.access_id??null;
+  if(data.getAll('pagesAccessId').length>1||data.get('pagesAccessId')!==pagesAccessId)
+    return fail('Pages access changed. Open the launch review again.',409);
+  if(pagesAccess?.mode==='read'&&!item.expected_commit_sha)
+    return fail('Connect Pages Edit access before approving creation of the private files and site.',403);
   if(snapshot.zip){
     if(!zipPreviewConfigured(env))return fail('Website ZIP launches are unavailable.',503);
     await retainZip(env.ZIP_ARTIFACTS,snapshot.zip);
@@ -599,7 +672,7 @@ async function approve(request,env,current,context){
   const receipt=item.legacy_receipt_id&&!item.job_id
     ?await getOwnedReceipt(env,{id:item.legacy_receipt_id,...receiptOwner(current,time)}):null;
   if(item.legacy_receipt_id&&!item.job_id&&!receipt)throw Error('This history entry expired');
-  if(!await approveJob(env,{preview:item,session:current,snapshot,receipt,time}))
+  if(!await approveJob(env,{preview:item,session:current,snapshot,receipt,time,pagesAccessId}))
     return fail('This launch changed or its target already has an approved launch. Check your launches.',409);
   queueAttempt(context,env,snapshot.id,current.hash);
   return redirect(reviewPath(item.id));
@@ -704,6 +777,7 @@ export default {
         if(url.pathname==='/history')return await launchHistory(env,current);
         if(url.pathname==='/toolkit')return await toolkit(env,current,request);
         if(url.pathname==='/toolkit/source')return await toolkitSource(env,current,request);
+        if(url.pathname===pagesAccessPath)return await pagesAccessPage(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
         if(url.pathname==='/site-update')return await siteUpdates.editor(env,current,url.searchParams.get('id'));
@@ -715,6 +789,8 @@ export default {
       if(request.method==='POST'){
         if(url.pathname==='/agent-link')return await confirmAgentLink(request,env,current,{view,fail,escape},{assertCsrf,formData,now});
         if(url.pathname==='/account')return await selectAccount(request,env,current);
+        if(url.pathname===pagesAccessPath)return await setPagesAccess(request,env,current);
+        if(url.pathname===pagesAccessPath+'/remove')return await clearPagesAccess(request,env,current);
         if(url.pathname==='/upload')return await uploadZip(request,env,current);
         if(url.pathname==='/preview')return await preview(request,env,current);
         if(url.pathname==='/draft')return await draft(request,env,current);

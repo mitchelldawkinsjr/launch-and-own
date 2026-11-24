@@ -66,7 +66,7 @@ async function withRuntime(scriptPath, scenario, { loseRepositoryReply = false }
         assert.equal(request.headers.get('user-agent'), 'launch-and-own');
       const method = request.method;
       const body = request.body === null ? undefined : await request.text();
-      const response = await fetchFn(request.url, { method, body });
+      const response = await fetchFn(request.url, { method, body, headers: request.headers });
       if (loseNextReply && method === 'POST' && request.url.endsWith('/user/repos')) {
         assert.equal(response.status, 201);
         loseNextReply = false;
@@ -237,12 +237,49 @@ async function rejectRevokedGrant(harness) {
   assert.equal(writes(harness).length, beforeRevocation);
 }
 
+async function recoverDeniedPagesGrant(harness) {
+  const {db, resourceState} = harness;
+  const owner = await connectTenant(harness);
+  const id = await newPreview(harness, owner);
+  resourceState.denyPagesOAuthAtCreate = true;
+  assert.equal((await approvePreview(harness, owner.cookie, owner.csrf, id)).status, 303);
+  const stalled = await waitForJob(db, id, {
+    status: 'needs_reauthorization', error_code: 'cloudflare_pages_http_401_cf10000'
+  });
+  assert.equal(stalled.expected_commit_sha, GENERATED_SHA);
+  assert.equal(stalled.pages_project_id, null);
+  resourceState.pages = {
+    id: 'owner-created-pages-fixture', name: 'esp-willow-studio-site', subdomain: 'esp-willow-studio-site.pages.dev',
+    production_branch: 'main', build_config: {build_command: '', destination_dir: 'public', root_dir: '/'},
+    source: {type: 'github', config: {owner: 'tester', repo_name: 'esp-willow-studio', repo_id: String(stalled.repository_id)}},
+    canonical_deployment: {id: 'dashboard-deployment', environment: 'production', latest_stage: {name: 'deploy', status: 'success'},
+      deployment_trigger: {metadata: {commit_hash: stalled.expected_commit_sha}}}
+  };
+  const token = 'local_fixture_pages_read_token';
+  resourceState.pagesAccessToken = token;
+  const before = harness.calls.length;
+  assert.equal((await post(harness, '/cloudflare-pages-access', owner.cookie, {csrf: owner.csrf, token, mode: 'read'})).status, 303);
+  await db.prepare('UPDATE onboarding_launch_jobs SET lease_until = 0 WHERE id = ?').bind(id).run();
+  const resumed = await post(harness, '/restore', owner.cookie, {csrf: owner.csrf, id});
+  assert.equal(resumed.status, 303);
+  const reviewId = launchId(resumed);
+  const saved = await db.prepare('SELECT access_id FROM onboarding_pages_access').first();
+  const approved = await post(harness, '/approve', owner.cookie, {csrf: owner.csrf, id: reviewId,
+    digest: await reviewDigest(harness, owner.cookie, reviewId), pagesAccessId: saved.access_id});
+  assert.equal(approved.status, 303);
+  const live = await waitForJob(db, id, {status: 'live'});
+  assert.equal(live.expected_commit_sha, stalled.expected_commit_sha);
+  assert.equal(live.pages_project_id, resourceState.pages.id);
+  assert(harness.calls.slice(before).every(call => call.method === 'GET'));
+}
+
 const scratch = await mkdtemp(join(tmpdir(), 'launch-own-recovery-'));
 try {
   const scriptPath = join(scratch, 'worker.mjs');
   await bundleWorker(scriptPath);
   await withRuntime(scriptPath, resumeAfterExpiry, { loseRepositoryReply: true });
   await withRuntime(scriptPath, rejectRevokedGrant);
+  await withRuntime(scriptPath, recoverDeniedPagesGrant);
   console.log(JSON.stringify({
     mode: 'local-worker-d1',
     liveProviderRequests: 0,
@@ -254,6 +291,7 @@ try {
       explicitReapproval: 'passed',
       pinnedDeployment: 'passed',
       providerRevocation: 'passed',
+      pagesCredentialRecovery: 'passed',
     },
   }, null, 2));
 } finally {

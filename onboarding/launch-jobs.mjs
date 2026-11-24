@@ -6,12 +6,19 @@ import { isZipArtifact } from './zip-artifacts.mjs';
 
 export const UNCLAIMED = '(j.lease_until IS NULL OR j.lease_until <= ?)';
 export const RUNNABLE = "j.status IN ('queued', 'pending_deployment')";
+// Older Workers must pause approvals that depend on a Pages credential.
+const PAGES_APPROVAL_EPOCH = -1;
 // Only the matching, currently selected account on the approving session grants authority.
 const APPROVAL_TABLES = 'onboarding_launch_job_sessions a JOIN onboarding_sessions s ON s.id_hash = a.session_hash';
-const CURRENT_APPROVAL = `a.job_id = j.id AND a.authorization_epoch = s.authorization_epoch
+const CURRENT_APPROVAL = `a.job_id = j.id
     AND s.github_user_id = j.github_user_id AND lower(s.github_login) = lower(j.github_login)
     AND s.cloudflare_account_id = j.cloudflare_account_id AND s.cloudflare_token_ct IS NOT NULL
-    AND s.expires_at > ?`;
+    AND s.expires_at > ?
+    AND ((a.pages_access_id IS NULL AND a.authorization_epoch = s.authorization_epoch) OR
+      (a.authorization_epoch = ${PAGES_APPROVAL_EPOCH} AND EXISTS (SELECT 1 FROM onboarding_pages_access c
+      WHERE c.session_hash = s.id_hash AND c.authorization_epoch = s.authorization_epoch
+        AND c.account_id = s.cloudflare_account_id AND c.access_id = a.pages_access_id
+        AND c.expires_at = s.expires_at)))`;
 export const HAS_APPROVAL = `EXISTS (SELECT 1 FROM ${APPROVAL_TABLES} WHERE ${CURRENT_APPROVAL})`;
 const OWNED = 'j.github_user_id = ? AND j.cloudflare_account_id = ? AND j.expires_at > ?';
 const idPattern = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
@@ -61,12 +68,15 @@ const HAS_REVIEW = `EXISTS (
     AND s.github_user_id = ? AND lower(s.github_login) = lower(p.github_login)
     AND s.cloudflare_account_id = p.cloudflare_account_id AND s.cloudflare_token_ct IS NOT NULL
     AND s.authorization_epoch = ? AND s.expires_at > ?
+    AND (SELECT access_id FROM onboarding_pages_access
+      WHERE session_hash = s.id_hash AND authorization_epoch = s.authorization_epoch
+        AND account_id = s.cloudflare_account_id AND expires_at > ?) IS ?
 )`;
 
-export async function approveJob(env, { preview, session, snapshot, receipt, time }) {
+export async function approveJob(env, { preview, session, snapshot, receipt, time, pagesAccessId = null }) {
   const review = [preview.id, session.hash, preview.plan_json, preview.job_id, preview.legacy_receipt_id,
     preview.preview_html, preview.customer_name, preview.github_login, preview.cloudflare_account_id, session.github_user_id,
-    session.authorization_epoch, time];
+    session.authorization_epoch, time, time, pagesAccessId];
   let approval;
   if (preview.job_id) {
     approval = env.DB.prepare(`UPDATE onboarding_launch_jobs AS j
@@ -94,10 +104,11 @@ export async function approveJob(env, { preview, session, snapshot, receipt, tim
   // depends on the preceding write so a losing approval cannot bind a session.
   const [created] = await env.DB.batch([
     approval,
-    env.DB.prepare(`INSERT INTO onboarding_launch_job_sessions(job_id, session_hash, authorization_epoch)
-      SELECT ?, ?, ? WHERE changes() = 1
-      ON CONFLICT(job_id) DO UPDATE SET session_hash = excluded.session_hash, authorization_epoch = excluded.authorization_epoch`)
-      .bind(snapshot.id, session.hash, session.authorization_epoch),
+    env.DB.prepare(`INSERT INTO onboarding_launch_job_sessions(job_id, session_hash, authorization_epoch, pages_access_id)
+      SELECT ?, ?, ?, ? WHERE changes() = 1
+      ON CONFLICT(job_id) DO UPDATE SET session_hash = excluded.session_hash,
+        authorization_epoch = excluded.authorization_epoch, pages_access_id = excluded.pages_access_id`)
+      .bind(snapshot.id, session.hash, pagesAccessId ? PAGES_APPROVAL_EPOCH : session.authorization_epoch, pagesAccessId),
     env.DB.prepare(`UPDATE onboarding_launches
       SET job_id = ?, preview_html = NULL, status = 'approved', approved_at = ?, updated_at = ?
       WHERE changes() = 1 AND id = ? AND session_hash = ? AND status = 'preview'`)
@@ -178,7 +189,7 @@ export async function deleteOwnedLaunch(env, session, id, time) {
 export async function activeJobSession(env, job, deadline, { credentialsValid = false, loadGrants = false } = {}) {
   const grantExpiry = credentialsValid ? `, COALESCE(s.github_token_expires_at, s.expires_at),
     COALESCE(s.cloudflare_token_expires_at, s.expires_at)` : '';
-  const fields = loadGrants ? 's.*, s.id_hash AS hash'
+  const fields = loadGrants ? 's.*, s.id_hash AS hash, a.pages_access_id'
     : `MIN(s.expires_at, j.lease_until, j.expires_at${grantExpiry}) AS authorized_until`;
   return await env.DB.prepare(`SELECT ${fields} FROM onboarding_launch_jobs j, ${APPROVAL_TABLES}
     WHERE ${CURRENT_APPROVAL}

@@ -9,6 +9,7 @@ import {renderSiteBundle,siteBundleApprovalSha256} from "../site/render-site-bun
 import {matchesApprovedPagesProject} from "./approved-pages-project.mjs";
 import {isLegacyRepositoryDescription,isManagedRepositoryDescription,managedRepositoryDescription} from "./managed-site-repository.mjs";
 import {ProviderRequestError} from "./provider-errors.mjs";
+import {pagesRequestError} from "./cloudflare-pages-errors.mjs";
 import {pinImportedCommit} from "./provision-imported-site.mjs";
 
 function checkedName(name) {
@@ -34,9 +35,11 @@ function requestFactory({githubToken,cloudflareToken,fetchFn=fetch,strict=false}
     if(allow404&&resp.status===404)return null;
     if(!resp.ok){
       if(strict){
+        if(!github&&path.includes("/pages/"))
+          throw await pagesRequestError(resp,{conflictCanRetry:resp.status===409});
         const err=new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
         const need=github?resp.headers.get("x-accepted-github-permissions"):null;
-        const kind=github?"github":path.includes("/pages/")?"cloudflare_pages":"cloudflare";
+        const kind=github?"github":"cloudflare";
         err.code=kind+"_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/;/g,"_or_").replace(/[^a-z0-9_]+/g,"_").replace(/^_|_$/g,"").slice(0,64)):"");
         throw err;
       }
