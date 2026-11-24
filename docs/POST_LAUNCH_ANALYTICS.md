@@ -35,6 +35,8 @@ The default feature projection contains `feature`, `state`, `reason`, `configura
 
 All five metric data fields, including visitors, pageviews and Core Web Vitals, remain `null` and `metrics.status='not_queried'`. No `active_verified` is possible from this phase. No quotas/plan entitlements are invented.
 
+The onboarding panel in `onboarding/toolkit-analytics.mjs` uses this reader with a freshly verified managed site and current owner session. It renders separate messages for reconnection, insufficient Pages permission and rate limiting. After a successful project match, the link opens the exact Pages project without sending a referrer. The panel directs the owner to Metrics and explains the privacy notice and separate approval of the next deployment before opt-in. Traffic and beacon verification remain separate checks.
+
 ## Integration, activation and rollout gates
 
 1. Sol 6.2 Max's #84 audit in merged PR #95 accepts the `manual_setup` / `blocked_permission_or_plan` / `not_available` states and configuration signal. Its read-only code and audit have merged, but account-specific authorization, durable site inventory and hosted rollout gates remain open. Confirm Pages OAuth scopes, current free-plan constraints and public copy before integration. Keep the adapter standalone; do not bypass #39's authenticated, durable site inventory.

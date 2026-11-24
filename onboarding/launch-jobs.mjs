@@ -112,20 +112,31 @@ const statusColumn = `CASE WHEN ${RUNNABLE} AND NOT ${HAS_APPROVAL}
   THEN 'needs_reauthorization' ELSE j.status END AS display_status`;
 const deletable = `(${UNCLAIMED} AND (NOT (${RUNNABLE}) OR NOT ${HAS_APPROVAL}))`;
 
-export async function listOwnedJobs(env, session, time) {
-  const result = await env.DB.prepare(`SELECT j.id, j.customer_name, j.site_slug, j.updated_at,
-      j.expires_at, j.expected_commit_sha, j.approval_digest, j.error_code, ${statusColumn},
-      CASE WHEN j.status='live' AND j.production_branch='main'
+const editorEligibility = `CASE WHEN j.status='live' AND j.production_branch='main'
           AND j.repository_id IS NOT NULL AND j.repository_id > 0
           AND json_type(j.plan_json,'$.site')='object'
           AND COALESCE(json_extract(j.plan_json,'$.site.layout'),'')!='multi-page'
           AND json_extract(j.plan_json,'$.forms')=0
-          AND json_type(j.plan_json,'$.zip') IS NULL THEN 1 ELSE 0 END AS can_edit,
+          AND json_type(j.plan_json,'$.zip') IS NULL THEN 1 ELSE 0 END AS can_edit`;
+
+export async function listOwnedJobs(env, session, time) {
+  const result = await env.DB.prepare(`SELECT j.id, j.customer_name, j.site_slug, j.updated_at,
+      j.expires_at, j.expected_commit_sha, j.approval_digest, j.error_code, ${statusColumn},
+      ${editorEligibility},
       CASE WHEN json_type(j.plan_json,'$.zip') IS NOT NULL THEN 1 ELSE 0 END AS uploaded_zip,
       (${resumable}) AS can_restore, ${deletable} AS can_delete
     FROM onboarding_launch_jobs j WHERE ${OWNED} ORDER BY j.updated_at DESC LIMIT 20`)
     .bind(time, time, time, time, time, ...ownerBindings(session, time)).all();
   return result.results;
+}
+
+// The caller resolves the immutable repository and Pages project on the server.
+export async function findOwnedLiveToolkitJob(env, session, site, time) {
+  return await env.DB.prepare(`SELECT j.id, ${editorEligibility} FROM onboarding_launch_jobs j
+    WHERE ${OWNED} AND j.status = 'live' AND j.repository_id = ? AND j.pages_project_id = ?
+      AND j.production_branch = ?
+    ORDER BY j.approved_at DESC LIMIT 1`)
+    .bind(...ownerBindings(session, time), site.repositoryId, site.pagesProjectId, site.branch).first();
 }
 
 export async function hasCurrentOwnerSession(env, session, time) {

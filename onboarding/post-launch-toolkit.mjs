@@ -77,7 +77,7 @@ export function historyToolkitCapabilities({
     web_analytics: cap('manual_setup', 'review_provider_settings',
       'Not set up here yet. In Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
     pr_previews: cap('blocked_permission_or_plan', 'preview_access_and_approval_required',
-      'Draft preview links stay off until you turn them on. Those draft links can be public.'),
+      'Pages PR previews need verified private access and separate approval. Use the exact Launch & Own review to inspect updates.'),
     custom_domains: cap('manual_setup', 'verified_domain_setup_required',
       'Add your own domain name in your Cloudflare Pages project when you are ready.'),
     email_routing: cap('not_available', 'owned_custom_domain_needed',

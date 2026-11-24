@@ -7,10 +7,15 @@
 import {
   discoverOwnedManagedSites,
   readCurrentManagedHomepage,
+  readCurrentManagedSite,
   ManagedSiteInventoryError
 } from '../pipeline/owned-site-inventory.mjs';
-import {hasCurrentOwnerSession} from './launch-jobs.mjs';
-import {getFreshAccessToken} from './token-lifecycle.mjs';
+import {findOwnedLiveToolkitJob, hasCurrentOwnerSession, isLaunchId} from './launch-jobs.mjs';
+import {getFreshAccessToken, AuthorizationRefreshBusy} from './token-lifecycle.mjs';
+import {loadToolkitAnalytics, renderToolkitAnalytics} from './toolkit-analytics.mjs';
+import {readToolkitPreviewStatus, renderToolkitPreviewStatus} from './toolkit-preview.mjs';
+import {prepareOptionalExtensionReview} from '../pipeline/optional-service-budget.mjs';
+import {renderToolkitUsage} from './toolkit-usage.mjs';
 import {seal, unseal} from './crypto.mjs';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -19,6 +24,8 @@ const SITE_ID = /^managed_[1-9][0-9]*_[a-z0-9_-]{1,128}$/i;
 const OPAQUE = /^[a-z0-9_-]{1,128}$/i;
 const REPO = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const NUMERIC = /^[1-9][0-9]*$/;
+const CHECKS = Object.freeze({deployment: 'Deployment', analytics: 'Web Analytics',
+  previews: 'PR previews', usage: 'Plans and limits'});
 export function ownerPrincipalFromSession(session) {
   if (!session || !Number.isSafeInteger(session.github_user_id) || session.github_user_id < 1 ||
       typeof session.github_login !== 'string' ||
@@ -120,7 +127,7 @@ export async function openManagedSiteReference(env, session, raw, time = Math.fl
       value.authorizationEpoch !== session.authorization_epoch ||
       !validReference(value.reference, principal))
     throw new ManagedSiteInventoryError('owned_site_not_found');
-  return value.reference;
+  return Object.freeze(value.reference);
 }
 
 async function providerBundle(env, session, {
@@ -139,19 +146,26 @@ async function providerBundle(env, session, {
       signal: options.signal ?? AbortSignal.timeout(10000)
     });
   };
-  const github = githubAccessToken || await tokenFetch({
-    env, session, provider: 'github', fetchFn: fencedFetch
-  });
-  const cloudflare = cloudflareAccessToken || await tokenFetch({
-    env, session, provider: 'cloudflare', fetchFn: fencedFetch
-  });
-  return {
-    checkSession,
-    fencedFetch,
-    githubAccessToken: github,
-    cloudflareAccessToken: cloudflare,
-    assertCurrentAuthorization: authorize
-  };
+  await checkSession();
+  try {
+    const github = githubAccessToken || await tokenFetch({
+      env, session, provider: 'github', fetchFn: fencedFetch
+    });
+    const cloudflare = cloudflareAccessToken || await tokenFetch({
+      env, session, provider: 'cloudflare', fetchFn: fencedFetch
+    });
+    // Provider readers fence each request. Fence refresh requests here.
+    return {
+      checkSession,
+      githubAccessToken: github,
+      cloudflareAccessToken: cloudflare,
+      assertCurrentAuthorization: authorize
+    };
+  } catch (error) {
+    if (error instanceof ManagedSiteInventoryError) throw error;
+    throw new ManagedSiteInventoryError(error instanceof AuthorizationRefreshBusy
+      ? 'provider_refresh_in_progress' : 'provider_reauthorization_required');
+  }
 }
 
 /**
@@ -200,10 +214,12 @@ export async function loadCurrentManagedSitesPage(env, session, {
 }
 
 /**
- * Inspect current GitHub homepage bytes for a sealed reference.
- * Returns metadata only — never the raw HTML for browser embedding.
+ * Check one dashboard view for a sealed reference. Separate requests keep
+ * provider reads bounded even when credentials need renewal. Return display
+ * metadata only and keep private homepage bytes on the server.
  */
 export async function inspectSealedManagedSource(env, session, ticketRaw, {
+  check = 'deployment',
   clock = nowSeconds,
   fetchFn = fetch,
   tokenFetch = getFreshAccessToken,
@@ -213,24 +229,54 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
   const principal = ownerPrincipalFromSession(session);
   if (!principal)
     return {status: 'unavailable', code: 'verified_owner_required'};
+  if (!Object.hasOwn(CHECKS, check))
+    return {status: 'unavailable', code: 'invalid_toolkit_check'};
   try {
     const reference = await openManagedSiteReference(env, session, ticketRaw, clock());
     const bundle = await providerBundle(env, session, {
       clock, fetchFn, tokenFetch, githubAccessToken, cloudflareAccessToken
     });
-    const source = await readCurrentManagedHomepage({
-      siteId: reference.siteId,
-      reference,
-      principal,
+    const request = {siteId: reference.siteId, reference, principal, fetchFn,
       githubAccessToken: bundle.githubAccessToken,
       cloudflareAccessToken: bundle.cloudflareAccessToken,
-      assertCurrentAuthorization: bundle.assertCurrentAuthorization,
-      fetchFn: bundle.fencedFetch
-    });
+      assertCurrentAuthorization: bundle.assertCurrentAuthorization};
+    const name = reference.repositoryName.slice(4).replaceAll('-', ' ');
+    const display = {status: 'ok', check, name: name[0].toUpperCase() + name.slice(1),
+      repositoryUrl: 'https://github.com/' + reference.githubOwner + '/' + reference.repositoryName,
+      pagesProjectUrl: 'https://dash.cloudflare.com/' + reference.cloudflareAccountId +
+        '/pages/view/' + reference.pagesProjectName};
+    if (check !== 'deployment') {
+      const site = await readCurrentManagedSite(request);
+      if (check === 'usage') {
+        const feature = await prepareOptionalExtensionReview({site, principal}, {
+          now: clock(), assertCurrentAuthorization: () => bundle.assertCurrentAuthorization(principal)
+        });
+        await bundle.checkSession();
+        return {...display, feature};
+      }
+      const keys = ['githubUserId', 'githubOwner', 'cloudflareAccountId', 'repositoryId',
+        'repositoryName', 'pagesProjectId', 'pagesProjectName', 'branch'];
+      const featureRequest = {site, principal, cloudflareAccessToken: bundle.cloudflareAccessToken, fetchFn,
+        assertCurrentAuthorization: identity => {
+          // Both feature readers pass a frozen snapshot of the scoped site.
+          return Boolean(identity && keys.every(key => identity[key] === site[key])) &&
+            bundle.assertCurrentAuthorization(principal);
+        }};
+      const feature = check === 'analytics' ? await loadToolkitAnalytics(featureRequest)
+        : await readToolkitPreviewStatus(featureRequest);
+      await bundle.checkSession();
+      return {...display, feature};
+    }
+    const source = await readCurrentManagedHomepage({...request, includePublication: true});
+    const launch = await findOwnedLiveToolkitJob(env, session, reference, clock());
     await bundle.checkSession();
+    const jobId = isLaunchId(launch?.id) ? encodeURIComponent(launch.id) : null;
     return {
-      status: 'ok',
+      ...display,
       siteId: source.siteId,
+      editPath: jobId && launch.can_edit ? '/site-update?id=' + jobId : null,
+      optionsPath: jobId ? '/site-options?id=' + jobId : null,
+      publicationCheck: source.publicationCheck,
       baseCommitSha: source.baseCommitSha,
       homepageHtmlSha256: source.homepageHtmlSha256,
       homepageGitBlobSha: source.homepageGitBlobSha,
@@ -263,8 +309,7 @@ export function renderCurrentSitesSection(inventory, {escape}) {
       '">Show more sites</a></p>'
     : '';
   return '<section><h2>Sites we found in your accounts</h2>' +
-    '<p>These links come from your connected GitHub and Cloudflare accounts. ' +
-    'This list does not re-check the public website content. Use it to open the places you own.</p>' +
+    '<p>Choose a site to check its current deployment and settings.</p>' +
     body + pager + '</section>';
 }
 
@@ -284,36 +329,79 @@ function renderCurrentSite(site, escape) {
     ? '<p>Current private-files version: <code>' + escape(site.baseCommitSha) + '</code></p>'
     : '';
   const observed = site.productionCommitSha
-    ? '<p class="muted">Version Cloudflare last reported for production (not re-checked here): <code>' +
+    ? '<p class="muted">Reported production version <code>' +
       escape(site.productionCommitSha) + '</code></p>'
     : '<p class="muted">No finished production publish showed up in project details.</p>';
   const source = site.sourceTicket
     ? '<p><a href="/toolkit/source?ticket=' + encodeURIComponent(site.sourceTicket) +
-      '">Check the private homepage fingerprint</a></p>'
+      '">Open site toolkit</a></p>'
     : '';
   return '<article><h3>' + escape(name || site.siteId) + '</h3>' +
     '<p class="pill">Live content not re-checked here</p>' +
-    '<p>This find is separate from your launch list above. Matching them is not guaranteed.</p>' +
     repo + pages + sha + observed + source + '</article>';
 }
 
-export function renderCurrentSourcePage(inspection, {view, escape}) {
+const DEPLOYMENT_COPY = Object.freeze({
+  verified_homepage: 'The public homepage matches the current file in GitHub.',
+  waiting_for_current_deployment: 'Cloudflare has yet to publish the current GitHub version.',
+  deployment_failed: 'Cloudflare reported a failed production deployment for this GitHub version.',
+  deployment_changed: 'The production deployment changed during this check. Refresh for the latest result.',
+  public_content_differs: 'The public homepage differs from the current file in GitHub.',
+  public_check_unavailable: 'We could not confirm the public homepage. Try again later.'
+});
+
+function renderDeployment(inspection, escape) {
+  const result = inspection.publicationCheck;
+  const verified = result?.state === 'verified_homepage';
+  const message = result && Object.hasOwn(DEPLOYMENT_COPY, result.state)
+    ? DEPLOYMENT_COPY[result.state] : 'We checked the current homepage file in GitHub.';
+  const production = result?.productionCommitSha
+    ? '<p>Production version <code>' + escape(result.productionCommitSha) + '</code></p>' : '';
+  const checkedAt = verified ? new Date(result.checkedAt * 1000).toISOString() : null;
+  const website = verified
+    ? '<p><a href="' + escape(result.verifiedUrl) + '" rel="noreferrer">Open verified homepage</a></p>' +
+      '<p>Checked <time datetime="' + checkedAt + '">' + checkedAt.slice(0, 16).replace('T', ' ') + ' UTC</time></p>' : '';
+  const actions = (inspection.editPath
+    ? '<p><a href="' + escape(inspection.editPath) + '">Update this website</a></p>'
+    : inspection.repositoryUrl
+      ? '<p>Open your files on GitHub for edits outside the one-page editor.</p>' : '') +
+    (inspection.optionsPath
+      ? '<p><a href="' + escape(inspection.optionsPath) + '">Review optional features</a></p>' : '');
+  return '<section><h2>Deployment</h2><p role="status">' + message + '</p>' +
+    production + website + actions +
+    '<details><summary>Technical details</summary>' +
+    '<p>Current GitHub version <code>' + escape(inspection.baseCommitSha) + '</code></p>' +
+    '<p>Homepage fingerprint <code>' + escape(inspection.homepageHtmlSha256) + '</code></p>' +
+    '<p>Git file ID <code>' + escape(inspection.homepageGitBlobSha) + '</code></p>' +
+    '<p>Editor mode <code>' + escape(inspection.editMode) + '</code></p>' +
+    '</details></section>';
+}
+
+export function renderCurrentSourcePage(inspection, {view, escape}, ticket = '') {
+  const back = '<p><a href="/toolkit">Back to toolkit</a></p>';
   if (!inspection || inspection.status !== 'ok') {
     const code = inspection?.code ? ' (' + escape(inspection.code) + ')' : '';
-    return view('Private homepage check',
-      '<p>That check is unavailable or expired' + code + '.</p>' +
-      '<p><a href="/toolkit">Back to toolkit</a></p>');
+    return view('Site toolkit',
+      '<p>That check is unavailable or expired' + code + '.</p>' + back);
   }
-  return view('Private homepage check',
-    '<p>We read the homepage file from your private GitHub folder and recorded a fingerprint. ' +
-    'This is not a check of the public website, and it does not unlock editing.</p>' +
-    '<p class="pill">Editor mode: ' + escape(inspection.editMode) + '</p>' +
-    '<p>Site id: <code>' + escape(inspection.siteId) + '</code></p>' +
-    '<p>Private-files version: <code>' + escape(inspection.baseCommitSha) + '</code></p>' +
-    '<p>Homepage fingerprint: <code>' + escape(inspection.homepageHtmlSha256) + '</code></p>' +
-    '<p>Git file id: <code>' + escape(inspection.homepageGitBlobSha) + '</code></p>' +
-    '<p class="muted">Public site re-checked: ' + escape(String(inspection.publicationVerified)) +
-    ' · Matched to a launch: ' +
-    escape(String(inspection.historicalContinuityVerified)) + '</p>' +
-    '<p><a href="/toolkit">Back to toolkit</a></p>');
+  const tabs = ticket ? '<nav aria-label="Site toolkit" style="display:flex;flex-wrap:wrap;gap:.5rem 1rem">' +
+    Object.entries(CHECKS).map(([check, label]) => {
+      const selected = inspection.check === check;
+      return '<a href="/toolkit/source?ticket=' + encodeURIComponent(ticket) +
+        '&amp;check=' + check + '"' + (selected ? ' aria-current="page">' +
+        '<strong>' + label + '</strong>' : '>' + label) + '</a>';
+    }).join('') + '</nav>' : '';
+  const providers = (inspection.repositoryUrl
+    ? '<a href="' + escape(inspection.repositoryUrl) + '" rel="noreferrer">Open on GitHub</a>' : '') +
+    (inspection.pagesProjectUrl
+      ? ' · <a href="' + escape(inspection.pagesProjectUrl) + '" rel="noreferrer">Open in Cloudflare</a>' : '');
+  const render = {
+    analytics: () => renderToolkitAnalytics(inspection.feature, {escape}),
+    previews: () => renderToolkitPreviewStatus(inspection.feature),
+    usage: () => renderToolkitUsage(inspection.feature, {escape})
+  };
+  const content = Object.hasOwn(render, inspection.check)
+    ? render[inspection.check]() : renderDeployment(inspection, escape);
+  return view(inspection.name ? inspection.name + ' toolkit' : 'Site toolkit',
+    tabs + (providers ? '<p>' + providers + '</p>' : '') + content + back);
 }

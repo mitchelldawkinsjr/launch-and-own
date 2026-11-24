@@ -9,7 +9,7 @@ import {planCustomer} from "./plan-customer.mjs";
 import {matchesApprovedPagesProject} from "./approved-pages-project.mjs";
 import {ProviderRequestError} from "./provider-errors.mjs";
 
-async function servesApprovedHtml(response, expected) {
+export async function responseMatchesBytes(response, expected) {
   const reader = response.body?.getReader();
   if (!reader) return false;
   let offset = 0;
@@ -124,7 +124,7 @@ export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedC
   try{
     if(approved){
       const expectedBytes=approved.htmlBytes??new TextEncoder().encode(approved.html);
-      if(await servesApprovedHtml(page,expectedBytes))homepageBytes=expectedBytes;
+      if(await responseMatchesBytes(page,expectedBytes))homepageBytes=expectedBytes;
     }else{
       homepageBytes=new Uint8Array(await page.arrayBuffer());
     }
