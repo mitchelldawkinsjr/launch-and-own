@@ -111,35 +111,26 @@ export class D1OwnerLinkStore {
     const linked = assertLinkChallenge(challenge, verifiedIdentity, principal, {nowSeconds});
 
     const authorizationEpoch = prev ? prev.authorizationEpoch + 1 : 0;
-    // Consume only if still unconsumed; then upsert link (fail closed on races).
-    const consumed = await d1Run(this.db, `
-      UPDATE bridge_link_challenges SET consumed_at = ?
-      WHERE id = ? AND consumed_at IS NULL AND expires_at > ?`,
-    nowSeconds, challengeId, nowSeconds);
-    if (!consumed.meta?.changes) deny('invalid_link_challenge');
-
-    if (prev) {
-      const updated = await d1Run(this.db, `
-        UPDATE bridge_owner_links
-        SET github_user_id = ?, cloudflare_account_id = ?, authorization_epoch = ?,
-            reauthorized = 1, linked_at = ?
-        WHERE subject = ? AND client_id = ? AND authorization_epoch = ?`,
-      linked.githubUserId, linked.cloudflareAccountId, authorizationEpoch, nowSeconds,
-      scope.subject, principal.clientId, prev.authorizationEpoch);
-      if (!updated.meta?.changes) deny('invalid_link_challenge');
-    } else {
-      try {
-        await d1Run(this.db, `
-          INSERT INTO bridge_owner_links (
-            subject, client_id, github_user_id, cloudflare_account_id,
-            authorization_epoch, reauthorized, linked_at
-          ) VALUES (?, ?, ?, ?, ?, 1, ?)`,
-        scope.subject, principal.clientId, linked.githubUserId,
-        linked.cloudflareAccountId, authorizationEpoch, nowSeconds);
-      } catch {
-        deny('invalid_link_challenge');
-      }
-    }
+    // Revocation and link consumption must serialize on the same D1 transaction.
+    const claim = this.db.prepare(`UPDATE bridge_link_challenges SET consumed_at = ?
+      WHERE id = ? AND consumed_at IS NULL AND expires_at > ?`)
+      .bind(nowSeconds, challengeId, nowSeconds);
+    const bindLink = prev
+      ? this.db.prepare(`UPDATE bridge_owner_links
+          SET github_user_id = ?, cloudflare_account_id = ?, authorization_epoch = ?,
+              reauthorized = 1, linked_at = ?
+          WHERE changes() = 1 AND subject = ? AND client_id = ? AND authorization_epoch = ?`)
+        .bind(linked.githubUserId, linked.cloudflareAccountId, authorizationEpoch, nowSeconds,
+          scope.subject, principal.clientId, prev.authorizationEpoch)
+      : this.db.prepare(`INSERT INTO bridge_owner_links
+          (subject, client_id, github_user_id, cloudflare_account_id,
+           authorization_epoch, reauthorized, linked_at)
+          SELECT ?, ?, ?, ?, ?, 1, ? WHERE changes() = 1
+          ON CONFLICT(subject, client_id) DO NOTHING`)
+        .bind(scope.subject, principal.clientId, linked.githubUserId, linked.cloudflareAccountId,
+          authorizationEpoch, nowSeconds);
+    const result = await this.db.batch([claim, bindLink]);
+    if (!result.every(step => step.meta?.changes === 1)) deny('invalid_link_challenge');
 
     return Object.freeze({
       subject: linked.subject,

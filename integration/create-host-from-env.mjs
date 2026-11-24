@@ -8,9 +8,14 @@ import {D1OwnerLinkStore} from './d1-owner-link-store.mjs';
 import {D1SiteDraftStore} from './d1-site-draft-store.mjs';
 import {D1JobPublicationStore} from './d1-job-publication-store.mjs';
 import {RESOURCE_URI} from './protected-resource.mjs';
+import {BROWSER_ORIGIN} from './tool-contract.mjs';
+import {MAX_BRIDGE_TICKET_BODY_BYTES, readBridgeJson} from './request-body.mjs';
 
 export function createHostFromEnv(env) {
-  if (!env?.DB) throw new Error('bridge_missing_d1');
+  if (typeof env?.DB?.prepare !== 'function' || typeof env.DB.batch !== 'function')
+    throw new Error('bridge_missing_d1');
+  if (env.ONBOARDING_ORIGIN && env.ONBOARDING_ORIGIN !== BROWSER_ORIGIN)
+    throw new Error('bridge_invalid_onboarding_origin');
   if (typeof env.BRIDGE_TICKET_KEY !== 'string' ||
       !/^[a-f0-9]{64}$/i.test(env.BRIDGE_TICKET_KEY))
     throw new Error('bridge_missing_ticket_key');
@@ -29,7 +34,7 @@ export function createHostFromEnv(env) {
         body: JSON.stringify({ticket})
       });
       if (!res.ok) throw new Error('onboarding_status_unavailable');
-      return res.json();
+      return readBridgeJson(res, MAX_BRIDGE_TICKET_BODY_BYTES);
     } : null
   });
 }

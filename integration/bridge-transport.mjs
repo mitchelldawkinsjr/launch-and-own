@@ -188,7 +188,20 @@ async function dispatchToolCall(host, request) {
   }
 
   const call = validateToolCall({name, arguments: args}, principal, {nowSeconds: now});
+  const result = await runToolCall(host, principal, call, now);
+  const current = await principalFromToken(host, token);
+  const before = principal.linkedOwner;
+  const after = current.linkedOwner;
+  if (current.subject !== principal.subject || current.clientId !== principal.clientId ||
+      before?.githubUserId !== after?.githubUserId ||
+      before?.cloudflareAccountId !== after?.cloudflareAccountId ||
+      before?.authorizationEpoch !== after?.authorizationEpoch ||
+      before?.reauthorized !== after?.reauthorized)
+    deny('needs_reauthorization');
+  return result;
+}
 
+async function runToolCall(host, principal, call, now) {
   if (call.name === 'get_connection_status') {
     return jsonOk({
       linked: Boolean(call.scope.owner),
@@ -260,9 +273,7 @@ async function dispatchToolCall(host, request) {
   if (['get_job_status', 'verify_publication'].includes(call.name) &&
       DRAFT_ID.test(call.arguments.job_id) && host.onboardingStatus && host.bridgeTicketKey) {
     const record = await draftPublicationRecord(host, call.scope, call.arguments.job_id);
-    const current = await principalFromToken(host, token);
-    const currentScope = assertTrustedPrincipal(current, {nowSeconds: host.nowSeconds()});
-    return jsonOk(publicationStatus(record, currentScope));
+    return jsonOk(publicationStatus(record, call.scope));
   }
 
   if (call.name === 'get_job_status')

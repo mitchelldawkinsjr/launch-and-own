@@ -76,3 +76,18 @@ test('bridge Worker modules never statically import node:sqlite (Workers bundle)
   for (const file of readdirSync(dir).filter(f => f.endsWith('.mjs') && !f.endsWith('.test.mjs')))
     assert.doesNotMatch(readFileSync(new URL(file, dir), 'utf8'), /^import .*['"]node:sqlite['"]/m, file);
 });
+
+test('approved deployment requires persistent authorization configuration', async () => {
+  const req = new Request('https://mcp.360web.cloud/.well-known/oauth-protected-resource/mcp');
+  for (const env of [
+    {BRIDGE_DEPLOYMENT: 'approved'},
+    {BRIDGE_DEPLOYMENT: 'approved', DB: {prepare() {}, batch() {}}},
+    {BRIDGE_DEPLOYMENT: 'approved', DB: {prepare() {}, batch() {}},
+      BRIDGE_TICKET_KEY: 'a'.repeat(64), ONBOARDING_ORIGIN: 'https://unregistered.example'}
+  ]) {
+    const response = await worker.fetch(req, env);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {error: 'service_unavailable'});
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+  }
+});

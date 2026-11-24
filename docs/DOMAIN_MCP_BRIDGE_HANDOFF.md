@@ -62,10 +62,19 @@ MCP clients connect to `https://mcp.360web.cloud/mcp` (Streamable HTTP, JSON res
 | `POST /register` | RFC 7591 dynamic registration, public clients only; https or loopback-http redirects |
 | `GET/POST /authorize` | Human consent page; PKCE S256 required; same-origin POST only |
 | `POST /token` | Code exchange (single use) and rotating refresh tokens |
+| `POST /revoke` | Revoke a client’s access token or end its refresh grant and bridge owner link |
 
 The OAuth grant identifies an **agent session only** (fresh opaque subject). GitHub/Cloudflare identity still binds only through `start_connect_accounts` → `/agent-link` → sealed ticket. Apply `migrations/0002_oauth.sql` to the bridge D1 before deploying. No GitHub/Cloudflare OAuth scope changes.
 
 Connect a client: `claude mcp add --transport http launch-and-own https://mcp.360web.cloud/mcp`, or add the same URL as a ChatGPT connector (developer mode).
+
+### Bridge security rollout
+
+Apply `0003_oauth_rate_limits.sql` to the dedicated bridge D1 before deploying the hardened Worker. The Worker requires persistent D1 state and the shared ticket key. The migration adds bounded rate buckets for public OAuth routes and indexes for grant revocation. The buckets store a keyed slot rather than the source address. The protected resource stays the registered bridge origin.
+
+OAuth parses bounded JSON and URL-encoded bodies. MCP checks an Origin header when a browser supplies one, and server-to-server clients can omit it. Code exchange and refresh rotation each claim the old credential and insert both replacement tokens in one D1 batch. A failed insert lets the authorized client retry the same credential. A refresh grant revocation ends its access and refresh tokens, cancels outstanding link challenges, and removes the bridge owner link. This does not revoke the owner's separately stored GitHub or Cloudflare session.
+
+After the approved deploy, smoke-test discovery, dynamic registration, the browser consent redirect, PKCE exchange, MCP initialize and tools/list, and revocation with a consenting QA client. Confirm oversized requests fail before parsing and unexpected browser origins receive 403. Roll back the Worker to the prior approved version if client or tenant checks fail. The migration is additive. [Security review #157](https://github.com/mitchelldawkinsjr/launch-and-own/issues/157)
 
 ### D2. Agent draft → owner review → launch (#43 item 5)
 
