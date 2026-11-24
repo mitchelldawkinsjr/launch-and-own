@@ -1,8 +1,8 @@
-# Domain handoff — MCP bridge Worker + D1 (not live yet)
+# Domain handoff — MCP bridge Worker + D1
 
 **Issue:** [#43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43). **Coordination:** [#2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2).
 
-This document is the **operator checklist** to take the in-repo MCP bridge from “merged / not_available” to a Domain-approved hosted beta. Code alone must not flip `BRIDGE_DEPLOYMENT=approved` or the distribution matrix to hosted access.
+Domain has deployed the shared MCP bridge and verified owner-only connections. Independent acceptance still gates the distribution matrix. Use this checklist for further approved rollouts. [Deployed bridge evidence](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43#issuecomment-7104228298)
 
 ## What is already in the repo
 
@@ -38,7 +38,7 @@ Customer matrix access remains **`not_available`** until consenting-user `/agent
 
 ### C. Browser link mint (onboarding)
 
-In-repo: `GET|POST /agent-link` (`onboarding/agent-link.mjs`). Still needs Domain secrets before it works in production.
+Domain has verified the hosted owner-account flow through `GET|POST /agent-link` (`onboarding/agent-link.mjs`). Check that the current deployments still share the approved ticket key before updating either Worker. [Owner MCP evidence](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43#issuecomment-7089818896)
 
 1. Customer is already signed into `onboard.360web.cloud` with GitHub **and** selected Cloudflare account.
 2. Agent `start_connect_accounts` hands off to `/agent-link?challenge_id=…`.
@@ -77,6 +77,14 @@ Connect a client: `claude mcp add --transport http launch-and-own https://mcp.36
 The calls use separate ticket purposes and expire after 60 seconds. The status endpoint accepts up to 4 KiB of JSON on the registered onboarding origin. Provider tokens stay on their originating service.
 
 For an approved rollout of status handoff version 2, Domain deploys the bridge first and then onboarding. The upgraded bridge returns `onboarding_status_unavailable` during a version mismatch. Verify the historical status fields and a revoked or expired session with a consenting QA owner. Roll back both Workers together. No D1 migration is required for version 2.
+
+### D3. Optional discovery metadata rollout
+
+Custom ChatGPT apps can use the packaged PNG directly where their settings allow it. A bridge rollout serves the description and same-origin PNG to clients that read MCP server metadata. [Branding instructions](../clients/chatgpt/README.md)
+
+For a bridge rollout, Domain confirms the live Worker version and the exact candidate source. The last reported bridge version is `5629e23b` from `0b9bcce`. Review the #138 status-handoff changes in the candidate and confirm the paired onboarding version before approving the rollout. [Bridge deployment](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43#issuecomment-7104228298) · [#138](https://github.com/mitchelldawkinsjr/launch-and-own/pull/138) · [Onboarding deployment](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2#issuecomment-7117559538)
+
+After an approved deployment, verify OAuth discovery, owner-authorized MCP initialize and tool listing, and the advertised PNG's origin, content type, and bytes. Confirm the owner link and draft/status handoff with the authorized QA account. Roll back to the recorded bridge version if the checks fail.
 
 ### E. Release gates
 

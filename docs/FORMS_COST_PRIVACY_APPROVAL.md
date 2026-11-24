@@ -31,10 +31,10 @@ Budget `planDigest` values from `prepareOptionalExtensionReview` are **not** thi
 
 ## Hosted rollout (Domain #2)
 
-1. Apply `0010` after confirming the ledger through `0009` and the dedicated onboarding D1 identity. The migration retains historical grants when an owner replaces consent.
-2. Leave `OPTION_FORMS_ENABLED` unset outside a Domain-approved pilot with an exact owner grant.
-3. Record cost/privacy grants through the operator workflow for the current consent.
-4. Review the staged Turnstile widget and dedicated D1 before separately approving Worker deployment and the owner's exact test.
-5. Independent #21 customer test remains separate.
+1. The onboarding beta database is migrated through `0010`. Domain confirmed a compatible onboarding Worker with the forms flag disabled. [Schema evidence](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2#issuecomment-7114063388) · [Deployment evidence](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2#issuecomment-7117559538)
+2. For a pilot after #21, identify one consenting owner and an exact live managed `pages.dev` project. Domain verifies current account entitlements and the approved credential path for Turnstile and customer D1. The configured onboarding OAuth request currently lacks those write scopes. [Onboarding scopes](../onboarding/wrangler.jsonc) · [Independent acceptance](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)
+3. Review the cost and privacy limits for that site, then record the current forms consent, cost/privacy grant, and separate operator execution grant. Domain approves the bounded `OPTION_FORMS_ENABLED=true` staging window. The exact operations create the widget, create dedicated customer D1, and apply the reviewed schema.
+4. The staging receipt links to a separate Worker publication review. Review the source digest, verified database binding, secret binding, submission limits, retention cron, and site change before any publication. The current product stops at this review.
+5. Acceptance requires the owner’s exact Siteverify-passed test against the approved deployed Worker version and database. Record only the redacted test receipt. Treat health checks as liveness. [Worker review and acceptance](CUSTOMER_FORM_WORKER.md)
 
 Sol coordinates under [#83](https://github.com/mitchelldawkinsjr/launch-and-own/issues/83). Parent: [#89](https://github.com/mitchelldawkinsjr/launch-and-own/issues/89).
