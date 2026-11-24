@@ -127,7 +127,7 @@ export async function openManagedSiteReference(env, session, raw, time = Math.fl
       value.authorizationEpoch !== session.authorization_epoch ||
       !validReference(value.reference, principal))
     throw new ManagedSiteInventoryError('owned_site_not_found');
-  return value.reference;
+  return Object.freeze(value.reference);
 }
 
 async function providerBundle(env, session, {
@@ -240,7 +240,8 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
       githubAccessToken: bundle.githubAccessToken,
       cloudflareAccessToken: bundle.cloudflareAccessToken,
       assertCurrentAuthorization: bundle.assertCurrentAuthorization};
-    const display = {status: 'ok', check, name: reference.repositoryName.slice(4),
+    const name = reference.repositoryName.slice(4).replaceAll('-', ' ');
+    const display = {status: 'ok', check, name: name[0].toUpperCase() + name.slice(1),
       repositoryUrl: 'https://github.com/' + reference.githubOwner + '/' + reference.repositoryName,
       pagesProjectUrl: 'https://dash.cloudflare.com/' + reference.cloudflareAccountId +
         '/pages/view/' + reference.pagesProjectName};
@@ -359,7 +360,7 @@ function renderDeployment(inspection, escape) {
   const checkedAt = verified ? new Date(result.checkedAt * 1000).toISOString() : null;
   const website = verified
     ? '<p><a href="' + escape(result.verifiedUrl) + '" rel="noreferrer">Open verified homepage</a></p>' +
-      '<p>Checked <time datetime="' + checkedAt + '">' + checkedAt + '</time></p>' : '';
+      '<p>Checked <time datetime="' + checkedAt + '">' + checkedAt.slice(0, 16).replace('T', ' ') + ' UTC</time></p>' : '';
   const actions = (inspection.editPath
     ? '<p><a href="' + escape(inspection.editPath) + '">Update this website</a></p>'
     : inspection.repositoryUrl
@@ -383,10 +384,13 @@ export function renderCurrentSourcePage(inspection, {view, escape}, ticket = '')
     return view('Site toolkit',
       '<p>That check is unavailable or expired' + code + '.</p>' + back);
   }
-  const tabs = ticket ? '<nav aria-label="Site toolkit">' + Object.entries(CHECKS)
-    .map(([check, label]) => '<a href="/toolkit/source?ticket=' + encodeURIComponent(ticket) +
-      '&amp;check=' + check + '"' + (inspection.check === check ? ' aria-current="page"' : '') +
-      '>' + label + '</a>').join(' · ') + '</nav>' : '';
+  const tabs = ticket ? '<nav aria-label="Site toolkit" style="display:flex;flex-wrap:wrap;gap:.5rem 1rem">' +
+    Object.entries(CHECKS).map(([check, label]) => {
+      const selected = inspection.check === check;
+      return '<a href="/toolkit/source?ticket=' + encodeURIComponent(ticket) +
+        '&amp;check=' + check + '"' + (selected ? ' aria-current="page">' +
+        '<strong>' + label + '</strong>' : '>' + label) + '</a>';
+    }).join('') + '</nav>' : '';
   const providers = (inspection.repositoryUrl
     ? '<a href="' + escape(inspection.repositoryUrl) + '" rel="noreferrer">Open on GitHub</a>' : '') +
     (inspection.pagesProjectUrl

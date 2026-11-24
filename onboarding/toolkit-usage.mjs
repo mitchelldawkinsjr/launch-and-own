@@ -1,4 +1,5 @@
 /** Owner-facing fallback when optional-service account usage is unavailable. */
+const numberFormat = new Intl.NumberFormat('en-US');
 const ACCOUNT_DASHBOARD = /^https:\/\/dash\.cloudflare\.com\/[a-fA-F0-9]{32}$/;
 
 export function renderToolkitUsage(result, {escape}) {
@@ -6,7 +7,7 @@ export function renderToolkitUsage(result, {escape}) {
   if (typeof result?.usageDashboardUrl !== 'string' || !ACCOUNT_DASHBOARD.test(result.usageDashboardUrl))
     return heading + '<p>Reconnect your accounts to check this site’s plan and usage.</p></section>';
   const {workers, d1, kv, r2} = result.publishedFreeLimits;
-  const count = value => new Intl.NumberFormat('en-US').format(value);
+  const count = value => numberFormat.format(value);
   const sources = [
     ['Workers', count(workers.metrics.requestsPerDay) + ' requests/day and ' +
       workers.metrics.cpuMsPerInvocation + ' ms CPU/invocation', workers.documentation],
