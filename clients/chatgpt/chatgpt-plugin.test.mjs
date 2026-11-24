@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync, statSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {RESOURCE_URI} from '../../integration/protected-resource.mjs';
+import {SERVER_INFO} from '../../integration/mcp-jsonrpc.mjs';
 import {authorizationServerMetadata, SCOPE} from '../../integration/oauth-server.mjs';
 import {TOOLS} from '../../integration/mcp-jsonrpc.mjs';
 import {loadDistributionMatrix} from '../../distribution/release-gates.mjs';
@@ -76,4 +77,20 @@ test('browser install guidance truthfully documents uploaded MCP ZIP Desktop onl
   assert.match(instructions,/do not promise/i);
   assert.match(instructions,/ChatGPT desktop app/);
   assert.match(instructions,/https:\/\/onboard\.360web\.cloud/);
+});
+
+
+test('branding icon is a real PNG and is referenced by the plugin and MCP metadata',()=>{
+  const iconPath = fileURLToPath(new URL('./assets/launch-and-own-icon.png', import.meta.url));
+  const png = readFileSync(iconPath);
+  assert.ok(statSync(iconPath).size > 1000);
+  assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+  assert.equal(png.readUInt32BE(16),128);
+  assert.equal(png.readUInt32BE(20),128);
+  const iconRel = './assets/launch-and-own-icon.png';
+  assert.equal(plugin.extensions['com.openai'].interface.logo,iconRel);
+  assert.equal(plugin.extensions['com.openai'].interface.composerIcon,iconRel);
+  const branded = SERVER_INFO.icons[0];
+  assert.equal(branded.src,'https://raw.githubusercontent.com/mitchelldawkinsjr/launch-and-own/main/branding/launch-and-own-icon.png');
+  assert.deepEqual(branded.sizes,['128x128']);
 });
