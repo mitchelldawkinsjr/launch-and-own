@@ -2,6 +2,7 @@
 // No launch-history dependency, D1 writes, provider mutations, or unverified live claims.
 import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
 import { isManagedRepositoryDescription } from './managed-site-repository.mjs';
+import { responseMatchesBytes } from './verify-site.mjs';
 
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const LOGIN = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i;
@@ -9,8 +10,9 @@ const PROJECT = /^(esp-[a-z0-9]+(?:-[a-z0-9]+)*)-site$/;
 const OPAQUE = /^[a-z0-9_-]{1,128}$/i;
 const GIT_SHA = /^[a-f0-9]{40}$/i;
 const NUMERIC = /^[1-9][0-9]*$/;
-const PER_PAGE = 3; // 3 candidates x 3 reads + /user + Pages list = <=11 GETs.
-const MAX_PROVIDER_REQUESTS = 11;
+// Eight provider reads leave room for token renewals and history reads on Workers Free.
+const PER_PAGE = 2;
+const MAX_PROVIDER_REQUESTS = 8;
 const MAX_PAGE_NUMBER = 100;
 const MAX_SOURCE_BYTES = 128 * 1024;
 
@@ -183,14 +185,34 @@ async function verifyCurrentSite(read, reference) {
       !exactManagedProject(page.result, repository, owner)) denied('owned_site_not_found');
   const branch = await get('github', root + '/branches/main', {allow404: true});
   if (!GIT_SHA.test(branch?.commit?.sha ?? '')) denied('current_source_requires_review');
-  return {root, projectPath, baseCommitSha: branch.commit.sha.toLowerCase()};
+  return {root, projectPath, repository, project: page.result,
+    baseCommitSha: branch.commit.sha.toLowerCase()};
+}
+
+async function ownedReferenceReader(siteId, reference, options) {
+  const read = reader(options);
+  const {owner, get} = read;
+  checkedReference(reference, owner, siteId);
+  const user = await get('github', '/user');
+  if (user?.id !== owner.githubUserId ||
+      user?.login?.toLowerCase() !== owner.githubLogin.toLowerCase())
+    denied('github_owner_mismatch');
+  return read;
+}
+
+/** Fresh account and repository proof for a single sealed dashboard selection. */
+export async function readCurrentManagedSite({siteId, reference, ...options} = {}) {
+  const read = await ownedReferenceReader(siteId, reference, options);
+  const {repository, project, baseCommitSha} = await verifyCurrentSite(read, reference);
+  await read.authorized();
+  return safeSite(read.owner, repository, project, baseCommitSha);
 }
 
 /**
  * Page-scoped, GET-only discovery. `page` is a selector, NEVER ownership.
- * At most 3 candidate sites / 11 provider calls and 3 auth checks per GET
- * (+ one final), below the 50-subrequest Workers Free allowance when an
- * authorization fence uses a single D1 query per check.
+ * At most two candidates and eight provider reads per page. Each API GET
+ * makes three live authorization checks, leaving room for dashboard history
+ * reads and credential refreshes within the Workers Free subrequest budget.
  * Older pages may change between requests: never claim stable full-account
  * coverage or historical continuity from a copied, editable repo marker.
  */
@@ -267,6 +289,51 @@ function decodeGitHubFile(file) {
   return {bytes, html};
 }
 
+function productionSnapshot(project) {
+  const commit = publicCommit(project);
+  const id = project.canonical_deployment?.id;
+  return commit && typeof id === 'string' && OPAQUE.test(id) ? {id, commit} : null;
+}
+
+async function checkPublicHomepage(read, fetchFn, url, bytes) {
+  await read.authorized();
+  let state = 'public_check_unavailable';
+  try {
+    const response = await fetchFn(url, {
+      method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(8000),
+      headers: {accept: 'text/html', 'cache-control': 'no-cache'}
+    });
+    if (response.status === 200 && /^text\/html(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) {
+      state = await responseMatchesBytes(response, bytes) ? 'verified_homepage' : 'public_content_differs';
+    } else {
+      await response.body?.cancel();
+    }
+  } catch {
+    // Provider transport details are unsuitable for the customer projection.
+  }
+  await read.authorized();
+  return state;
+}
+
+function publicationProjection(project, baseCommitSha, checked, website, digest, checkedAt) {
+  const current = productionSnapshot(project);
+  const latest = project.latest_deployment;
+  const latestCommit = latest?.deployment_trigger?.metadata?.commit_hash;
+  if (!current || current.commit !== baseCommitSha) {
+    const failed = latest?.environment === 'production' &&
+      typeof latestCommit === 'string' && latestCommit.toLowerCase() === baseCommitSha &&
+      latest.latest_stage?.status === 'failure';
+    return {state: failed ? 'deployment_failed' : 'waiting_for_current_deployment',
+      productionCommitSha: current?.commit ?? null};
+  }
+  if (!checked || checked.id !== current.id)
+    return {state: 'deployment_changed', productionCommitSha: current.commit};
+  if (checked.state !== 'verified_homepage')
+    return {state: checked.state, productionCommitSha: current.commit};
+  return {state: 'verified_homepage', productionCommitSha: current.commit, deploymentId: current.id,
+    publicHtmlSha256: digest, verifiedUrl: website, checkedAt};
+}
+
 /**
  * Read an owner-selected site's latest current GitHub source DIRECTLY against
  * a server-held, current verified reference. `siteId` is just a selector.
@@ -274,17 +341,15 @@ function decodeGitHubFile(file) {
  * short-lived signed/sealed server ticket), never trust a browser JSON object.
  * Recheck user, exact repo/project and branch before/after SHA-pinned source GET.
  *
- * Source HTML is internal and untrusted; no unsandboxed UI render or automatic
- * sidecar generation. Historic ownership and live public bytes remain unproved.
+ * Source HTML is internal and untrusted. Optional publication checks compare
+ * the canonical public homepage with exact GitHub bytes. That comparison
+ * establishes current byte equality and has no historic approval authority.
  */
-export async function readCurrentManagedHomepage({siteId, reference, ...options} = {}) {
-  const read = reader(options);
+export async function readCurrentManagedHomepage({
+  siteId, reference, includePublication = false, ...options
+} = {}) {
+  const read = await ownedReferenceReader(siteId, reference, options);
   const {owner, get, authorized} = read;
-  checkedReference(reference, owner, siteId);
-  const user = await get('github', '/user');
-  if (user?.id !== owner.githubUserId ||
-      user?.login?.toLowerCase() !== owner.githubLogin.toLowerCase())
-    denied('github_owner_mismatch');
   const verified = await verifyCurrentSite(read, reference);
   const current = await get('github', verified.root +
     '/contents/public/index.html?ref=' + verified.baseCommitSha, {allow404: true});
@@ -292,6 +357,12 @@ export async function readCurrentManagedHomepage({siteId, reference, ...options}
   const {bytes, html} = decodeGitHubFile(current);
   const contentSha256 = await sha256Bytes(bytes); // Exact Git blob bytes, INCLUDING BOM.
   await authorized();
+
+  const website = 'https://' + verified.project.name + '.pages.dev/';
+  const production = includePublication === true ? productionSnapshot(verified.project) : null;
+  const checked = production?.commit === verified.baseCommitSha
+    ? {id: production.id, state: await checkPublicHomepage(read, options.fetchFn ?? fetch, website, bytes)}
+    : null;
 
   // A same-name repository/project swap or moving main is never authorized by
   // an old SHA. Repeat exact provider reads without scanning every account site.
@@ -310,6 +381,8 @@ export async function readCurrentManagedHomepage({siteId, reference, ...options}
     homepageHtmlSha256: contentSha256, homepageGitBlobSha: current.sha.toLowerCase(),
     publicationVerified: false, historicalContinuityVerified: false,
     editMode: 'approved_migration_required',
+    ...(includePublication === true ? {publicationCheck: publicationProjection(projectResult.result,
+      verified.baseCommitSha, checked, website, contentSha256, Math.floor(Date.now() / 1000))} : {}),
     html // INTERNAL untrusted bytes represented as UTF-8, preserving BOM.
   };
 }

@@ -158,7 +158,42 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   const sourceHtml = await source.text();
   assert.match(sourceHtml, /Homepage fingerprint/);
   assert.match(sourceHtml, /approved_migration_required/);
+  assert.match(sourceHtml, /Open verified homepage/);
+  assert.match(sourceHtml, /Review optional features/);
+  assert.equal(source.headers.get('cache-control'), 'no-store');
   assert.doesNotMatch(sourceHtml, /Willow Studio/);
+
+  const detailPath = '/toolkit/source?ticket=' + encodeURIComponent(ticket);
+  const readsBefore = h.calls.length;
+  const analytics = await h.request(detailPath + '&check=analytics', {cookie: tenant.cookie});
+  assert.equal(analytics.status, 200);
+  const analyticsHtml = await analytics.text();
+  assert.match(analyticsHtml, /Cloudflare has yet to report a Web Analytics tag/);
+  assert.match(analyticsHtml, /browser beacon/);
+  assert.match(analyticsHtml, /\/pages\/view\/esp-willow-studio-site/);
+  const previews = await h.request(detailPath + '&check=previews', {cookie: tenant.cookie});
+  assert.equal(previews.status, 200);
+  const previewsHtml = await previews.text();
+  assert.match(previewsHtml, /New preview builds are off/);
+  assert.doesNotMatch(previewsHtml, /\.pages\.dev|\/pull\//);
+  const usage = await h.request(detailPath + '&check=usage', {cookie: tenant.cookie});
+  assert.equal(usage.status, 200);
+  const usageHtml = await usage.text();
+  assert.match(usageHtml, /remaining allowance is unavailable here/);
+  assert.match(usageHtml, /R2 Standard/);
+  assert.match(usageHtml, /account subscription required/i);
+  assert.match(usageHtml, new RegExp('https://dash.cloudflare.com/' + accountId + '"'));
+  assert(h.calls.slice(readsBefore).every(call => call.method === 'GET'));
+  assert(!h.calls.slice(readsBefore).some(call => call.url.includes('/contents/')),
+    'feature checks should not fetch the private homepage');
+
+  // Account discovery outlives job retention. The verified link survives, while
+  // edit and options stay tied to their own valid launch receipts.
+  h.sqlite.prepare('UPDATE onboarding_launch_jobs SET expires_at = 0').run();
+  const afterExpiry = await h.request(detailPath, {cookie: tenant.cookie});
+  const afterExpiryHtml = await afterExpiry.text();
+  assert.match(afterExpiryHtml, /Open verified homepage/);
+  assert.doesNotMatch(afterExpiryHtml, /site-options\?id|site-update\?id/);
   const row = h.sqlite.prepare(`SELECT id_hash AS hash, authorization_epoch, github_user_id,
     github_login, cloudflare_account_id, github_token_ct, cloudflare_token_ct
     FROM onboarding_sessions`).get();
@@ -170,9 +205,11 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   assert.equal(inspected.homepageHtmlSha256, expected);
   assert.match(sourceHtml, new RegExp(expected));
 
+  const callsBeforeForgery = h.calls.length;
   const forged = await h.request('/toolkit/source?ticket=not-a-real-ticket', {
     cookie: tenant.cookie
   });
+  assert.equal(h.calls.length, callsBeforeForgery);
   assert.equal(forged.status, 200);
   assert.match(await forged.text(), /unavailable or expired/);
 

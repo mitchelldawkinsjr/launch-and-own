@@ -32,7 +32,7 @@ function fixtures() {
         preview_deployment_setting: 'none'}},
       build_config: {root_dir: '/', destination_dir: 'public', build_command: '',
         web_analytics_token: 'private-beacon-secret'},
-      canonical_deployment: {environment: 'production', latest_stage: {
+      canonical_deployment: {id: 'canonical-deploy', environment: 'production', latest_stage: {
         name: 'deploy', status: 'success'}, deployment_trigger: {
         metadata: {commit_hash: head}}}},
     content: {type: 'file', encoding: 'base64',
@@ -62,7 +62,7 @@ function fake(f = fixtures()) {
     if (parsed.host === 'api.cloudflare.com') {
       if (path === cfRoot) return json({success: true,
         result: [{id: projectId, name: projectName}],
-        result_info: {page: Number(parsed.searchParams.get('page')), per_page: 3,
+        result_info: {page: Number(parsed.searchParams.get('page')), per_page: 2,
           total_pages: 1, total_count: 1}});
       if (path === cfRoot + '/' + projectName) return json({success: true, result: f.project});
       return json({success: false, result: null}, 404);
@@ -124,8 +124,8 @@ test('discovers an existing site after job history expiry without D1, tokens or 
   assert.equal(site.pagesProjectDashboardUrl,
     'https://dash.cloudflare.com/' + accountId + '/pages/view/' + projectName);
   assert(m.calls.every(c => c.options.method === 'GET' && c.options.redirect === 'manual'));
-  assert(m.calls.some(c => c.url.includes('?page=1&per_page=3')));
-  assert(m.calls.length <= 11);
+  assert(m.calls.some(c => c.url.includes('?page=1&per_page=2')));
+  assert(m.calls.length <= 8);
   assert(m.calls.every(c => c.url.startsWith('https://api.github.com/') ||
     c.url.startsWith('https://api.cloudflare.com/client/v4/')));
   assert(m.auth.length >= m.calls.length * 2);
@@ -260,32 +260,31 @@ test('Pages discovery returns a bounded one-page continuation instead of scannin
   m.custom[cfRoot] = async url => m.json({success: true,
     result: url.searchParams.get('page') === '1' ? [
       {id: 'other-1', name: 'unrelated-site'},
-      {id: projectId, name: projectName},
-      {id: 'other-2', name: 'another-unrelated'}] :
+      {id: projectId, name: projectName}] :
       [{id: 'other-3', name: 'other-provider-site'}],
-    result_info: {page: Number(url.searchParams.get('page')), per_page: 3,
-      total_pages: 2, total_count: 4}
+    result_info: {page: Number(url.searchParams.get('page')), per_page: 2,
+      total_pages: 2, total_count: 3}
   });
   const first = await m.read();
   assert.equal(first.page, 1);
   assert.equal(first.nextPage, 2);
   assert.equal(first.sites.length, 1);
-  assert(!m.calls.some(c => c.url.includes('?page=2&per_page=3')),
+  assert(!m.calls.some(c => c.url.includes('?page=2&per_page=2')),
     'do not silently exceed one bounded provider page');
   const firstCalls = m.calls.length;
-  assert(firstCalls <= 11);
+  assert(firstCalls <= 8);
   const second = await m.read({page: 2});
   assert.equal(second.page, 2);
   assert.equal(second.nextPage, null);
   assert.equal(second.sites.length, 0);
-  assert(m.calls.length - firstCalls <= 11);
-  assert(m.calls.some(c => c.url.includes('?page=2&per_page=3')));
+  assert(m.calls.length - firstCalls <= 8);
+  assert(m.calls.some(c => c.url.includes('?page=2&per_page=2')));
 });
 
 test('Cloudflare documented zero-page empty account reports an empty page, not an error', async () => {
   const m = fake();
   m.custom[cfRoot] = async () => m.json({success: true,
-    result: [], result_info: {page: 1, per_page: 3, total_pages: 0, total_count: 0}
+    result: [], result_info: {page: 1, per_page: 2, total_pages: 0, total_count: 0}
   });
   const result = await m.read();
   assert.equal(result.sites.length, 0);
@@ -488,7 +487,7 @@ test('selected source read uses exact current reference and at most eleven GET r
   assert.equal(result.status, 'github_current_source_verified');
   assert.equal(m.calls.length, 8,
     'a selected source read must revalidate directly, not re-enumerate 100 sites');
-  assert(m.calls.length <= 11);
+  assert(m.calls.length <= 8);
   assert(m.calls.every(x => x.options.method === 'GET'));
   assert.equal(result.historicalContinuityVerified, false);
   const missing = fake();
@@ -516,4 +515,64 @@ test('revocation after homepage read suppresses the source', async () => {
     return m.json(m.f.content);
   };
   await assert.rejects(m.source(), expectCode('authorization_changed'));
+});
+
+
+test('live homepage check uses the canonical production revision and credential-free exact bytes', async () => {
+  const m = fake();
+  m.custom['/'] = (url, options) => {
+    assert.equal(url.href, 'https://' + projectName + '.pages.dev/');
+    assert.equal(options.redirect, 'manual');
+    assert.equal(options.method, 'GET');
+    assert.equal(options.headers.authorization, undefined);
+    return new Response(html, {headers: {'content-type': 'text/html; charset=utf-8'}});
+  };
+  const result = await m.source({includePublication: true});
+  assert.equal(result.publicationCheck.state, 'verified_homepage');
+  assert.equal(result.publicationCheck.productionCommitSha, head);
+  assert.equal(result.publicationCheck.publicHtmlSha256, result.homepageHtmlSha256);
+  assert.equal(result.publicationCheck.deploymentId, 'canonical-deploy');
+  assert.equal(result.publicationVerified, false, 'this check does not validate historic approval');
+  assert.equal(m.calls.length, 9);
+});
+
+test('homepage live link stays withheld when production changes, fails, redirects, or serves different bytes', async () => {
+  for (const [caseName, setup, expected, publicGets] of [
+    ['older production', m => {
+      m.f.project.canonical_deployment.deployment_trigger.metadata.commit_hash = movedHead;
+    }, 'waiting_for_current_deployment', 0],
+    ['failed production', m => {
+      m.f.project.canonical_deployment = null;
+      m.f.project.latest_deployment = {environment: 'production',
+        deployment_trigger: {metadata: {commit_hash: head}}, latest_stage: {status: 'failure'}};
+    }, 'deployment_failed', 0],
+    ['new deployment', m => {
+      m.custom['/'] = () => {
+        m.f.project.canonical_deployment.id = 'replacement';
+        return new Response(html, {headers: {'content-type': 'text/html'}});
+      };
+    }, 'deployment_changed', 1],
+    ['different HTML', m => {
+      m.custom['/'] = () => new Response(html + 'x', {headers: {'content-type': 'text/html'}});
+    }, 'public_content_differs', 1],
+    ['redirect', m => {
+      m.custom['/'] = () => new Response(null, {status: 302, headers: {location: 'https://example.test/'}});
+    }, 'public_check_unavailable', 1]
+  ]) {
+    const m = fake();
+    setup(m);
+    const {publicationCheck} = await m.source({includePublication: true});
+    assert.equal(publicationCheck.state, expected, caseName);
+    assert.equal(publicationCheck.verifiedUrl, undefined, caseName);
+    assert.equal(m.calls.filter(call => call.url.endsWith('.pages.dev/')).length, publicGets, caseName);
+  }
+});
+
+test('revoked owner during public byte check cannot receive deployment evidence', async () => {
+  const m = fake();
+  m.custom['/'] = () => {
+    m.revoke();
+    return new Response(html, {headers: {'content-type': 'text/html'}});
+  };
+  await assert.rejects(m.source({includePublication: true}), expectCode('authorization_changed'));
 });

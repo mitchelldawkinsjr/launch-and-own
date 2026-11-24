@@ -255,13 +255,13 @@ async function toolkit(env,current,request){
 async function toolkitSource(env,current,request){
   if(!current?.cloudflare_account_id)
     return renderCurrentSourcePage({status:'unavailable',code:'verified_owner_required'},{view,escape});
-  const grants=await assertHistoryAccess(env,current);
-  const ticket=new URL(request.url).searchParams.get('ticket');
-  const inspection=await inspectSealedManagedSource(env,current,ticket,{...grants});
+  const params=new URL(request.url).searchParams;
+  const ticket=params.get('ticket');
+  const inspection=await inspectSealedManagedSource(env,current,ticket,{check:params.get('check')||'deployment'});
   if(['authorization_changed','github_reauthorization_required','cloudflare_reauthorization_required',
     'provider_reauthorization_required'].includes(inspection.code)||!await hasCurrentOwnerSession(env,current,now()))
     return fail('Reconnect your accounts to view your website toolkit.',401);
-  return renderCurrentSourcePage(inspection,{view,escape});
+  return renderCurrentSourcePage(inspection,{view,escape},ticket);
 }
 async function selectAccount(request,env,current){
   const data=await formData(request);assertCsrf(request,data,current,baseUrl(env));
