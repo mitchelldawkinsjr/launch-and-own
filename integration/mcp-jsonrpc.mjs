@@ -6,12 +6,13 @@
 import {handleBridgeRequest} from './bridge-transport.mjs';
 import {RESOURCE_METADATA_PATH} from './protected-resource.mjs';
 import {MCP_ORIGIN} from './oauth-server.mjs';
+import {MCP_ICON_PATH} from './mcp-icon.mjs';
 
 const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 // Public-facing discovery metadata. A custom ChatGPT connection may still
 // require the owner to enter its description and upload an icon in the UI.
-// This refers to the existing public onboarding logo, not an OAuth credential.
+// Clients can load the PNG from the MCP origin without credentials.
 export const SERVER_INFO = Object.freeze({
   name: 'launch-and-own',
   title: 'Launch & Own',
@@ -19,7 +20,7 @@ export const SERVER_INFO = Object.freeze({
   description: 'Build and launch websites you own using ChatGPT, GitHub, and Cloudflare. Create a website draft, preview the exact result, approve publication securely in your browser, and verify when your site is live.',
   websiteUrl: 'https://onboard.360web.cloud',
   icons: Object.freeze([Object.freeze({
-    src: 'https://raw.githubusercontent.com/mitchelldawkinsjr/launch-and-own/main/branding/launch-and-own-icon.png',
+    src: MCP_ORIGIN + MCP_ICON_PATH,
     mimeType: 'image/png',
     sizes: Object.freeze(['128x128'])
   })])
