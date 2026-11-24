@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "launch-and-own",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build customer-owned static websites with secure GitHub and Cloudflare linking, exact preview, separate human approval and verified publication via Launch & Own.",
   "homepage": "https://onboard.360web.cloud",
   "repository": "https://github.com/mitchelldawkinsjr/launch-and-own",
@@ -30,7 +30,9 @@
           "Help me plan and build a website I own.",
           "Prepare a simple website and show me the approval steps.",
           "Check the publication status of my Launch & Own website."
-        ]
+        ],
+        "logo": "./assets/launch-and-own-icon.png",
+        "composerIcon": "./assets/launch-and-own-icon.png"
       }
     }
   }
