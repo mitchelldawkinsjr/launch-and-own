@@ -106,3 +106,24 @@ test("denied account permission is a failure",async()=>{
  await assert.rejects(verifyCloudflareAccount({accessToken:"private-token",accountId:id,
    fetchFn:async()=>new Response(JSON.stringify({success:false}),{status:403})}),/Cannot access/);
 });
+test("OAuth grants that cannot GET /accounts/{id} still verify via exact account list match",async()=>{
+ const id="0123456789abcdef0123456789abcdef";
+ let calls=0;
+ const result=await verifyCloudflareAccount({accessToken:"private-token",accountId:id,strict:true,fetchFn:async(url)=>{
+  calls++;
+  if(url.endsWith("/accounts/"+id))
+    return new Response(JSON.stringify({success:false}),{status:401});
+  assert.match(url,/\/accounts\?page=1&per_page=50$/);
+  return Response.json({success:true,result:[{id,name:"Default account"},{id:"f".repeat(32),name:"Other"}]});
+ }});
+ assert.equal(calls,2);
+ assert.deepEqual(result,{id,name:"Default account"});
+});
+test("list fallback does not accept a different Cloudflare account",async()=>{
+ const id="0123456789abcdef0123456789abcdef";
+ await assert.rejects(verifyCloudflareAccount({accessToken:"private-token",accountId:id,strict:true,fetchFn:async(url)=>{
+  if(url.endsWith("/accounts/"+id))
+    return new Response(JSON.stringify({success:false}),{status:401});
+  return Response.json({success:true,result:[{id:"f".repeat(32),name:"Other"}]});
+ }}),/cloudflare_http_401|Provider request failed/);
+});
