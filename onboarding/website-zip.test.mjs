@@ -6,7 +6,7 @@ import worker from './worker.mjs';
 import previewWorker from './zip-preview-worker.mjs';
 import { createZipPreview } from './zip-preview-access.mjs';
 import { extractWebsiteZip } from './website-zip.mjs';
-import { approvePreview, connectTenant, harness, jobRow, launchId, makeDue, origin,
+import { accountId, approvePreview, connectTenant, harness, jobRow, launchId, makeDue, moveLeaseIntoPast, origin,
   originalFetch, post, reviewDigest, writes } from './worker-test-support.mjs';
 
 function zip(entries) {
@@ -135,7 +135,8 @@ function zipHarness(t) {
   const h = harness();
   const state = h.resourceState;
   Object.assign(h.env, { ZIP_ARTIFACTS: localBucket(), ZIP_PREVIEW_DOMAIN: 'preview.example.test', ZIP_PREVIEW_KEY: 'cd'.repeat(32) });
-  const imported = { files: null, commits: 0, lostResponse: false, foreignHead: false, moveHead: false, publicBytes: null };
+  const imported = { files: null, commits: 0, lostResponse: false, foreignHead: false, moveHead: false,
+    publicBytes: null, currentCommit: approvedSha, currentHomepage: null };
   const fetchFn = async (url, options = {}) => {
     if (url === 'https://api.github.com/graphql') {
       const { query, variables } = JSON.parse(options.body);
@@ -174,7 +175,12 @@ function zipHarness(t) {
       if (imported.foreignHead) tree.push({ path: 'customer-file.txt', mode: '100644', type: 'blob' });
       return Response.json({ truncated: false, tree });
     }
-    if (url === repoRoot + '/branches/main') return Response.json({ commit: { sha: approvedSha } });
+    if (url === repoRoot + '/branches/main') return Response.json({ commit: { sha: imported.currentCommit } });
+    if (url === repoRoot + '/contents/public/index.html?ref=' + imported.currentCommit && imported.files) {
+      const bytes = imported.currentHomepage ?? imported.files.get('public/index.html');
+      const sha = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
+      return Response.json({type: 'file', encoding: 'base64', size: bytes.length, sha, content: bytes.toString('base64')});
+    }
     if (url === liveRoot) return new Response(imported.publicBytes ?? imported.files.get('public/index.html'),
       { headers: { 'content-type': 'text/html' } });
     const response = await h.fetchFn(url, options);
@@ -337,6 +343,69 @@ test('expired preview capabilities cannot read or reopen a staged upload', async
     headers: { origin }, body: new URLSearchParams({ ticket: preview.ticket }) }), h.env);
   assert.equal(response.status, 404);
   assert.equal(response.headers.get('set-cookie'), null);
+});
+
+test('a stalled ZIP launch verifies a dashboard-created Pages project, and the toolkit checks its later commit', async t => {
+  const h = zipHarness(t);
+  const tenant = await connectTenant(h);
+  h.resourceState.denyPagesOAuthAtCreate = true;
+  const id = launchId(await upload(h, tenant));
+  assert.equal((await approvePreview(h, tenant.cookie, tenant.csrf, id)).status, 303);
+  const stalled = jobRow(h);
+  assert.equal(stalled.status, 'needs_reauthorization');
+  assert.equal(stalled.error_code, 'cloudflare_pages_http_401_cf10000');
+  assert.equal(stalled.expected_commit_sha, approvedSha);
+  assert.equal(stalled.pages_project_id, null);
+  assert.equal(h.imported.commits, 1);
+  assert.match(await (await h.request('/toolkit', {cookie: tenant.cookie})).text(), /Connect Cloudflare Pages access/);
+
+  // Simulate the owner's separate Cloudflare dashboard creation.
+  const token = 'fixture_dashboard_pages_access_token';
+  h.resourceState.pagesAccessToken = token;
+  const created = await h.fetchFn('https://api.cloudflare.com/client/v4/accounts/' + accountId + '/pages/projects', {
+    method: 'POST', headers: {authorization: 'Bearer ' + token},
+    body: JSON.stringify({build_config: {build_command: '', destination_dir: 'public', root_dir: '/'}})
+  });
+  assert.equal(created.status, 201);
+  const project = h.resourceState.pages;
+  project.source.config.preview_deployment_setting = 'all';
+  project.canonical_deployment.deployment_trigger.metadata.commit_hash = approvedSha;
+  const readsOnlyAfter = h.calls.length;
+  assert.equal((await post(h, '/cloudflare-pages-access', tenant.cookie, {csrf: tenant.csrf, token, mode: 'read'})).status, 303);
+  const accessId = h.sqlite.prepare('SELECT access_id FROM onboarding_pages_access').get().access_id;
+  moveLeaseIntoPast(h);
+  const restored = await post(h, '/restore', tenant.cookie, {csrf: tenant.csrf, id});
+  assert.equal(restored.status, 303);
+  const restoredId = launchId(restored);
+  assert.match(await (await h.request('/review?id=' + restoredId, {cookie: tenant.cookie})).text(),
+    /Approve and verify existing project/);
+  h.imported.publicBytes = Buffer.from('<h1>Different live content</h1>');
+  assert.equal((await post(h, '/approve', tenant.cookie, {csrf: tenant.csrf, id: restoredId,
+    digest: await reviewDigest(h, tenant.cookie, restoredId), pagesAccessId: accessId})).status, 303);
+  assert.equal(jobRow(h).status, 'pending_deployment');
+  makeDue(h);
+  h.imported.publicBytes = null;
+  assert.equal((await post(h, '/verify', tenant.cookie, {csrf: tenant.csrf, id: restoredId})).status, 303);
+  assert.equal(jobRow(h).status, 'live');
+  assert.equal(jobRow(h).pages_project_id, project.id);
+  assert.equal(jobRow(h).approval_digest, stalled.approval_digest);
+
+  // A later GitHub merge is current inventory evidence. The original job keeps its original approval.
+  h.imported.currentCommit = 'a'.repeat(40);
+  h.imported.currentHomepage = Buffer.from('<!doctype html><html><h1>Current website</h1></html>');
+  h.imported.publicBytes = h.imported.currentHomepage;
+  project.canonical_deployment.id = 'later-owner-deployment';
+  project.canonical_deployment.deployment_trigger.metadata.commit_hash = h.imported.currentCommit;
+  const inventory = await (await h.request('/toolkit', {cookie: tenant.cookie})).text();
+  const detailUrl = inventory.match(/href="(\/toolkit\/source\?ticket=[^"]+)"/)?.[1];
+  assert.ok(detailUrl);
+  const detail = await (await h.request(detailUrl, {cookie: tenant.cookie})).text();
+  assert.match(detail, /Open verified homepage/);
+  assert.match(detail, new RegExp(h.imported.currentCommit));
+  assert.equal(jobRow(h).expected_commit_sha, approvedSha);
+  assert.equal(project.source.config.preview_deployment_setting, 'all');
+  assert.equal(h.imported.commits, 1);
+  assert(h.calls.slice(readsOnlyAfter).every(request => request.method === 'GET'));
 });
 
 test('scheduled retry recovers a lost commit response using retained, byte-exact files', async t => {

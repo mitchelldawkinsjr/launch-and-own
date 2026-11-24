@@ -144,9 +144,14 @@ test("Pages list preflight confirms Pages API access on the selected account",as
  }});
  assert.deepEqual(result,{ok:true});
 });
-test("Pages list denial is a distinct Pages authorization failure",async()=>{
+test("Pages list denial captures only the provider code and request correlation ID",async t=>{
  const id="0123456789abcdef0123456789abcdef";
+ const diagnostic=t.mock.method(console,"error",()=>{});
  await assert.rejects(verifyCloudflarePagesAccess({accessToken:"private-token",accountId:id,strict:true,
-   fetchFn:async()=>new Response(JSON.stringify({success:false,errors:[{code:10000,message:"Authentication error"}]}),{status:401})
+   fetchFn:async()=>Response.json({success:false,errors:[{code:10000,message:"private fixture response"}]},
+    {status:401,headers:{"cf-ray":"0123456789abcdef-IAD"}})
  }),error=>error instanceof Error&&error.code==="cloudflare_pages_http_401_cf10000");
+ assert.deepEqual(diagnostic.mock.calls.map(call=>JSON.parse(call.arguments[0])),[{
+  event:"cloudflare_pages_request_denied",httpStatus:401,providerCode:"10000",rayId:"0123456789abcdef-IAD"
+ }]);
 });

@@ -238,7 +238,7 @@ test('disconnect revokes GitHub grant and Cloudflare OAuth token and removes the
   assert(h.calls.some(c=>c.url==='https://api.github.com/applications/Iv1.example/grant'&&c.method==='DELETE'));
   assert(h.calls.some(c=>c.url==='https://dash.cloudflare.com/oauth2/revoke'&&c.method==='POST'));
   const notice=await (await h.request('/?disconnect=complete')).text();
-  assert.match(notice,/Launch &amp; Own access was removed/);
+  assert.match(notice,/Launch &amp; Own OAuth access was removed/);
   const old=await (await h.request('/',{cookie:sessionCookie})).text();
   assert.match(old,/Connect GitHub/);
  }finally{globalThis.fetch=originalFetch}

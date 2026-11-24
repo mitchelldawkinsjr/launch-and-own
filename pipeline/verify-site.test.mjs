@@ -214,6 +214,16 @@ test("read-only verification of a pinned project cannot start the first build",a
  assert.deepEqual(h.posts,[]);
  assert.equal(h.requests.length,1);
 });
+test("read-only adoption checks the approved GitHub source and does not start a Pages build",async()=>{
+ const h=approvedProjectMock();
+ const r=await verifyWebsite(input,{...firstBuildOptions,allowFirstBuild:false,
+  approved:{...approvedTarget,projectId:null},fetchFn:h.fetchFn});
+ assert.equal(r.status,"pending-deployment");
+ assert.equal(r.pagesProjectId,"proj-1");
+ assert.deepEqual(h.posts,[]);
+ assert.match(h.requests[1],/\/branches\/main$/);
+ assert.equal(h.requests.length,3);
+});
 test("approved project that never deployed gets exactly one production build started",async()=>{
  const h=approvedProjectMock();
  const r=await verifyWebsite(input,{...firstBuildOptions,fetchFn:h.fetchFn});

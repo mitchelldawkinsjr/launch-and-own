@@ -17,6 +17,7 @@ import {readToolkitPreviewStatus, renderToolkitPreviewStatus} from './toolkit-pr
 import {prepareOptionalExtensionReview} from '../pipeline/optional-service-budget.mjs';
 import {renderToolkitUsage} from './toolkit-usage.mjs';
 import {seal, unseal} from './crypto.mjs';
+import {pagesAccessFetch} from './pages-access.mjs';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 const REFERENCE_LIFETIME = 15 * 60;
@@ -154,12 +155,17 @@ async function providerBundle(env, session, {
     const cloudflare = cloudflareAccessToken || await tokenFetch({
       env, session, provider: 'cloudflare', fetchFn: fencedFetch
     });
+    const pages = await pagesAccessFetch(env, session, fetchFn, {now: clock});
     // Provider readers fence each request. Fence refresh requests here.
     return {
-      checkSession,
+      async checkSession() {
+        await checkSession();
+        if (!await pages.isCurrent()) throw new ManagedSiteInventoryError('authorization_changed');
+      },
       githubAccessToken: github,
       cloudflareAccessToken: cloudflare,
-      assertCurrentAuthorization: authorize
+      fetchFn: pages.fetchFn,
+      assertCurrentAuthorization: async owner => await authorize(owner) && await pages.isCurrent()
     };
   } catch (error) {
     if (error instanceof ManagedSiteInventoryError) throw error;
@@ -185,19 +191,23 @@ export async function loadCurrentManagedSitesPage(env, session, {
     return {status: 'unavailable', code: 'provider_reauthorization_required'};
 
   try {
+    const authorize = createOwnerAuthorizationFence(env, session, clock);
+    const pages = await pagesAccessFetch(env, session, fetchFn, {now: clock});
     const inventory = await discoverOwnedManagedSites({
       page,
       principal,
       githubAccessToken,
       cloudflareAccessToken,
-      assertCurrentAuthorization: createOwnerAuthorizationFence(env, session, clock),
-      fetchFn
+      assertCurrentAuthorization: async owner => await authorize(owner) && await pages.isCurrent(),
+      fetchFn: pages.fetchFn
     });
     const sites = [];
     for (const site of inventory.sites) {
       const ticket = await sealManagedSiteReference(env, session, site, clock());
       sites.push(Object.freeze({...site, sourceTicket: ticket}));
     }
+    if (!await authorize(principal) || !await pages.isCurrent())
+      throw new ManagedSiteInventoryError('authorization_changed');
     return {
       status: 'ok',
       page: inventory.page,
@@ -236,7 +246,7 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
     const bundle = await providerBundle(env, session, {
       clock, fetchFn, tokenFetch, githubAccessToken, cloudflareAccessToken
     });
-    const request = {siteId: reference.siteId, reference, principal, fetchFn,
+    const request = {siteId: reference.siteId, reference, principal, fetchFn: bundle.fetchFn,
       githubAccessToken: bundle.githubAccessToken,
       cloudflareAccessToken: bundle.cloudflareAccessToken,
       assertCurrentAuthorization: bundle.assertCurrentAuthorization};
@@ -256,7 +266,7 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
       }
       const keys = ['githubUserId', 'githubOwner', 'cloudflareAccountId', 'repositoryId',
         'repositoryName', 'pagesProjectId', 'pagesProjectName', 'branch'];
-      const featureRequest = {site, principal, cloudflareAccessToken: bundle.cloudflareAccessToken, fetchFn,
+      const featureRequest = {site, principal, cloudflareAccessToken: bundle.cloudflareAccessToken, fetchFn: bundle.fetchFn,
         assertCurrentAuthorization: identity => {
           // Both feature readers pass a frozen snapshot of the scoped site.
           return Boolean(identity && keys.every(key => identity[key] === site[key])) &&

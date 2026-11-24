@@ -7,6 +7,7 @@ import { activeJobSession, approvalSnapshot, HAS_APPROVAL, RUNNABLE, UNCLAIMED }
 import { AuthorizationRefreshBusy, getFreshAccessToken } from './token-lifecycle.mjs';
 import { WebsiteZipError } from './website-zip.mjs';
 import { loadApprovedZip } from './zip-artifacts.mjs';
+import { pagesAccessFetch, PagesAccessChanged } from './pages-access.mjs';
 
 const clock = () => Math.floor(Date.now() / 1000);
 const LEASE_SECONDS = 120;
@@ -71,7 +72,7 @@ async function finishAttempt(env, job, code, { retryable = false, retryAfter = 0
   ]);
 }
 
-function guardedFetch(env, job, credentialsValid) {
+function guardedFetch(env, job, credentialsValid, providerFetch = fetch) {
   return async (url, options = {}) => {
     const deadline = clock() + REQUEST_SECONDS;
     if (job.lease_until <= deadline) throw new ProviderRequestError();
@@ -83,8 +84,9 @@ function guardedFetch(env, job, credentialsValid) {
     const signal = options.signal ? AbortSignal.any([timeout, options.signal]) : timeout;
     try {
       // Workers only allow follow/manual redirects; default manual and fail closed on non-2xx.
-      return await fetch(url, { ...options, signal, redirect: options.redirect ?? 'manual' });
-    } catch {
+      return await providerFetch(url, { ...options, signal, redirect: options.redirect ?? 'manual' });
+    } catch (error) {
+      if (error instanceof PagesAccessChanged) throw error;
       throw new ProviderRequestError();
     }
   };
@@ -102,7 +104,7 @@ async function requireProviderAccess(check) {
   try {
     await check();
   } catch (error) {
-    if (error instanceof JobStorageUnavailable || error instanceof AuthorizationEnded ||
+    if (error instanceof JobStorageUnavailable || error instanceof AuthorizationEnded || error instanceof PagesAccessChanged ||
         (error instanceof ProviderRequestError && error.retryable)) throw error;
     let detail = 'provider_authorization_required';
     if (error instanceof ProviderRequestError) {
@@ -136,15 +138,26 @@ async function verifiedConnections(env, job, input) {
     githubAccessToken: githubToken, cloudflareAccessToken: cloudflareToken,
     expectedGitHubUserId: job.github_user_id, fetchFn
   }));
+  const pages = session.pages_access_id ? await pagesAccessFetch(env, session, fetch, {
+    expectedAccessId: session.pages_access_id, allowWrite: true
+  }) : null;
+  const pagesFetch = pages ? guardedFetch(env, job, true, pages.fetchFn) : fetchFn;
   const assertCloudflareAccess = () => requireProviderAccess(async () => {
     await verifyCloudflareAccount({
       accessToken: cloudflareToken, accountId: job.cloudflare_account_id, fetchFn, strict: true
     });
     await verifyCloudflarePagesAccess({
-      accessToken: cloudflareToken, accountId: job.cloudflare_account_id, fetchFn, strict: true
+      accessToken: cloudflareToken, accountId: job.cloudflare_account_id, fetchFn: pagesFetch, strict: true
     });
   });
-  return { githubToken, cloudflareToken, fetchFn, assertCloudflareAccess };
+  return { githubToken, cloudflareToken, fetchFn: pagesFetch, assertCloudflareAccess, pagesMode: pages?.mode };
+}
+
+function recordProvisionedProject(env, job, projectId) {
+  const time = clock();
+  return writeActiveClaim(env, job, `status = 'pending_deployment', provisioned_at = ?, pages_project_id = ?,
+    attempts = 0, updated_at = ?, next_attempt_at = ?, error_code = NULL, lease_id = NULL, lease_until = NULL`,
+    [time, projectId, time, time]);
 }
 
 async function performClaim(env, job) {
@@ -171,7 +184,8 @@ async function performClaim(env, job) {
   await connection.assertCloudflareAccess();
   const checkpoint = job.expected_commit_sha ? { repositoryId: job.repository_id,
     branch: job.production_branch, headCommitSha: job.expected_commit_sha, projectId: job.pages_project_id } : null;
-  if (job.status === 'queued') {
+  const verifyExistingOnly = connection.pagesMode === 'read';
+  if (job.status === 'queued' && !verifyExistingOnly) {
     const provisioned = await applyWebsite(input, { ...connection, approved: {
       id: job.id, githubUserId: job.github_user_id, html: snapshot.html, files,
       allowLegacy: job.legacy_receipt_id !== null, checkpoint,
@@ -182,19 +196,25 @@ async function performClaim(env, job) {
           [repositoryId, branch, headCommitSha]);
       }
     }});
-    const time = clock();
-    await writeActiveClaim(env, job, `status = 'pending_deployment', provisioned_at = ?, pages_project_id = ?,
-      attempts = 0, updated_at = ?, next_attempt_at = ?, error_code = NULL, lease_id = NULL, lease_until = NULL`,
-      [time, provisioned.pagesProjectId, time, time]);
-    return;
+    return await recordProvisionedProject(env, job, provisioned.pagesProjectId);
   }
+  if (!checkpoint) throw new AuthorizationEnded('cloudflare_pages_create_access_required');
   const result = await verifyWebsite(input, {
-    ...connection, expectedCommitSha: checkpoint.headCommitSha, approved: { ...checkpoint, html: snapshot.html,
+    ...connection, allowFirstBuild: !verifyExistingOnly, expectedCommitSha: checkpoint.headCommitSha,
+    approved: { ...checkpoint, html: snapshot.html,
       githubUserId: job.github_user_id, htmlBytes: files?.find(file => file.path === 'index.html').bytes }
   });
+  if (result.status === 'pending-pages-project')
+    throw new AuthorizationEnded('cloudflare_pages_dashboard_setup_required');
+  if (result.status === 'pages-project-changed')
+    return await finishAttempt(env, job, 'approved_deployment_pending', { retryable: true });
   if (result.status === 'live') {
+    const time = clock();
     await writeActiveClaim(env, job, `status = 'live', updated_at = ?, error_code = NULL,
-      lease_id = NULL, lease_until = NULL`, [clock()]);
+      provisioned_at = COALESCE(provisioned_at, ?), pages_project_id = COALESCE(pages_project_id, ?),
+      lease_id = NULL, lease_until = NULL`, [time, time, checkpoint.projectId ?? result.pagesProjectId]);
+  } else if (job.status === 'queued') {
+    await recordProvisionedProject(env, job, result.pagesProjectId);
   } else {
     const code = result.status === 'unexpected-public-content' ? 'approved_html_not_served' : 'approved_deployment_pending';
     await finishAttempt(env, job, code, { retryable: true });
@@ -209,8 +229,9 @@ export async function runLaunchJob(env, id, sessionHash = null) {
   } catch (error) {
     if (error instanceof ClaimLost) return;
     if (error instanceof JobStorageUnavailable) throw error;
-    if (error instanceof AuthorizationEnded || (error instanceof ProviderRequestError && error.authorizationLost)) {
-      const code = error instanceof AuthorizationEnded
+    if (error instanceof AuthorizationEnded || error instanceof PagesAccessChanged ||
+        (error instanceof ProviderRequestError && error.authorizationLost)) {
+      const code = error instanceof PagesAccessChanged ? 'cloudflare_pages_access_changed' : error instanceof AuthorizationEnded
         ? (error.code || 'session_ended')
         : (error.code || `provider_http_${error.status || 'unknown'}`);
       await pauseJob(env, job, code);

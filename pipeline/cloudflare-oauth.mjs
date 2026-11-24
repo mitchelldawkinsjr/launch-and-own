@@ -4,6 +4,7 @@
 // one-time state consumption, and an exact registered redirect URI.
 import {randomBytes, createHash, timingSafeEqual} from "node:crypto";
 import {ProviderRequestError} from "./provider-errors.mjs";
+import {pagesRequestError, readPagesJson} from "./cloudflare-pages-errors.mjs";
 
 export const CLOUDFLARE_AUTH_URL="https://dash.cloudflare.com/oauth2/auth";
 export const CLOUDFLARE_TOKEN_URL="https://dash.cloudflare.com/oauth2/token";
@@ -119,27 +120,10 @@ export async function verifyCloudflarePagesAccess({accessToken,accountId,fetchFn
   if(typeof accountId!=="string"||!/^[0-9a-f]{32}$/i.test(accountId))throw Error("Valid Cloudflare account ID is required");
   const headers={authorization:"Bearer "+accessToken,accept:"application/json"};
   const url=API+"/accounts/"+encodeURIComponent(accountId)+"/pages/projects?per_page=1";
-  const r=await fetchFn(url,{method:"GET",headers,redirect:"manual"});
-  let providerCode="";
-  let body=null;
-  try{body=await r.clone().json()}catch{/* non-JSON */}
-  if(r.ok){
-    if(body?.success===true&&Array.isArray(body.result))return {ok:true};
-  }
-  const first=Array.isArray(body?.errors)&&body.errors[0];
-  if(first&&Number.isFinite(first.code))providerCode=String(first.code);
-  // Operator-only: status + Cloudflare error code; never log tokens or bodies.
-  console.error(JSON.stringify({
-    event:"cloudflare_pages_preflight_denied",
-    httpStatus:r.status,
-    providerCode:providerCode||null,
-    success:body?.success===false?false:body?.success===true?true:null
-  }));
-  if(strict){
-    const err=new ProviderRequestError(r);
-    err.code="cloudflare_pages_http_"+r.status+(providerCode?"_cf"+providerCode:"");
-    throw err;
-  }
-  throw Error("Cloudflare Pages access is unavailable for this account (HTTP "+r.status+
-    (providerCode?" cf"+providerCode:"")+")");
+  const r=await fetchFn(url,{method:"GET",headers,redirect:"manual",signal:AbortSignal.timeout(8000)});
+  const body=await readPagesJson(r);
+  if(r.ok&&body?.success===true&&Array.isArray(body.result))return {ok:true};
+  const error=await pagesRequestError(r,undefined,body);
+  if(strict)throw error;
+  throw Error("Cloudflare Pages access is unavailable for this account ("+error.code+")");
 }

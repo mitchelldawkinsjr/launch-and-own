@@ -416,6 +416,35 @@ test('non-base64/oversize/binary homepage refuses automatic editing or migration
   }
 });
 
+test('publication verification can read a supported large ZIP homepage by exact commit and blob', async () => {
+  const m = fake();
+  const bytes = Buffer.from('<!doctype html><html>' + 'x'.repeat(1024 * 1024 + 1) + '</html>');
+  m.f.content.size = bytes.length;
+  m.f.content.sha = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
+  m.f.content.encoding = 'none';
+  m.f.content.content = '';
+  let exactRaw = bytes;
+  const path = root + '/contents/public/index.html';
+  m.custom[path] = (url, options) => {
+    assert.equal(url.searchParams.get('ref'), head);
+    if (options.headers.accept === 'application/vnd.github.raw+json') return new Response(exactRaw);
+    assert.equal(options.headers.accept, 'application/vnd.github.object+json');
+    return m.json(m.f.content);
+  };
+  const check = () => m.source({includePublication: true, fetchFn: async (url, options) =>
+    url === 'https://' + projectName + '.pages.dev/'
+      ? new Response(bytes, {headers: {'content-type': 'text/html; charset=utf-8'}})
+      : m.base.fetchFn(url, options)
+  });
+  const result = await check();
+  assert.equal(result.publicationCheck.state, 'verified_homepage');
+  assert.equal(result.homepageGitBlobSha, m.f.content.sha);
+  assert.equal(result.homepageHtmlSha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(m.calls.length, 9);
+  exactRaw = Buffer.alloc(bytes.length, 'z');
+  await assert.rejects(check(), expectCode('current_source_requires_review'));
+});
+
 test('owner discovery record is a valid #84 current-site capability reference', async () => {
   const m = fake();
   const {sites} = await m.read();

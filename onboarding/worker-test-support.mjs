@@ -24,6 +24,7 @@ function harness({withJobs=true}={}){
   sqlite.exec(readFileSync(new URL('./migrations/0008_forms_cost_privacy_approvals.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('./migrations/0009_option_kinds_seo_redirects.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('./migrations/0010_forms_provisioning_receipts.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0011_cloudflare_pages_access.sql',import.meta.url),'utf8'));
  };
  if(withJobs)migrateJobs();
  const DB={
@@ -53,7 +54,8 @@ function harness({withJobs=true}={}){
  const calls=[];
  const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,customDomain:null,failPagesOnce:false,
   failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42,
-  updateBranch:null,updateHtml:null,updatePr:null,updateFileWrites:0,denyPullRequests:false};
+  updateBranch:null,updateHtml:null,updatePr:null,updateFileWrites:0,denyPullRequests:false,
+  denyPagesOAuth:false,denyPagesOAuthAtCreate:false,pagesAccessToken:null};
  const fetchFn=async(url,opts={})=>{
   calls.push({url,method:opts.method||'GET'});
   if(url==='https://github.com/login/oauth/access_token'){
@@ -104,6 +106,18 @@ function harness({withJobs=true}={}){
   if(acct){
     if(resourceState.cloudflareRevoked)return new Response(null,{status:403});
     return Response.json({success:true,result:{id:acct[1],name:'Demo Account'}});
+  }
+  const pagesAccount=url.match(/^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/([a-f0-9]{32})\/pages\/projects(?:[/?]|$)/);
+  if(pagesAccount){
+    const bearer=new Headers(opts.headers).get('authorization');
+    const hasPagesAccess=resourceState.pagesAccessToken&&pagesAccount[1]===accountId&&
+      bearer==='Bearer '+resourceState.pagesAccessToken;
+    if(opts.method==='POST'&&url.endsWith('/pages/projects')&&resourceState.denyPagesOAuthAtCreate&&!hasPagesAccess)
+      resourceState.denyPagesOAuth=true;
+    if(resourceState.denyPagesOAuth&&!hasPagesAccess)
+      return Response.json({success:false,errors:[{code:10000,message:'Test fixture denied Pages access'}]},{
+        status:401,headers:{'cf-ray':'0123456789abcdef-IAD'}
+      });
   }
   const pagesList=url.match(/\/accounts\/([a-f0-9]{32})\/pages\/projects(?:\?|$)/);
   if(pagesList&&(opts.method||'GET')==='GET'&&!url.includes('/pages/projects/')){

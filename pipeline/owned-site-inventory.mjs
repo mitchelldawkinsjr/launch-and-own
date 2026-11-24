@@ -1,5 +1,7 @@
 // #39 / GPT-6: read-only current managed-site discovery and source verification.
 // No launch-history dependency, D1 writes, provider mutations, or unverified live claims.
+import {createHash} from 'node:crypto';
+import {readBounded} from './bounded-body.mjs';
 import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
 import { isManagedRepositoryDescription } from './managed-site-repository.mjs';
 import { responseMatchesBytes } from './verify-site.mjs';
@@ -10,11 +12,13 @@ const PROJECT = /^(esp-[a-z0-9]+(?:-[a-z0-9]+)*)-site$/;
 const OPAQUE = /^[a-z0-9_-]{1,128}$/i;
 const GIT_SHA = /^[a-f0-9]{40}$/i;
 const NUMERIC = /^[1-9][0-9]*$/;
-// Eight provider reads leave room for token renewals and history reads on Workers Free.
+// An inventory page uses at most eight provider reads. A larger publication check
+// can use one additional pinned GitHub read for the file body.
 const PER_PAGE = 2;
-const MAX_PROVIDER_REQUESTS = 8;
+const MAX_PROVIDER_REQUESTS = 9;
 const MAX_PAGE_NUMBER = 100;
 const MAX_SOURCE_BYTES = 128 * 1024;
+const MAX_PUBLISHED_HOMEPAGE_BYTES = 2 * 1024 * 1024; // ZIP upload's per-file limit.
 
 export class ManagedSiteInventoryError extends Error {
   constructor(code) {
@@ -62,7 +66,7 @@ function reader({principal, githubAccessToken, cloudflareAccessToken,
         principal?.githubLogin !== owner.githubLogin ||
         principal?.cloudflareAccountId !== owner.cloudflareAccountId) denied('authorization_changed');
   }
-  async function get(provider, path, {allow404 = false} = {}) {
+  async function get(provider, path, {allow404 = false, mediaType, byteLimit} = {}) {
     await authorized();
     if (++requests > MAX_PROVIDER_REQUESTS) denied('provider_request_budget_exceeded');
     const token = provider === 'github' ? githubAccessToken : cloudflareAccessToken;
@@ -74,7 +78,7 @@ function reader({principal, githubAccessToken, cloudflareAccessToken,
         method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(10000),
         headers: {
           authorization: 'Bearer ' + token,
-          accept: provider === 'github' ? 'application/vnd.github+json' : 'application/json',
+          accept: provider === 'github' ? mediaType ?? 'application/vnd.github+json' : 'application/json',
           ...(provider === 'github' ? {
             'x-github-api-version': '2022-11-28', 'user-agent': 'launch-and-own'
           } : {})
@@ -92,6 +96,11 @@ function reader({principal, githubAccessToken, cloudflareAccessToken,
     if (response?.status === 429) denied(provider + '_rate_limited');
     if (response?.status === 404 && allow404) return null;
     if (!response?.ok || response.status >= 300) denied(provider + '_temporarily_unavailable');
+    if (byteLimit !== undefined) {
+      const bytes = await readBounded(response.body, byteLimit).catch(() => null);
+      await authorized();
+      return bytes;
+    }
     let data;
     try { data = await response.json(); }
     catch { denied(provider + '_unexpected_response'); }
@@ -269,24 +278,37 @@ async function sha256Bytes(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, '0')).join('');
 }
-function decodeGitHubFile(file) {
-  if (file?.type !== 'file' || file.encoding !== 'base64' ||
-      typeof file.content !== 'string' || !GIT_SHA.test(file.sha ?? '') ||
-      !Number.isSafeInteger(file.size) || file.size < 0 || file.size > MAX_SOURCE_BYTES)
+async function decodeGitHubFile(file, maxBytes, readRaw) {
+  if (file?.type !== 'file' || !GIT_SHA.test(file.sha ?? '') ||
+      !Number.isSafeInteger(file.size) || file.size < 0 || file.size > maxBytes)
+    denied('current_source_requires_review');
+  if (file.encoding === 'none' && readRaw) {
+    const bytes = await readRaw(file.size);
+    if (!bytes || bytes.byteLength !== file.size ||
+        createHash('sha1').update('blob ' + file.size + '\0').update(bytes).digest('hex') !== file.sha.toLowerCase())
+      denied('current_source_requires_review');
+    return decodeHomepage(bytes);
+  }
+  if (file.encoding !== 'base64' || typeof file.content !== 'string')
     denied('current_source_requires_review');
   const encoded = file.content.replace(/\s/g, '');
-  if (encoded.length > Math.ceil(MAX_SOURCE_BYTES / 3) * 4 + 8 ||
+  if (encoded.length > Math.ceil(maxBytes / 3) * 4 + 8 ||
       !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))
     denied('current_source_requires_review');
-  let bytes, html;
+  let bytes;
   try {
     const binary = atob(encoded);
     bytes = Uint8Array.from(binary, x => x.charCodeAt(0));
     if (bytes.length !== file.size) denied('current_source_requires_review');
-    // ignoreBOM:true preserves U+FEFF in the internal representation.
-    html = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes);
   } catch { denied('current_source_requires_review'); }
-  return {bytes, html};
+  return decodeHomepage(bytes);
+}
+
+function decodeHomepage(bytes) {
+  try {
+    // ignoreBOM:true preserves U+FEFF in the internal representation.
+    return {bytes, html: new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes)};
+  } catch { denied('current_source_requires_review'); }
 }
 
 function productionSnapshot(project) {
@@ -351,10 +373,16 @@ export async function readCurrentManagedHomepage({
   const read = await ownedReferenceReader(siteId, reference, options);
   const {owner, get, authorized} = read;
   const verified = await verifyCurrentSite(read, reference);
-  const current = await get('github', verified.root +
-    '/contents/public/index.html?ref=' + verified.baseCommitSha, {allow404: true});
+  const homepage = verified.root + '/contents/public/index.html?ref=' + verified.baseCommitSha;
+  const current = await get('github', homepage, {
+    allow404: true, mediaType: includePublication === true ? 'application/vnd.github.object+json' : undefined
+  });
   if (!current) denied('current_source_requires_review');
-  const {bytes, html} = decodeGitHubFile(current);
+  const {bytes, html} = includePublication === true
+    ? await decodeGitHubFile(current, MAX_PUBLISHED_HOMEPAGE_BYTES, size => get('github', homepage, {
+      mediaType: 'application/vnd.github.raw+json', byteLimit: size
+    }))
+    : await decodeGitHubFile(current, MAX_SOURCE_BYTES);
   const contentSha256 = await sha256Bytes(bytes); // Exact Git blob bytes, INCLUDING BOM.
   await authorized();
 
