@@ -52,7 +52,6 @@ export async function listOptionApprovals(env, jobId) {
 
 async function storeOptionApproval(env, { job, session, kind, digest, payload, time }) {
   if (!KINDS.has(kind) || !DIGEST.test(digest)) return false;
-  if (!await hasCurrentOwnerSession(env, session, time)) return false;
   const id = crypto.randomUUID();
   const body = JSON.stringify(payload);
   const result = await env.DB.prepare(
@@ -63,6 +62,11 @@ async function storeOptionApproval(env, { job, session, kind, digest, payload, t
      FROM onboarding_launch_jobs j
      WHERE j.id = ? AND j.github_user_id = ? AND j.cloudflare_account_id = ?
        AND j.status = 'live' AND j.expires_at > ?
+       AND EXISTS (
+         SELECT 1 FROM onboarding_sessions s WHERE s.id_hash = ? AND s.authorization_epoch = ?
+           AND s.github_user_id = j.github_user_id AND s.cloudflare_account_id = j.cloudflare_account_id
+           AND s.github_token_ct IS NOT NULL AND s.cloudflare_token_ct IS NOT NULL AND s.expires_at > ?
+       )
      ON CONFLICT(job_id, kind) DO UPDATE SET
        id = excluded.id,
        approval_digest = excluded.approval_digest,
@@ -72,7 +76,8 @@ async function storeOptionApproval(env, { job, session, kind, digest, payload, t
      WHERE onboarding_option_approvals.github_user_id = excluded.github_user_id
        AND onboarding_option_approvals.cloudflare_account_id = excluded.cloudflare_account_id`)
     .bind(id, kind, digest.toLowerCase(), body, time, time,
-      job.id, session.github_user_id, session.cloudflare_account_id, time).run();
+      job.id, session.github_user_id, session.cloudflare_account_id, time,
+      session.hash, session.authorization_epoch, time).run();
   return result.meta.changes === 1;
 }
 
@@ -485,6 +490,8 @@ export function createSiteOptionsRoutes({
     const rows = await listOptionApprovals(env, job.id);
     const built = buildReview(job, current, kind, form, rows);
     if (built.error) return fail(built.error);
+    if (!await hasCurrentOwnerSession(env, current, now()))
+      return fail('Reconnect to review this options request.', 401);
     const extras = Object.entries(built.fields).map(([name, value]) =>
       '<input type="hidden" name="' + escape(name) + '" value="' + escape(value) + '">').join('');
     return view('Confirm optional feature request',
@@ -549,7 +556,7 @@ export function createSiteOptionsRoutes({
       return fail('This options request changed. Reload and try again.');
     const saved = await storeOptionApproval(env, {
       job, session: current, kind, digest: built.review.approvalDigest,
-      payload: built.review, time
+      payload: built.review, time: now()
     });
     if (!saved) return fail('Could not store this options request. Reload and try again.', 409);
     return Response.redirect(baseUrl(env) + '/site-options?id=' + encodeURIComponent(job.id), 303);

@@ -75,6 +75,25 @@ test('toolkit links the options page and approvals store without provider writes
   assert.match(page, /Existing mailbox/);
 });
 
+test('a session revoked at the storage boundary cannot save an options request', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const {tenant, id} = await liveSite(h, t);
+  const {digest} = await prepareDomain(h, tenant, id);
+  const prepare = h.DB.prepare;
+  t.mock.method(h.DB, 'prepare', sql => {
+    if (sql.includes('INSERT INTO onboarding_option_approvals'))
+      h.sqlite.prepare('UPDATE onboarding_sessions SET authorization_epoch = authorization_epoch + 1').run();
+    return prepare(sql);
+  });
+
+  const result = await post(h, '/site-options-approve', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'domain', hostname: 'www.example.com', digest
+  });
+  assert.equal(result.status, 409);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_option_approvals').get().n, 0);
+});
+
 test('a bad digest does not store an options approval', async (t) => {
   const h = harness();
   t.after(() => h.sqlite.close());

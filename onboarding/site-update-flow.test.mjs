@@ -190,6 +190,10 @@ test('approval reuses freshly renewed GitHub and Cloudflare grants',async()=>{
   h.sqlite.prepare('UPDATE onboarding_sessions SET github_token_expires_at=1, cloudflare_token_expires_at=1').run();
   const afterPreview=h.calls.length;
   const pagesReads=[];
+  let dbQueries=0,rateLimitChecks=0;
+  const prepare=h.DB.prepare;
+  h.DB.prepare=sql=>{dbQueries++;return prepare(sql)};
+  h.env.ONBOARDING_LIMITER.limit=async()=>{rateLimitChecks++;return {success:true}};
   globalThis.fetch=async(url,options)=>{
    if(url===PROJECT)
     pagesReads.push({bearer:options.headers.authorization,cache:options.cache});
@@ -206,6 +210,8 @@ test('approval reuses freshly renewed GitHub and Cloudflare grants',async()=>{
    (x.url.endsWith('/oauth/access_token')||x.url.endsWith('/oauth2/token')));
   assert.equal(renewals.length,2);
   assert.notEqual(renewals[0].url,renewals[1].url);
+  const total=dbQueries+rateLimitChecks+h.calls.length-afterPreview;
+  assert(total<=50,'Both token renewals and approval used '+total+' operations');
  }finally{globalThis.fetch=originalFetch;h.sqlite.close()}
 });
 
