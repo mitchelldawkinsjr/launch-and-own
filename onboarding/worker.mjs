@@ -1,5 +1,11 @@
 import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app-oauth.mjs';
-import {githubAppCanCreateRepositories,githubAppInstallUrl} from '../pipeline/github-app-installation.mjs';
+import {
+  CLOUDFLARE_WORKERS_PAGES_APP_SLUG,
+  githubAppCanCreateRepositories,
+  githubAppInstallUrl,
+  githubAppInstalledOnUser,
+  listUserGithubAppInstallations
+} from '../pipeline/github-app-installation.mjs';
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
@@ -189,13 +195,22 @@ async function home(env,current,notice){
   const zipEnabled=zipPreviewConfigured(env);
   if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Create a simple site here, or upload one you already built. Your site will live in your own GitHub and Cloudflare accounts.':'Create a simple website that lives in your own GitHub and Cloudflare accounts.'}</p><p>Nothing is published until you review a preview and approve it.</p>${providerConnectionCards()}<small>We never ask for API tokens or passwords.</small>`);
   let appInstalled=false;
+  let pagesAppInstalled=false;
   try{
     const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    const installations=await listUserGithubAppInstallations({accessToken:githubToken});
     appInstalled=await githubAppCanCreateRepositories({
-      accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login
+      accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login,installations
     });
-  }catch{appInstalled=false;}
-  const installHtml=appInstalled?'':`<p role="alert">One more GitHub step: install the Launch &amp; Own app so it can create a private place for your website files. Signing in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install on GitHub</a></p><p>After you install it, come back here and refresh the page.</p>`;
+    pagesAppInstalled=githubAppInstalledOnUser({
+      installations,appSlug:CLOUDFLARE_WORKERS_PAGES_APP_SLUG,githubLogin:current.github_login
+    });
+  }catch{appInstalled=false;pagesAppInstalled=false;}
+  const installHtml=!appInstalled
+    ?`<p role="alert">One more GitHub step: install the Launch &amp; Own app so it can create a private place for your website files. Signing in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install Launch &amp; Own on GitHub</a></p><p>After you install it, come back here and refresh the page.</p>`
+    :!pagesAppInstalled
+      ?`<p role="alert">Cloudflare also needs its own GitHub app (Workers &amp; Pages) so it can publish from your private folder. This is separate from Launch &amp; Own.</p><p><a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Install Workers &amp; Pages on GitHub</a></p><p>Allow access to all repositories, or at least each site folder you launch. Then refresh this page.</p>`
+      :'';
   const connected=!!current.cloudflare_token_ct;
   let accountHtml='';
   if(appInstalled&&connected&&!current.cloudflare_account_id){
@@ -218,7 +233,7 @@ async function home(env,current,notice){
     '<label for="ai-theme">Color theme</label><select id="ai-theme" name="theme"><option value="ocean">Ocean</option><option value="forest">Forest</option><option value="sunset">Sunset</option><option value="graphite">Graphite</option></select>',
     '<label for="ai-email">Contact email (optional)</label><input id="ai-email" name="contactEmail" type="email" maxlength="254" placeholder="hello@example.com">'
   ].join('');
-  const ready=appInstalled&&connected&&current.cloudflare_account_id;
+  const ready=appInstalled&&pagesAppInstalled&&connected&&current.cloudflare_account_id;
   const aiEntry=ready&&aiDraftConfigured(env)?
     '<section><h2>Optional: get help with the wording</h2><p>Describe your business and we will suggest homepage text. Your business name and description are sent to the AI service; your contact email is not. Read every line before you publish. AI can get details wrong.</p>'+
     button('/draft','Draft my website copy',current.csrf,aiFields)+'</section>':'';
@@ -520,7 +535,7 @@ async function review(env,current,id){
     `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
     `<p><strong>Public website address:</strong> ${escape(website)}</p>`+
     `<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>`+
-    `<p>Cloudflare also needs permission to read that GitHub folder. <a href="https://github.com/settings/installations">Check GitHub app access</a> if publishing gets stuck.</p>`;
+    `<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> installed with access to that private folder. <a href="https://github.com/settings/installations">Review your GitHub app installs</a> if publishing gets stuck.</p>`;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open the exact preview</a> (new tab)</p>';
   let status=item.status;
   let controls='';

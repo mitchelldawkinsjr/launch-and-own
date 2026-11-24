@@ -77,6 +77,10 @@ function harness({withJobs=true}={}){
       app_slug:'launch-and-own',
       account:{login:'tester',type:'User'},
       permissions:{repository_creation:'write',contents:'write',metadata:'read',pull_requests:'write'}
+    },{
+      app_slug:'cloudflare-workers-and-pages',
+      account:{login:'tester',type:'User'},
+      permissions:{administration:'write',contents:'write',metadata:'read',pull_requests:'write'}
     }]});
   }
   if(url==='https://api.github.com/applications/Iv1.example/grant'){
