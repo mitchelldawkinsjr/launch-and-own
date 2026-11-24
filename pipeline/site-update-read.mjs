@@ -3,6 +3,7 @@
 import {planCustomer} from './plan-customer.mjs';
 import {isManagedRepositoryDescription} from './managed-site-repository.mjs';
 import {sha256} from '../onboarding/crypto.mjs';
+import {hasApprovedUpdateHead} from './propose-site-update.mjs';
 
 const SHA=/^[a-f0-9]{40}$/i, DIGEST=/^[a-f0-9]{64}$/i;
 const encode=encodeURIComponent;
@@ -55,6 +56,9 @@ export async function readApprovedUpdatePr(input,options={}) {
   if(pr?.number!==input.number||pr?.html_url!==url||pr?.base?.ref!=='main'||
       pr?.head?.ref!==branch||pr?.head?.repo?.full_name&&pr.head.repo.full_name.toLowerCase()!==(owner+'/'+repoName).toLowerCase())
     throw Error('Pull request does not match the exact approved website update');
+  if(input.headCommitSha!==undefined&&(!SHA.test(input.headCommitSha)||
+    !hasApprovedUpdateHead(pr,{repositoryId:input.repositoryId,headCommitSha:input.headCommitSha})))
+    return {status:'changed-since-review'};
   if(pr.merged_at||pr.merged===true){
     if(typeof pr.merge_commit_sha!=='string'||!SHA.test(pr.merge_commit_sha))
       throw Error('Merged pull request commit cannot be verified');

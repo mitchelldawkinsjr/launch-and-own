@@ -108,7 +108,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       value.cloudflareAccountId!==current.cloudflare_account_id||
       (kind==='review'&&value.authorizationEpoch!==current.authorization_epoch)||
       !isLaunchId(value.jobId)||!SHA.test(value.baseCommitSha||'')||
-      !DIGEST.test(value.approvedHtmlSha256||''))
+      !DIGEST.test(value.approvedHtmlSha256||'')||
+      (value.headCommitSha!==undefined&&!SHA.test(value.headCommitSha)))
       throw Error('Update review is unavailable or expired');
     return value;
   }
@@ -199,7 +200,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       '<p>The page you approved already matches what is in your private files. No change request was created. Check your live site or edit again.</p>'+
       '<p><a href="/history">Back to your launches</a></p>');
     const receipt=await encodeTicket(env,'status',current,{jobId:item.job.id,repositoryId:item.job.repository_id,
-      baseCommitSha:ticket.baseCommitSha,approvedHtmlSha256:ticket.approvedHtmlSha256,number:proposal.number});
+      baseCommitSha:ticket.baseCommitSha,approvedHtmlSha256:ticket.approvedHtmlSha256,
+      number:proposal.number,headCommitSha:proposal.headCommitSha});
     return new Response(null,{status:303,headers:{
       location:'/site-update-status?ticket='+encodeURIComponent(receipt),'cache-control':'no-store','referrer-policy':'same-origin'
     }});

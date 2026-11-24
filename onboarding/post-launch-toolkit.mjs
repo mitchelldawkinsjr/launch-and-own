@@ -240,6 +240,10 @@ export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ti
   const ladder = updatePublicationLadder({
     prStatus: pr.status, verifyStatus: verifyResult?.status
   });
+  if (pr.status === 'changed-since-review')
+    return '<p role="status">The change request version differs from your approval.</p>' +
+      (isLaunchId(jobId) ? '<p><a href="/site-update?id=' + encodeURIComponent(jobId) +
+        '">Start a fresh edit</a></p>' : '');
   if (ladder.current === 'closed')
     return '<p role="status">That change request was closed before it was published.</p>' +
       (isLaunchId(jobId) ? '<p><a href="/site-update?id=' + encodeURIComponent(jobId) + '">Start a fresh edit</a></p>' : '');

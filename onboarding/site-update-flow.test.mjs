@@ -80,6 +80,13 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   let statusHtml=await status.text();
   assert.match(statusHtml,/Open the change to publish/);
   assert.match(statusHtml,/Publish in GitHub/);
+  h.resourceState.updatePr.head.sha='2'.repeat(40);
+  status=await h.request(statusPath,{cookie:tenant.cookie});
+  assert.equal(status.status,200);
+  const changedHtml=await status.text();
+  assert.match(changedHtml,/change request version differs from your approval/);
+  assert.doesNotMatch(changedHtml,/Open the change to publish|href="https:\/\/github\.com/);
+  h.resourceState.updatePr.head.sha=UPDATE_COMMIT;
   h.resourceState.updatePr={...h.resourceState.updatePr,state:'closed'};
   status=await h.request(statusPath,{cookie:tenant.cookie});
   assert.equal(status.status,200);
