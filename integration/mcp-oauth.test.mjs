@@ -13,10 +13,11 @@ const ticketKey = 'cd'.repeat(32);
 const account = 'abcdef0123456789abcdef0123456789';
 
 function setup() {
-  const {db} = createMemoryD1(['migrations/0001_bridge.sql', 'migrations/0002_oauth.sql']);
+  const {db, sqlite} = createMemoryD1(['migrations/0001_bridge.sql', 'migrations/0002_oauth.sql',
+    'migrations/0003_oauth_rate_limits.sql']);
   const env = {BRIDGE_DEPLOYMENT: 'approved', DB: db, BRIDGE_TICKET_KEY: ticketKey};
   const call = (path, init = {}) => worker.fetch(new Request(MCP + path, init), env);
-  return {db, call};
+  return {db, sqlite, env, call};
 }
 
 const form = fields => ({
@@ -208,4 +209,134 @@ test('redirect URI policy: https or loopback http only', () => {
   assert.ok(!allowedRedirectUri('http://example.com/cb'));
   assert.ok(!allowedRedirectUri('javascript:alert(1)'));
   assert.ok(!allowedRedirectUri('https://a.example/cb#frag'));
+});
+
+test('only a valid owner-origin RPC or a non-browser client can send MCP requests', async (t) => {
+  const {sqlite, call} = setup();
+  t.after(() => sqlite.close());
+  const grant = await authorize(call);
+  const {access_token} = await (await exchange(call, grant)).json();
+  const init = origin => ({
+    method: 'POST',
+    headers: {'content-type': 'application/json', authorization: 'Bearer ' + access_token,
+      ...(origin === undefined ? {} : {origin})},
+    body: JSON.stringify({jsonrpc: '2.0', method: 'ping', id: 1})
+  });
+  for (const origin of [undefined, MCP])
+    assert.equal((await call('/mcp', init(origin))).status, 200);
+  for (const origin of ['https://unregistered.example', 'null'])
+    assert.equal((await call('/mcp', init(origin))).status, 403);
+  assert.equal((await call('/mcp/tools/call', init('https://unregistered.example'))).status, 403);
+});
+
+test('OAuth and MCP body limits apply to streamed input before parsing', async (t) => {
+  const {sqlite, call} = setup();
+  t.after(() => sqlite.close());
+  const stream = length => new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('x'.repeat(length)));
+      controller.close();
+    }
+  });
+  const oversized = await call('/register', {
+    method: 'POST', headers: {'content-type': 'application/json'},
+    body: stream(8193), duplex: 'half'
+  });
+  assert.equal(oversized.status, 413);
+  assert.equal(sqlite.prepare('SELECT count(*) AS count FROM bridge_oauth_clients').get().count, 0);
+  const wrongType = await call('/authorize', {
+    method: 'POST', headers: {origin: MCP, 'content-type': 'text/plain'}, body: 'synthetic'
+  });
+  assert.equal(wrongType.status, 415);
+  const repeated = form({client_id: 'duplicate'});
+  repeated.body += '&client_id=second';
+  assert.equal((await call('/token', repeated)).status, 400);
+  assert.equal((await call('/authorize?state=a&state=b')).status, 400);
+
+  const grant = await authorize(call);
+  const {access_token} = await (await exchange(call, grant)).json();
+  const rpc = await call('/mcp', {
+    method: 'POST', headers: {'content-type': 'application/json', authorization: 'Bearer ' + access_token},
+    body: stream(65537), duplex: 'half'
+  });
+  assert.equal(rpc.status, 413);
+  assert.equal((await rpc.json()).id, null);
+  const ticket = await call('/mcp/link/browser', {
+    method: 'POST', headers: {'content-type': 'application/json'}, body: stream(4097), duplex: 'half'
+  });
+  assert.equal(ticket.status, 413);
+});
+
+test('concurrent public registrations use a fixed D1 rate bucket and return Retry-After', async (t) => {
+  const {sqlite, call} = setup();
+  t.after(() => sqlite.close());
+  t.mock.method(Date, 'now', () => 1_700_000_000_000);
+  const submit = () => call('/register', {
+    method: 'POST', headers: {'content-type': 'application/json', 'cf-connecting-ip': '192.0.2.100'},
+    body: JSON.stringify({redirect_uris: [REDIRECT]})
+  });
+  const responses = await Promise.all(Array.from({length: 15}, submit));
+  assert.equal(responses.filter(response => response.status === 201).length, 12);
+  for (const response of responses.filter(response => response.status !== 201)) {
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get('retry-after'), '60');
+  }
+  assert.equal(sqlite.prepare('SELECT count(*) AS count FROM bridge_oauth_rate_limits').get().count, 1);
+  assert.equal(sqlite.prepare('SELECT count(*) AS count FROM bridge_oauth_clients').get().count, 12);
+});
+
+test('a failed token insert leaves the one-time code usable for a retry', async (t) => {
+  const {sqlite, call} = setup();
+  t.after(() => sqlite.close());
+  const grant = await authorize(call);
+  sqlite.exec("CREATE TRIGGER fixture_fail_refresh BEFORE INSERT ON bridge_refresh_tokens " +
+    "BEGIN SELECT RAISE(ABORT, 'test only'); END");
+  const failed = await exchange(call, grant);
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), {error: 'service_unavailable'});
+  assert.equal(sqlite.prepare('SELECT used_at FROM bridge_oauth_codes').get().used_at, null);
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM bridge_agent_tokens').get().n, 0);
+  sqlite.exec('DROP TRIGGER fixture_fail_refresh');
+
+  const outcomes = await Promise.all([exchange(call, grant), exchange(call, grant)]);
+  assert.deepEqual(outcomes.map(response => response.status).sort(), [200, 400]);
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM bridge_agent_tokens').get().n, 1);
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM bridge_refresh_tokens').get().n, 1);
+});
+
+test('refresh revocation clears the exact client grant, even with a concurrent rotation', async (t) => {
+  const {sqlite, call} = setup();
+  t.after(() => sqlite.close());
+  const grant = await authorize(call);
+  const other = await authorize(call);
+  const initial = await (await exchange(call, grant)).json();
+  const refresh = presented => call('/token', form({
+    grant_type: 'refresh_token', client_id: grant.client_id, refresh_token: presented
+  }));
+  const revoke = clientId => call('/revoke', form({
+    client_id: clientId, token: initial.refresh_token
+  }));
+  const prompt = await (await rpc(call, initial.access_token, 'tools/call',
+    {name: 'start_connect_accounts'})).json();
+  const ticket = await mintBrowserLinkTicket(ticketKey, {
+    challengeId: prompt.result.structuredContent.challenge_id, githubUserId: 42,
+    cloudflareAccountId: account, nowSeconds: Math.floor(Date.now() / 1000)
+  });
+  const link = () => call('/mcp/link/browser', {method: 'POST',
+    headers: {'content-type': 'application/json'}, body: JSON.stringify({ticket})});
+  assert.equal((await link()).status, 200);
+
+  assert.equal((await revoke(other.client_id)).status, 200);
+  assert.equal((await rpc(call, initial.access_token, 'ping')).status, 200);
+  const [rotated, revoked] = await Promise.all([refresh(initial.refresh_token), revoke(grant.client_id)]);
+  assert.equal(revoked.status, 200);
+  if (rotated.status === 200) {
+    const successor = await rotated.json();
+    assert.equal((await rpc(call, successor.access_token, 'ping')).status, 401);
+    assert.equal((await refresh(successor.refresh_token)).status, 400);
+  } else assert.equal(rotated.status, 400);
+  assert.equal((await rpc(call, initial.access_token, 'ping')).status, 401);
+  assert.equal((await refresh(initial.refresh_token)).status, 400);
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM bridge_owner_links').get().n, 0);
+  assert.equal((await link()).status, 400);
 });

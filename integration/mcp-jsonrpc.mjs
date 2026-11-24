@@ -7,6 +7,7 @@ import {handleBridgeRequest} from './bridge-transport.mjs';
 import {RESOURCE_METADATA_PATH} from './protected-resource.mjs';
 import {MCP_ORIGIN} from './oauth-server.mjs';
 import {MCP_ICON_PATH} from './mcp-icon.mjs';
+import {MAX_MCP_BODY_BYTES, readBridgeJson} from './request-body.mjs';
 
 const VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
@@ -101,8 +102,18 @@ const unauthorized = () => securityJson({error: 'unauthenticated'}, 401, {
 });
 
 const rpcResult = (id, result) => securityJson({jsonrpc: '2.0', id, result});
-const rpcError = (id, code, message) =>
-  securityJson({jsonrpc: '2.0', id: id ?? null, error: {code, message}});
+const rpcError = (id, code, message, status = 200) =>
+  securityJson({jsonrpc: '2.0', id: id ?? null, error: {code, message}}, status);
+
+function validRequestId(id) {
+  return id === undefined || id === null ||
+    (typeof id === 'string' && id.length <= 128) || Number.isSafeInteger(id);
+}
+
+export function acceptsMcpOrigin(request, resourceUri) {
+  const origin = request.headers.get('origin');
+  return origin === null || origin === new URL(resourceUri).origin;
+}
 
 function bearer(request) {
   const match = /^Bearer ([A-Za-z0-9_-]{1,256})$/.exec(request.headers.get('authorization') || '');
@@ -110,6 +121,8 @@ function bearer(request) {
 }
 
 export async function handleMcp(host, request) {
+  if (!acceptsMcpOrigin(request, host.resourceUri))
+    return securityJson({error: 'forbidden_origin'}, 403);
   if (request.method !== 'POST')
     return securityJson({error: 'method_not_allowed'}, 405, {allow: 'POST'});
   const token = bearer(request);
@@ -117,10 +130,15 @@ export async function handleMcp(host, request) {
     return unauthorized();
 
   let msg;
-  try { msg = await request.json(); } catch { return rpcError(null, -32700, 'Parse error'); }
+  try { msg = await readBridgeJson(request, MAX_MCP_BODY_BYTES); }
+  catch (error) {
+    if (error.status === 413) return rpcError(null, -32600, 'Request body too large', 413);
+    if (error.status === 415) return rpcError(null, -32600, 'Expected application/json', 415);
+    return rpcError(null, -32700, 'Parse error');
+  }
   if (!msg || typeof msg !== 'object' || Array.isArray(msg) || msg.jsonrpc !== '2.0' ||
-      typeof msg.method !== 'string')
-    return rpcError(msg?.id, -32600, 'Invalid Request');
+      typeof msg.method !== 'string' || !validRequestId(msg.id))
+    return rpcError(validRequestId(msg?.id) ? msg?.id : null, -32600, 'Invalid Request');
   // Notifications (no id) and client responses get no body.
   if (msg.id === undefined) return securityJson(null, 202);
 
@@ -148,7 +166,7 @@ export async function handleMcp(host, request) {
     });
     if (result.status === 401) return unauthorized();
     if (result.body?.error === 'unknown_tool')
-      return rpcError(msg.id, -32602, 'Unknown tool: ' + params.name);
+      return rpcError(msg.id, -32602, 'Unknown tool');
     if (result.status >= 400) {
       const code = result.body?.error || 'error';
       return rpcResult(msg.id, {isError: true, content: [{type: 'text',

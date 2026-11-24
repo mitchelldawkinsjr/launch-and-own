@@ -1,14 +1,14 @@
 /**
  * Isolated Fetch adapter for the shared MCP bridge.
  *
- * Undeployed scaffold: production rollout requires explicit Domain approval,
- * real OAuth resource registration, and D1-backed stores. This module does
- * not edit onboarding/worker.mjs and performs no provider I/O.
+ * The hosted bridge requires explicit deployment approval and persistent
+ * authorization state. Test hosts can be injected by the runner.
  */
-import {handleBridgeRequest, createBridgeHost} from './bridge-transport.mjs';
+import {handleBridgeRequest} from './bridge-transport.mjs';
 import {createHostFromEnv} from './create-host-from-env.mjs';
 import {RESOURCE_METADATA_PATH} from './protected-resource.mjs';
-import {handleMcp} from './mcp-jsonrpc.mjs';
+import {acceptsMcpOrigin, handleMcp} from './mcp-jsonrpc.mjs';
+import {MAX_BRIDGE_TICKET_BODY_BYTES, MAX_MCP_BODY_BYTES, readBridgeJson} from './request-body.mjs';
 import {handleOAuth} from './oauth-server.mjs';
 import {MCP_ICON_PATH, MCP_ICON_PNG_BASE64} from './mcp-icon.mjs';
 
@@ -37,15 +37,14 @@ function toResponse(result) {
   });
 }
 
-async function readBody(request) {
-  if (request.method === 'GET' || request.method === 'HEAD') return undefined;
-  const type = request.headers.get('content-type') || '';
-  if (!type.includes('application/json')) return undefined;
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
+const bodyLimits = new Map([
+  ['/mcp/tools/call', MAX_MCP_BODY_BYTES],
+  ['/mcp/link/browser', MAX_BRIDGE_TICKET_BODY_BYTES],
+  ['/mcp/internal/draft', MAX_BRIDGE_TICKET_BODY_BYTES]
+]);
+
+function bridgeError(status, error) {
+  return toResponse({status, headers: {'content-type': 'application/json'}, body: {error}});
 }
 
 /**
@@ -53,13 +52,17 @@ async function readBody(request) {
  */
 export function createBridgeFetch(host) {
   return async function fetch(request) {
-    const body = await readBody(request);
-    if (body === null)
-      return toResponse({
-        status: 400,
-        headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
-        body: {error: 'invalid_arguments'}
-      });
+    const path = new URL(request.url).pathname;
+    const limit = bodyLimits.get(path);
+    let body;
+    if (request.method === 'POST' && limit) {
+      if (!acceptsMcpOrigin(request, host.resourceUri)) return bridgeError(403, 'forbidden_origin');
+      try { body = await readBridgeJson(request, limit); }
+      catch (error) {
+        return bridgeError(error.status ?? 400, error.status === 413
+          ? 'request_too_large' : 'invalid_arguments');
+      }
+    }
     const headers = Object.fromEntries(request.headers.entries());
     return toResponse(await handleBridgeRequest(host, {
       method: request.method,
@@ -91,27 +94,22 @@ export default {
         headers: {'content-type': 'image/png', 'cache-control': 'public, max-age=86400'}
       }));
     }
-    // Test harness may inject a host. Approved production uses D1 + ticket key.
-    let host = env.__bridgeHost;
-    if (!host) {
-      try {
-        host = createHostFromEnv(env);
-      } catch {
-        host = createBridgeHost({
-          nowSeconds: () => Math.floor(Date.now() / 1000)
+    try {
+      const host = env.__bridgeHost ?? createHostFromEnv(env);
+      if (url.pathname === '/mcp') return secure(await handleMcp(host, request));
+      if (env.DB) {
+        const oauth = await handleOAuth(request, {
+          db: env.DB, tokens: host.tokens, nowSeconds: host.nowSeconds(),
+          rateKey: host.bridgeTicketKey
         });
+        if (oauth) return secure(oauth);
       }
+      // RFC 9728 path-suffixed discovery for the /mcp resource.
+      if (url.pathname === RESOURCE_METADATA_PATH + '/mcp')
+        request = new Request(new URL(RESOURCE_METADATA_PATH, url), request);
+      return await createBridgeFetch(host)(request);
+    } catch {
+      return bridgeError(503, 'service_unavailable');
     }
-    if (url.pathname === '/mcp') return secure(await handleMcp(host, request));
-    if (env.DB) {
-      const oauth = await handleOAuth(request, {
-        db: env.DB, tokens: host.tokens, nowSeconds: host.nowSeconds()
-      });
-      if (oauth) return secure(oauth);
-    }
-    // RFC 9728 path-suffixed discovery used by MCP clients for resource /mcp.
-    if (url.pathname === RESOURCE_METADATA_PATH + '/mcp')
-      request = new Request(new URL(RESOURCE_METADATA_PATH, url), request);
-    return createBridgeFetch(host)(request);
   }
 };

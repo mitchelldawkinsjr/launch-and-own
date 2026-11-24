@@ -20,12 +20,10 @@ export function createMemoryD1(migrationFiles = ['migrations/0001_bridge.sql']) 
     prepare(sql) {
       return {
         bind(...args) {
-          const runSync = () => sqlite.prepare(sql).run(...args);
+          const execute = () => ({meta: {changes: sqlite.prepare(sql).run(...args).changes}});
           return {
-            async run() {
-              const result = runSync();
-              return {meta: {changes: result.changes}};
-            },
+            execute,
+            async run() { return execute(); },
             async first() {
               return sqlite.prepare(sql).get(...args) || null;
             },
@@ -39,8 +37,7 @@ export function createMemoryD1(migrationFiles = ['migrations/0001_bridge.sql']) 
     async batch(statements) {
       sqlite.exec('BEGIN');
       try {
-        const out = [];
-        for (const stmt of statements) out.push(await stmt);
+        const out = statements.map(statement => statement.execute());
         sqlite.exec('COMMIT');
         return out;
       } catch (error) {

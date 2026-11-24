@@ -17,18 +17,25 @@ export class D1AgentTokenStore {
     this.db = db;
   }
 
-  async issue({subject, clientId, nowSeconds, ttlSeconds = 3600, audience = BRIDGE_AUDIENCE}) {
+  prepareIssue({subject, clientId, nowSeconds, ttlSeconds = 3600, audience = BRIDGE_AUDIENCE},
+    {afterClaim = false} = {}) {
     if (typeof subject !== 'string' || typeof clientId !== 'string' ||
         !Number.isSafeInteger(nowSeconds) || audience !== BRIDGE_AUDIENCE)
       deny('unauthenticated');
     const token = 'agt_' + randomBytes(24).toString('hex');
     const expiresAt = nowSeconds + ttlSeconds;
-    await d1Run(this.db, `
+    const statement = this.db.prepare(`
       INSERT INTO bridge_agent_tokens (
         token_hash, subject, client_id, audience, expires_at, revoked_at
-      ) VALUES (?, ?, ?, ?, ?, NULL)`,
-    hashToken(token), subject, clientId, audience, expiresAt);
-    return token;
+      ) SELECT ?, ?, ?, ?, ?, NULL ${afterClaim ? 'WHERE changes() = 1' : ''}`)
+      .bind(hashToken(token), subject, clientId, audience, expiresAt);
+    return {token, statement};
+  }
+
+  async issue(options) {
+    const issue = this.prepareIssue(options);
+    await issue.statement.run();
+    return issue.token;
   }
 
   async lookup(token, {nowSeconds, expectedAudience = BRIDGE_AUDIENCE}) {
