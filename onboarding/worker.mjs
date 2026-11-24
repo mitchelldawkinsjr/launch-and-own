@@ -1,6 +1,10 @@
 import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app-oauth.mjs';
-import {githubAppCanCreateRepositories,githubAppInstallUrl} from '../pipeline/github-app-installation.mjs';
-import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount} from '../pipeline/cloudflare-oauth.mjs';
+import {
+  CLOUDFLARE_WORKERS_PAGES_APP_SLUG,
+  githubAppCanCreateRepositories,
+  githubAppInstallUrl
+} from '../pipeline/github-app-installation.mjs';
+import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,verifyCloudflarePagesAccess} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
 import {normalizeSite,renderSite} from '../site/render-site.mjs';
@@ -195,7 +199,11 @@ async function home(env,current,notice){
       accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login
     });
   }catch{appInstalled=false;}
-  const installHtml=appInstalled?'':`<p role="alert">One more GitHub step: install the Launch &amp; Own app so it can create a private place for your website files. Signing in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install on GitHub</a></p><p>After you install it, come back here and refresh the page.</p>`;
+  // Launch & Own's user token cannot see Cloudflare's separate app install, so this is guidance only.
+  const pagesHint=appInstalled
+    ?`<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> on this account (separate from Launch &amp; Own). Install once with access to each site folder, then continue here.</p>`
+    :'';
+  const installHtml=appInstalled?'':`<p role="alert">One more GitHub step: install the Launch &amp; Own app so it can create a private place for your website files. Signing in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install Launch &amp; Own on GitHub</a></p><p>After you install it, come back here and refresh the page.</p>`;
   const connected=!!current.cloudflare_token_ct;
   let accountHtml='';
   if(appInstalled&&connected&&!current.cloudflare_account_id){
@@ -235,7 +243,7 @@ async function home(env,current,notice){
   const cloudflareLine=connected
     ?(current.cloudflare_account_id?'Cloudflare connected · hosting account selected':'Cloudflare connected · choose your hosting account next')
     :'Cloudflare not connected yet';
-  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}${providerConnectionCards({githubStatus:'connected',githubLogin:current.github_login,githubAppInstalled:appInstalled,cloudflareStatus:connected?'connected':appInstalled?'next':'later',cloudflareAccountSelected:Boolean(current.cloudflare_account_id)})}<p>${cloudflareLine}</p>${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
+  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}${pagesHint}${providerConnectionCards({githubStatus:'connected',githubLogin:current.github_login,githubAppInstalled:appInstalled,cloudflareStatus:connected?'connected':appInstalled?'next':'later',cloudflareAccountSelected:Boolean(current.cloudflare_account_id)})}<p>${cloudflareLine}</p>${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
 }
 
 async function toolkit(env,current,request){
@@ -269,6 +277,7 @@ async function selectAccount(request,env,current){
   const accountId=data.get('accountId')?.toLowerCase();
   const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   await verifyCloudflareAccount({accessToken:token,accountId});
+  await verifyCloudflarePagesAccess({accessToken:token,accountId});
   const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET
     authorization_epoch=authorization_epoch+(cloudflare_account_id IS NOT ?), cloudflare_account_id=?
     WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
@@ -520,7 +529,7 @@ async function review(env,current,id){
     `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
     `<p><strong>Public website address:</strong> ${escape(website)}</p>`+
     `<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>`+
-    `<p>Cloudflare also needs permission to read that GitHub folder. <a href="https://github.com/settings/installations">Check GitHub app access</a> if publishing gets stuck.</p>`;
+    `<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> installed with access to that private folder. <a href="https://github.com/settings/installations">Review your GitHub app installs</a> if publishing gets stuck.</p>`;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open the exact preview</a> (new tab)</p>';
   let status=item.status;
   let controls='';
@@ -547,6 +556,8 @@ async function review(env,current,id){
     }
     if(['failed','needs_reauthorization'].includes(status)){
       output='<p>This launch paused. <a href="/history">Open your launches</a> to reconnect and continue when you are ready.</p>';
+      if(typeof item.job_error==='string'&&item.job_error.startsWith('cloudflare_pages_http_401'))
+        output+='<p role="alert">Cloudflare blocked Pages access for this grant. In Cloudflare open <strong>My Profile → Connected Applications</strong>, revoke Launch &amp; Own, then <a href="/connect/cloudflare">reconnect Cloudflare</a>, pick the same account, and continue again. Also confirm that account allows public OAuth apps under Members → Settings.</p>';
     }
     if(item.job_error)output+=`<p>Last result code: <code>${escape(item.job_error)}</code></p>`;
     if(item.attempts>0&&['queued','pending_deployment'].includes(status)&&item.next_attempt_at>now()){

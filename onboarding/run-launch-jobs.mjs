@@ -1,5 +1,5 @@
 import { verifyProviderConnections } from '../pipeline/authorization-checks.mjs';
-import { verifyCloudflareAccount } from '../pipeline/cloudflare-oauth.mjs';
+import { verifyCloudflareAccount, verifyCloudflarePagesAccess } from '../pipeline/cloudflare-oauth.mjs';
 import { applyWebsite } from '../pipeline/provision-site.mjs';
 import { ProviderRequestError } from '../pipeline/provider-errors.mjs';
 import { verifyWebsite } from '../pipeline/verify-site.mjs';
@@ -136,9 +136,14 @@ async function verifiedConnections(env, job, input) {
     githubAccessToken: githubToken, cloudflareAccessToken: cloudflareToken,
     expectedGitHubUserId: job.github_user_id, fetchFn
   }));
-  const assertCloudflareAccess = () => requireProviderAccess(() => verifyCloudflareAccount({
-    accessToken: cloudflareToken, accountId: job.cloudflare_account_id, fetchFn, strict: true
-  }));
+  const assertCloudflareAccess = () => requireProviderAccess(async () => {
+    await verifyCloudflareAccount({
+      accessToken: cloudflareToken, accountId: job.cloudflare_account_id, fetchFn, strict: true
+    });
+    await verifyCloudflarePagesAccess({
+      accessToken: cloudflareToken, accountId: job.cloudflare_account_id, fetchFn, strict: true
+    });
+  });
   return { githubToken, cloudflareToken, fetchFn, assertCloudflareAccess };
 }
 
@@ -162,6 +167,8 @@ async function performClaim(env, job) {
     }
   }
   const connection = await verifiedConnections(env, job, input);
+  // Fail closed on Pages API auth before any further GitHub/Pages mutations.
+  await connection.assertCloudflareAccess();
   const checkpoint = job.expected_commit_sha ? { repositoryId: job.repository_id,
     branch: job.production_branch, headCommitSha: job.expected_commit_sha, projectId: job.pages_project_id } : null;
   if (job.status === 'queued') {
