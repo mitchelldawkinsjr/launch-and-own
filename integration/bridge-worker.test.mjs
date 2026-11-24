@@ -17,6 +17,9 @@ test('undeployed Worker refuses traffic with not_deployed', async () => {
   }), {BRIDGE_DEPLOYMENT: 'not_approved'});
   assert.equal(res.status, 503);
   assert.equal((await res.json()).error, 'not_deployed');
+  const icon = await worker.fetch(new Request(ORIGIN + '/launch-and-own-icon.png'),
+    {BRIDGE_DEPLOYMENT: 'not_approved'});
+  assert.equal(icon.status, 503);
 });
 
 test('approved Fetch adapter serves metadata and authenticated tool calls', async () => {

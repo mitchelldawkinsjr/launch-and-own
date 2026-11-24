@@ -77,3 +77,15 @@ test('browser install guidance truthfully documents uploaded MCP ZIP Desktop onl
   assert.match(instructions,/ChatGPT desktop app/);
   assert.match(instructions,/https:\/\/onboard\.360web\.cloud/);
 });
+
+test('plugin branding references the packaged 128x128 PNG',()=>{
+  const iconRel = './assets/launch-and-own-icon.png';
+  const png = readFileSync(new URL(iconRel, import.meta.url));
+  assert.deepEqual(png,readFileSync(new URL('../../branding/launch-and-own-icon.png',import.meta.url)));
+  assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+  assert.equal(png.readUInt32BE(16),128);
+  assert.equal(png.readUInt32BE(20),128);
+  const presentation = plugin.extensions['com.openai'].interface;
+  assert.equal(presentation.logo,iconRel);
+  assert.equal(presentation.composerIcon,iconRel);
+});

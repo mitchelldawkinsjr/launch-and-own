@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash, randomBytes} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import worker from './bridge-worker.mjs';
 import {createMemoryD1} from './d1-support.mjs';
 import {mintBrowserLinkTicket} from './browser-link-ticket.mjs';
@@ -98,10 +99,23 @@ test('OAuth + MCP flow: unlinked session, browser link, then owner-scoped tools'
   assert.match(init.result.serverInfo.description, /Build and launch websites you own/);
   assert.equal(init.result.serverInfo.websiteUrl, 'https://onboard.360web.cloud');
   assert.deepEqual(init.result.serverInfo.icons, [{
-    src: 'https://onboard.360web.cloud/logo.png',
+    src: MCP + '/launch-and-own-icon.png',
     mimeType: 'image/png',
-    sizes: ['256x256']
+    sizes: ['128x128']
   }]);
+  // The advertised PNG is public and loads from the MCP origin without a bearer.
+  const iconPath = new URL(init.result.serverInfo.icons[0].src).pathname;
+  const icon = await call(iconPath);
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get('content-type'), 'image/png');
+  assert.equal(icon.headers.get('x-content-type-options'), 'nosniff');
+  assert.deepEqual(Buffer.from(await icon.arrayBuffer()),
+    readFileSync(new URL('../branding/launch-and-own-icon.png', import.meta.url)));
+  const head = await call(iconPath, {method: 'HEAD'});
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get('content-type'), 'image/png');
+  assert.equal((await head.arrayBuffer()).byteLength, 0);
+
   const note = await call('/mcp', {method: 'POST',
     headers: {'content-type': 'application/json', authorization: 'Bearer ' + access_token},
     body: JSON.stringify({jsonrpc: '2.0', method: 'notifications/initialized'})});

@@ -10,6 +10,9 @@ import {createHostFromEnv} from './create-host-from-env.mjs';
 import {RESOURCE_METADATA_PATH} from './protected-resource.mjs';
 import {handleMcp} from './mcp-jsonrpc.mjs';
 import {handleOAuth} from './oauth-server.mjs';
+import {MCP_ICON_PATH, MCP_ICON_PNG_BASE64} from './mcp-icon.mjs';
+
+const mcpIcon = Uint8Array.from(atob(MCP_ICON_PNG_BASE64), char => char.charCodeAt(0));
 
 const securityHeaders = Object.freeze({
   'cache-control': 'no-store',
@@ -82,6 +85,12 @@ export default {
         headers: {...securityHeaders, 'content-type': 'application/json'}
       });
     }
+    const url = new URL(request.url);
+    if (url.pathname === MCP_ICON_PATH && (request.method === 'GET' || request.method === 'HEAD')) {
+      return secure(new Response(request.method === 'HEAD' ? null : mcpIcon, {
+        headers: {'content-type': 'image/png', 'cache-control': 'public, max-age=86400'}
+      }));
+    }
     // Test harness may inject a host. Approved production uses D1 + ticket key.
     let host = env.__bridgeHost;
     if (!host) {
@@ -93,7 +102,6 @@ export default {
         });
       }
     }
-    const url = new URL(request.url);
     if (url.pathname === '/mcp') return secure(await handleMcp(host, request));
     if (env.DB) {
       const oauth = await handleOAuth(request, {
@@ -107,5 +115,3 @@ export default {
     return createBridgeFetch(host)(request);
   }
 };
-
-export {RESOURCE_METADATA_PATH};

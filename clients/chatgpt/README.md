@@ -27,7 +27,7 @@ The ChatGPT **Add custom MCP server** form currently accepts an optional user-en
 
 > Build and launch websites you own using ChatGPT, GitHub, and Cloudflare. Create a website draft, preview the exact result, approve publication securely in your browser, and verify when your site is live.
 
-The shared bridge also advertises that exact text in `initialize.serverInfo.description`, plus `websiteUrl` and a **public fallback logo** at `https://onboard.360web.cloud/logo.png`. Its `icons` metadata follows MCP protocol version 2025-11-25. The owner may upload a custom square **Launch & Own** icon in ChatGPT's app settings if the UI supports it. Clients are not guaranteed to auto-populate the description or icon from server metadata. Existing custom app settings may need an explicit edit, reconnect, or refresh and Domain-owned Worker deployment for updated server metadata.
+The bridge source supplies that text in `initialize.serverInfo.description` and advertises the 128×128 PNG at `https://mcp.360web.cloud/launch-and-own-icon.png` on its own origin. The hosted metadata needs the matching Domain-approved bridge deployment. The package includes the same icon in `assets/launch-and-own-icon.png`. The owner can upload this PNG directly in ChatGPT's app settings where supported. Existing custom apps may need an edit or reconnect to pick up the metadata.
 
 **Release note:** this source-only enhancement does not change the ten MCP tools, authentication, tenant permissions or launch approval. Neither an app icon nor a description grants production access.
 
@@ -38,7 +38,7 @@ The shared bridge also advertises that exact text in `initialize.serverInfo.desc
 - `skills/launch-and-own-connected/SKILL.md` — connected tool orchestration, human browser approval, honest verification and ZIP fallback.
 - `chatgpt-plugin.test.mjs` — manifest, contract, OAuth, workflow and release-truth regression tests. Run `node --test clients/chatgpt/chatgpt-plugin.test.mjs`.
 
-The release source is `clients/chatgpt/` as a single plugin directory. It may be zipped with that folder as the only enclosing directory. **Exclude README and test file** from the uploaded archive (they are developer support, not plugin runtime components).
+The release source is `clients/chatgpt/` as a single plugin directory, including `assets/`. It may be zipped with that folder as the only enclosing directory. **Exclude README and test file** from the uploaded archive (they are developer support, not plugin runtime components).
 
 ## Supported MCP operations
 
@@ -48,7 +48,7 @@ Initial site generation is the **one-page structured generator**. `prepare_site_
 
 ## Private installation and QA
 
-1. Create a **private** ChatGPT plugin from a ZIP of `plugin.json`, `mcp.json` and the connected skill. The root manifest name is `launch-and-own`.
+1. Create a **private** ChatGPT plugin from a ZIP of `plugin.json`, `mcp.json`, `assets/`, and the connected skill. The root manifest name is `launch-and-own`.
 2. In ChatGPT, open the private plugin and connect to `https://mcp.360web.cloud/mcp`. Complete the browser OAuth PKCE consent flow for the MCP agent session; never enter API keys in chat. DCR registration uses the server's `/register` endpoint with the client-provided HTTPS callback.
 3. With the connected plugin selected, call `get_connection_status`; while unlinked, `start_connect_accounts` returns a trusted `https://onboard.360web.cloud/agent-link?challenge_id=…` browser action. Open it while signed into **both** GitHub and the selected Cloudflare account, review, and confirm the link.
 4. Prepare a **fictional** one-page test site with `prepare_site`; obtain the exact preview fingerprint and trusted browser review URL. Do not approve until verifying the site, target private GitHub repository and Cloudflare Pages details in that browser.
