@@ -10,7 +10,7 @@
 import {DRAFT_ID, draftForOnboarding, draftPublicationRecord} from './draft-handoff.mjs';
 import {
   BRIDGE_AUDIENCE, BROWSER_ORIGIN, BridgeContractError,
-  assertSafeBrowserHandoff, assertTrustedPrincipal, publicationStatus, validateToolCall
+  assertSafeBrowserHandoff, publicationStatus, validateToolCall
 } from './tool-contract.mjs';
 import {
   MemoryOwnerLinkStore, linkedOwnerFromStore
@@ -197,7 +197,7 @@ async function dispatchToolCall(host, request) {
       before?.cloudflareAccountId !== after?.cloudflareAccountId ||
       before?.authorizationEpoch !== after?.authorizationEpoch ||
       before?.reauthorized !== after?.reauthorized)
-    deny('needs_reauthorization');
+    deny('not_found');
   return result;
 }
 
