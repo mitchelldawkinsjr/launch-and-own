@@ -84,6 +84,14 @@ test("invalid token payload fails closed",async()=>{
   fetchFn:async()=>Response.json({access_token:"",token_type:"Bearer"})
  }),/invalid/);
 });
+test("token responses that omit Pages scopes are rejected when scope is present",async()=>{
+ const {session}=beginCloudflareOAuth(client,random);
+ await assert.rejects(completeCloudflareOAuth({
+  clientId:client.clientId,redirectUri:client.redirectUri,code:"code",
+  receivedState:session.state,expectedState:session.state,codeVerifier:session.codeVerifier,
+  fetchFn:async()=>Response.json({access_token:"private",token_type:"Bearer",scope:"account-settings.read"})
+ }),/Pages permission/);
+});
 test("selected Cloudflare account is verified against the token and returned identity",async()=>{
  const id="0123456789abcdef0123456789abcdef";
  let calls=0;

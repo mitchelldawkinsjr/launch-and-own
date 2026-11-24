@@ -71,6 +71,14 @@ export async function completeCloudflareOAuth({
   const data=await r.json();
   if(typeof data.access_token!=="string"||!data.access_token||data.token_type?.toLowerCase()!=="bearer")
     throw Error("Cloudflare OAuth token response was invalid");
+  // When Cloudflare returns a scope string, require Pages read/write for publishing.
+  if(typeof data.scope==="string"&&data.scope.trim()){
+    const granted=new Set(data.scope.trim().split(/\s+/));
+    for(const need of ["page.read","page.write"]){
+      if(!granted.has(need))
+        throw Error("Cloudflare authorization is missing Pages permission; reconnect and allow Pages Read and Pages Write");
+    }
+  }
   // SECRET: Only the backend receives this. Encrypt at rest if persisted.
   return data;
 }
