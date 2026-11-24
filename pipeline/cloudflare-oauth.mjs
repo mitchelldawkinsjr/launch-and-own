@@ -100,8 +100,26 @@ export async function verifyCloudflareAccount({accessToken,accountId,fetchFn=fet
   }
   if(strict){
     const err=new ProviderRequestError(r);
-    err.code="cloudflare_http_"+r.status;
+    err.code="cloudflare_account_http_"+r.status;
     throw err;
   }
   throw Error("Cannot access selected Cloudflare account (HTTP "+r.status+")");
+}
+/** Confirm the grant can call the account Pages API (read). Call after account identity checks. */
+export async function verifyCloudflarePagesAccess({accessToken,accountId,fetchFn=fetch,strict=false}) {
+  nonempty(accessToken,"accessToken");
+  if(typeof accountId!=="string"||!/^[0-9a-f]{32}$/i.test(accountId))throw Error("Valid Cloudflare account ID is required");
+  const headers={authorization:"Bearer "+accessToken,accept:"application/json"};
+  const url=API+"/accounts/"+encodeURIComponent(accountId)+"/pages/projects?per_page=1";
+  const r=await fetchFn(url,{method:"GET",headers,redirect:"manual"});
+  if(r.ok){
+    const data=await r.json();
+    if(data.success===true&&Array.isArray(data.result))return {ok:true};
+  }
+  if(strict){
+    const err=new ProviderRequestError(r);
+    err.code="cloudflare_pages_http_"+r.status;
+    throw err;
+  }
+  throw Error("Cloudflare Pages access is unavailable for this account (HTTP "+r.status+")");
 }

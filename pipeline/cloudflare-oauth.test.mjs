@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,CLOUDFLARE_AUTH_URL,CLOUDFLARE_TOKEN_URL} from "./cloudflare-oauth.mjs";
+import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,verifyCloudflarePagesAccess,CLOUDFLARE_AUTH_URL,CLOUDFLARE_TOKEN_URL} from "./cloudflare-oauth.mjs";
 const client={clientId:"client-public-id",redirectUri:"https://onboarding.example.com/oauth/cloudflare/callback",scopes:["workers-platform.read","workers-platform.write"]};
 const random=(length)=>Buffer.alloc(length,0x13);
 test("OAuth URL contains correct Cloudflare endpoint, state and S256 challenge but never verifier",()=>{
@@ -125,5 +125,20 @@ test("list fallback does not accept a different Cloudflare account",async()=>{
   if(url.endsWith("/accounts/"+id))
     return new Response(JSON.stringify({success:false}),{status:401});
   return Response.json({success:true,result:[{id:"f".repeat(32),name:"Other"}]});
- }}),/cloudflare_http_401|Provider request failed/);
+ }}),/cloudflare_account_http_401|Provider request failed/);
+});
+test("Pages list preflight confirms Pages API access on the selected account",async()=>{
+ const id="0123456789abcdef0123456789abcdef";
+ const result=await verifyCloudflarePagesAccess({accessToken:"private-token",accountId:id,fetchFn:async(url,opts)=>{
+  assert.equal(url,"https://api.cloudflare.com/client/v4/accounts/"+id+"/pages/projects?per_page=1");
+  assert.equal(opts.headers.authorization,"Bearer private-token");
+  return Response.json({success:true,result:[]});
+ }});
+ assert.deepEqual(result,{ok:true});
+});
+test("Pages list denial is a distinct Pages authorization failure",async()=>{
+ const id="0123456789abcdef0123456789abcdef";
+ await assert.rejects(verifyCloudflarePagesAccess({accessToken:"private-token",accountId:id,strict:true,
+   fetchFn:async()=>new Response(JSON.stringify({success:false}),{status:401})
+ }),error=>error instanceof Error&&error.code==="cloudflare_pages_http_401");
 });

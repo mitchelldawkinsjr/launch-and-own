@@ -36,7 +36,8 @@ function requestFactory({githubToken,cloudflareToken,fetchFn=fetch,strict=false}
       if(strict){
         const err=new ProviderRequestError(resp,{conflictCanRetry:method==="PUT"||(github&&method==="POST")||resp.status===409});
         const need=github?resp.headers.get("x-accepted-github-permissions"):null;
-        err.code=service+"_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/;/g,"_or_").replace(/[^a-z0-9_]+/g,"_").replace(/^_|_$/g,"").slice(0,64)):"");
+        const kind=github?"github":path.includes("/pages/")?"cloudflare_pages":"cloudflare";
+        err.code=kind+"_http_"+resp.status+(need?("_need_"+need.toLowerCase().replace(/;/g,"_or_").replace(/[^a-z0-9_]+/g,"_").replace(/^_|_$/g,"").slice(0,64)):"");
         throw err;
       }
       throw Error(service+" "+method+" "+path+" failed (HTTP "+resp.status+")");

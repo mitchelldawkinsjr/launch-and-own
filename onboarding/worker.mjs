@@ -4,7 +4,7 @@ import {
   githubAppCanCreateRepositories,
   githubAppInstallUrl
 } from '../pipeline/github-app-installation.mjs';
-import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount} from '../pipeline/cloudflare-oauth.mjs';
+import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,verifyCloudflarePagesAccess} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
 import {normalizeSite,renderSite} from '../site/render-site.mjs';
@@ -277,6 +277,7 @@ async function selectAccount(request,env,current){
   const accountId=data.get('accountId')?.toLowerCase();
   const token=await getFreshAccessToken({env,session:current,provider:'cloudflare'});
   await verifyCloudflareAccount({accessToken:token,accountId});
+  await verifyCloudflarePagesAccess({accessToken:token,accountId});
   const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET
     authorization_epoch=authorization_epoch+(cloudflare_account_id IS NOT ?), cloudflare_account_id=?
     WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
