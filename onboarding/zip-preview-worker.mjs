@@ -3,17 +3,21 @@ import { verifyZipPreview } from './zip-preview-access.mjs';
 import { contentType, readBounded } from './website-zip.mjs';
 
 const cookieName = '__Host-website_zip_preview';
-// Private preview is ticket-gated and sandboxed. Allow HTTPS CDNs so Stitch/Tailwind
-// /font/image exports render; keep forms, framing, and workers locked down.
+const previewRestrictions = "manifest-src 'self'; worker-src 'none'; form-action 'none'; "
+  + "base-uri 'self'; frame-ancestors 'none'";
+const bundledPolicy = "sandbox allow-same-origin; default-src 'none'; "
+  + "script-src 'none'; style-src 'self' 'unsafe-inline'; "
+  + "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; "
+  + "connect-src 'none'; " + previewRestrictions;
+const interactivePolicy = "sandbox allow-scripts allow-same-origin; default-src 'none'; "
+  + "script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; "
+  + "img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; "
+  + "connect-src 'self' https:; " + previewRestrictions;
 const headers = {
   'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow', 'x-frame-options': 'DENY',
   'cross-origin-resource-policy': 'same-origin', 'cross-origin-opener-policy': 'same-origin',
-  'content-security-policy': "sandbox allow-scripts allow-same-origin; default-src 'none'; "
-    + "script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; "
-    + "img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; "
-    + "connect-src 'self' https:; manifest-src 'self'; worker-src 'none'; form-action 'none'; "
-    + "base-uri 'self'; frame-ancestors 'none'"
+  'x-dns-prefetch-control': 'off', 'content-security-policy': bundledPolicy
 };
 
 const unavailable = () => new Response('This private preview is unavailable. Open the preview again from Launch & Own.', {
@@ -30,6 +34,9 @@ async function openPreview(request, env, url) {
   const ticket = fields.get('ticket');
   const claim = await verifyZipPreview(env, url, ticket);
   if (!claim) return unavailable();
+  const externalAssets = fields.getAll('externalAssets');
+  if (externalAssets.length !== Number(claim.externalAssets)
+      || (claim.externalAssets && externalAssets[0] !== 'true')) return unavailable();
   const maxAge = claim.expires - Math.floor(Date.now() / 1000);
   return new Response(null, { status: 303, headers: { ...headers, location: '/',
     'set-cookie': `${cookieName}=${ticket}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}` } });
@@ -65,6 +72,7 @@ export default {
       if (!file) return unavailable();
       const bytes = await readZipFile(env.ZIP_ARTIFACTS, claim.artifact, claim.stage, file);
       return new Response(request.method === 'HEAD' ? null : bytes, { status, headers: { ...headers,
+        'content-security-policy': claim.externalAssets ? interactivePolicy : bundledPolicy,
         'content-type': contentType(file.path), 'content-length': String(file.size) } });
     } catch {
       return unavailable();

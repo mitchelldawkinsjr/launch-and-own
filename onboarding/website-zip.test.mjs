@@ -203,14 +203,21 @@ async function upload(h, tenant, options = {}) {
   } }), h.env);
 }
 
-async function openPrivatePreview(h, tenant, id) {
+async function privatePreviewChoices(h, tenant, id) {
   const interstitial = await h.request('/site-preview?id=' + id, { cookie: tenant.cookie });
   assert.equal(interstitial.status, 200);
   const html = await interstitial.text();
-  const [, host] = html.match(/action="(https:[^"]+)\/_open"/);
-  const [, ticket] = html.match(/name="ticket" type="hidden" value="([A-Za-z0-9_-]+)"/);
-  assert.match(interstitial.headers.get('content-security-policy'), new RegExp(`form-action ${host}`));
+  const matches = html.matchAll(/action="(https:[^"]+)\/_open" method="POST"><input name="ticket" type="hidden" value="([A-Za-z0-9_-]+)"/g);
+  const choices = Array.from(matches, ([, host, ticket]) => ({ host, ticket }));
+  assert.equal(choices.length, 2);
+  assert.ok(interstitial.headers.get('content-security-policy').includes('form-action ' + choices.map(choice => choice.host).join(' ')));
   assert.equal(interstitial.headers.get('referrer-policy'), 'origin');
+  assert.match(html, /name="externalAssets" value="true" required/);
+  return choices;
+}
+
+async function openPrivatePreview(h, tenant, id) {
+  const [{ host, ticket }] = await privatePreviewChoices(h, tenant, id);
   const request = (path, options = {}) => previewWorker.fetch(new Request(host + path, options), h.env);
   const go = await request('/_open', { method: 'POST', headers: { origin }, body: new URLSearchParams({ ticket }) });
   assert.equal(go.status, 303);
@@ -242,10 +249,12 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   assert.equal(await page.text(), home);
   const previewCsp = page.headers.get('content-security-policy');
   assert.match(previewCsp, /sandbox/);
-  assert.match(previewCsp, /script-src[^;]*https:/);
-  assert.match(previewCsp, /style-src[^;]*https:/);
-  assert.match(previewCsp, /img-src[^;]*https:/);
-  assert.match(previewCsp, /font-src[^;]*https:/);
+  assert.match(previewCsp, /script-src 'none'/);
+  assert.doesNotMatch(previewCsp, /allow-scripts|https:/);
+  assert.match(previewCsp, /style-src 'self'/);
+  assert.match(previewCsp, /img-src 'self'/);
+  assert.match(previewCsp, /font-src 'self'/);
+  assert.match(previewCsp, /connect-src 'none'/);
   assert.match(previewCsp, /form-action 'none'/);
   assert.equal(await (await preview.fetch('/about/index.html')).text(), '<h1>About Willow</h1>');
   assert.equal((await preview.fetch('/about')).headers.get('location'), preview.host + '/about/');
@@ -279,6 +288,42 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   makeDue(h);
   await post(h, '/verify', tenant.cookie, { id, csrf: tenant.csrf });
   assert.equal(jobRow(h).status, 'live');
+});
+
+test('interactive ZIP preview needs explicit consent and an origin-bound ticket', async t => {
+  const h = zipHarness(t);
+  const tenant = await connectTenant(h);
+  const id = launchId(await upload(h, tenant));
+  const [bundled, interactive] = await privatePreviewChoices(h, tenant, id);
+  assert.notEqual(interactive.host, bundled.host);
+  const open = (host, fields, source = origin) => previewWorker.fetch(new Request(host + '/_open', {
+    method: 'POST', headers: { origin: source }, body: new URLSearchParams(fields)
+  }), h.env);
+  for (const rejected of [
+    await open(interactive.host, { ticket: interactive.ticket }),
+    await open(interactive.host, { ticket: bundled.ticket, externalAssets: 'true' }),
+    await open(bundled.host, { ticket: interactive.ticket }),
+    await open(interactive.host, { ticket: interactive.ticket, externalAssets: 'true' }, 'https://unrelated.example')
+  ]) {
+    assert.equal(rejected.status, 404);
+    assert.equal(rejected.headers.get('set-cookie'), null);
+  }
+  const accepted = await open(interactive.host, { ticket: interactive.ticket, externalAssets: 'true' });
+  assert.equal(accepted.status, 303);
+  const cookie = accepted.headers.get('set-cookie').split(';')[0];
+  const fetchOn = host => previewWorker.fetch(new Request(host + '/', { headers: { cookie } }), h.env);
+  assert.equal((await fetchOn(bundled.host)).status, 404);
+  const page = await fetchOn(interactive.host);
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), home);
+  const csp = page.headers.get('content-security-policy');
+  assert.match(csp, /sandbox allow-scripts allow-same-origin/);
+  for (const directive of ['script-src', 'style-src', 'img-src', 'font-src', 'connect-src'])
+    assert.match(csp, new RegExp(directive + '[^;]*https:'));
+  for (const directive of ['worker-src', 'form-action', 'frame-ancestors'])
+    assert.match(csp, new RegExp(directive + " 'none'"));
+  assert.equal(page.headers.get('cache-control'), 'private, no-store');
+  assert.equal(writes(h).length, 0);
 });
 
 test('expired preview capabilities cannot read or reopen a staged upload', async t => {

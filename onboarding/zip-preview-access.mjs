@@ -10,7 +10,10 @@ const now = () => Math.floor(Date.now() / 1000);
 // two-level wildcard certificate). A leading-hyphen suffix such as "-zp.example.com" gives
 // sibling hosts "<id>-zp.example.com", which a free one-level *.example.com certificate covers.
 const suffixPattern = /^-[a-z0-9](?:[a-z0-9-]{0,14}[a-z0-9])?\./;
-export const zipPreviewHost = (id, domain) => domain.startsWith('-') ? id + domain : id + '.' + domain;
+export function zipPreviewHost(id, domain, externalAssets = false) {
+  const label = externalAssets ? id + '-external' : id;
+  return domain.startsWith('-') ? label + domain : label + '.' + domain;
+}
 
 export function zipPreviewConfigured(env) {
   const domain = env.ZIP_PREVIEW_DOMAIN;
@@ -28,10 +31,10 @@ export function zipPreviewConfigured(env) {
     && env.ZIP_PREVIEW_KEY.toLowerCase() !== env.TOKEN_ENCRYPTION_KEY?.toLowerCase();
 }
 
-export async function createZipPreview(env, artifact, stage, sessionExpiry) {
-  const origin = `https://${zipPreviewHost(artifact.id, env.ZIP_PREVIEW_DOMAIN)}`;
+export async function createZipPreview(env, artifact, stage, sessionExpiry, { externalAssets = false } = {}) {
+  const origin = `https://${zipPreviewHost(artifact.id, env.ZIP_PREVIEW_DOMAIN, externalAssets)}`;
   const expires = Math.min(sessionExpiry, now() + ticketLifetimeSeconds);
-  const ticket = await seal(env.ZIP_PREVIEW_KEY, JSON.stringify({ artifact, stage, expires }), aad(origin));
+  const ticket = await seal(env.ZIP_PREVIEW_KEY, JSON.stringify({ artifact, stage, expires, externalAssets }), aad(origin));
   return { origin, ticket };
 }
 
@@ -40,9 +43,11 @@ export async function verifyZipPreview(env, url, ticket) {
       || !/^[a-z0-9_-]{1,768}$/i.test(ticket)) return null;
   try {
     const claim = JSON.parse(await unseal(env.ZIP_PREVIEW_KEY, ticket, aad(url.origin)));
-    if (!isZipArtifact(claim.artifact) || url.host !== zipPreviewHost(claim.artifact.id, env.ZIP_PREVIEW_DOMAIN)
+    const { externalAssets = false } = claim;
+    if (typeof externalAssets !== 'boolean' || !isZipArtifact(claim.artifact)
+        || url.host !== zipPreviewHost(claim.artifact.id, env.ZIP_PREVIEW_DOMAIN, externalAssets)
         || (claim.stage !== 'draft' && claim.stage !== 'approved') || !Number.isSafeInteger(claim.expires)
         || claim.expires <= now() || claim.expires > now() + ticketLifetimeSeconds) return null;
-    return claim;
+    return { ...claim, externalAssets };
   } catch { return null; }
 }

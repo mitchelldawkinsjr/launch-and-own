@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { seal } from './crypto.mjs';
 import { createZipPreview, verifyZipPreview, zipPreviewConfigured, zipPreviewHost } from './zip-preview-access.mjs';
 
 const artifact = { id: '0f1e2d3c-4b5a-4968-8776-655443322110', digest: 'a'.repeat(64), fileCount: 2, totalBytes: 120 };
@@ -25,6 +26,17 @@ test('dotted preview domain keeps its existing host format', async () => {
   assert.equal(zipPreviewConfigured(env), true);
   const { origin } = await createZipPreview(env, artifact, 'draft', later());
   assert.equal(origin, `https://${artifact.id}.preview.example.test`);
+});
+
+test('existing tickets only authorize the script-free preview', async () => {
+  const env = { ...base, ZIP_PREVIEW_DOMAIN: '-zp.example.test' };
+  const origin = 'https://' + zipPreviewHost(artifact.id, env.ZIP_PREVIEW_DOMAIN);
+  const expires = Math.floor(Date.now() / 1000) + 60;
+  const ticket = await seal(env.ZIP_PREVIEW_KEY, JSON.stringify({ artifact, stage: 'draft', expires }),
+    'website-zip-preview:' + origin);
+  assert.equal((await verifyZipPreview(env, new URL(origin + '/'), ticket)).externalAssets, false);
+  const interactiveHost = zipPreviewHost(artifact.id, env.ZIP_PREVIEW_DOMAIN, true);
+  assert.equal(await verifyZipPreview(env, new URL('https://' + interactiveHost + '/'), ticket), null);
 });
 
 test('preview hosts can never collide with or sit under the onboarding host', () => {
