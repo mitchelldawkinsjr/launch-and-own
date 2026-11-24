@@ -1,6 +1,6 @@
 # Post-launch stored option requests — #88
 
-The existing `/site-options` toolkit page lets a verified owner review and store separate hostname, forwarding-email, forms, visitor-insights (Web Analytics), scoped PR-preview, SEO starter, and same-host redirect requests. Each request recomputes its digest server-side; email fingerprints include the **exact external mailbox and fixed contact@ alias**. Analytics and preview rows never enable a beacon or change `preview_deployment_setting` by themselves. SEO and redirect rows never publish HTML/robots/sitemap or create Page Rules. Preview opt-in requires acknowledging that draft links can be public. Turnstile contact forms stay Siteverify-plan-only until the separate #89 cost/privacy gate. Migrations `0007` and `0009` expand allowed kinds. Stored rows remain review records, not authority for a Cloudflare or GitHub mutation.
+The existing `/site-options` toolkit page lets a verified owner review and store separate hostname, forwarding-email, forms, visitor-insights (Web Analytics), scoped PR-preview, SEO starter, and same-host redirect requests. Each request recomputes its digest server-side; email fingerprints include the **exact external mailbox and fixed contact@ alias**. Analytics and preview rows never enable a beacon or change `preview_deployment_setting` by themselves. SEO and redirect rows never publish HTML/robots/sitemap or create Page Rules. Preview opt-in requires acknowledging that draft links can be public. Turnstile forms require a separate #89 cost/privacy gate before staging. The rollout returns a Worker publication review for the exact resources. Migrations `0007` and `0009` expand allowed kinds. Stored rows remain review records, not authority for a Cloudflare or GitHub mutation.
 
 ## Applying the reviewed domain or email
 
@@ -18,6 +18,6 @@ Visitor insights, PR preview, SEO, and redirect requests stay store-only until a
 
 ## Hosted status and release
 
-PR #121's prior Worker was reported deployed and its direct route may **still be present on the hosted Worker** until Domain #2 explicitly authorizes deployment of this safer replacement. Merging code alone does not change the running Worker. **Do not run the hosted `0006` D1 migration, deploy the Worker, add email OAuth scopes, or enable feature flags without Domain #2 / Sol #83 review.** The new code is disabled by default and tests no longer authorize stored-only domain writes. #53 onboarding redesign is untouched and #21 customer test has not been run.
+Domain reported the onboarding beta on `b2fecc3` with migrations through `0010`. Forms and email execution remain gated. The newer per-site toolkit and Analytics review require the independent #21 walkthrough and a separate Domain release window. For live execution, review the exact stored request and operator grant before selecting any feature flag or provider rollout. [Domain report](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2#issuecomment-7117559538)
 
 Detailed operator/execution contract: [APPROVED_EXTENSION_CONSUMER.md](APPROVED_EXTENSION_CONSUMER.md).

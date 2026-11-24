@@ -38,11 +38,11 @@ const approved={
 const result=await proposeWebsiteUpdate(approved,{githubToken:authorizedToken});
 ```
 
-The **customer-facing onboarding workflow is implemented in PR #31 / Issue #30** (pending review, CI and coordinated deployment) for verified *live one-page* launch jobs. From the authenticated `/history` page, a live site owner chooses **Edit this website**, reviews fields and a read-only GitHub `main` revision, opens the rendered HTML preview, and explicitly approves a reviewable PR. The server obtains the currently connected user's GitHub credential. The review receipt is AES-GCM-encrypted and bound to the active session, authorization epoch, user ID, Cloudflare account, exact commit and HTML digest for 15 minutes. Site owner/repository identity always comes from the owned launch record, not submitted form values.
+The deployed onboarding editor supports verified live one-page launch jobs. This update hardening needs its own Domain-approved rollout and independent acceptance. [Editor deployment](https://github.com/mitchelldawkinsjr/launch-and-own/issues/30#issuecomment-7088943607) From the authenticated `/history` page, a live site owner chooses **Edit this website**, reviews fields and a read-only GitHub `main` revision, opens the rendered HTML preview, and explicitly approves a reviewable PR. The server obtains the currently connected user's GitHub credential. The review receipt is AES-GCM-encrypted and bound to the active session, authorization epoch, user ID, Cloudflare account, exact commit and HTML digest for 15 minutes. Site owner/repository identity always comes from the owned launch record, not submitted form values.
 
-After PR creation the authenticated `/site-update-status` link checks the exact expected PR branch and, after manual merge, the canonical Cloudflare deployment's GitHub commit **and** public HTML SHA-256. Status receipts expire after 30 days and require a valid session with the same verified provider accounts; they contain no OAuth credentials. No PR creation means no publication. All provider writes remain behind explicit user approval and the owner-controlled GitHub PR permission. This workflow needs no new D1 migration or Worker binding.
+Before a PR opens, verify the staged commit’s single parent is the reviewed base and its only changed file is the exact homepage blob. The status receipt pins the returned PR head and immutable head/base repository IDs. A different PR head withholds the ready-to-merge and live actions. After manual merge, compare the canonical production commit and public HTML SHA-256. Status receipts expire after 30 days and require a valid session with the same verified provider accounts; they contain no OAuth credentials. No PR creation means no publication. All provider writes remain behind explicit user approval and the owner-controlled GitHub PR permission. This workflow needs no new D1 migration or Worker binding.
 
-**Beta limitations:** only *live one-page sites with unexpired 30-day launch history* are editable, and the form starts with the original approved fields, not changes made independently in GitHub. Every proposal checks the current GitHub base and fails if it has advanced. Customers must manually merge and can re-check verification before the receipt expires. Four-page editing and durable post-retention site discovery need a future milestone.
+**Beta limitations:** only *live one-page sites with unexpired 30-day launch history* are editable, and the form starts with the original approved fields, not changes made independently in GitHub. Every proposal checks the current GitHub base and fails if it has advanced. Customers must manually merge and can re-check verification before the receipt expires. Owned sites remain discoverable in the toolkit after launch history expires. Four-page sites and sites without verified editable source use the owner’s GitHub workflow.
 
 ## Security and recovery behavior
 
@@ -51,14 +51,15 @@ After PR creation the authenticated `/site-update-status` link checks the exact 
 - If `main` advanced after approval, stop and request a fresh preview; **never quietly rebase a changed site**.
 - The exact HTML SHA-256 must match the approved preview before any provider request.
 - Existing feature branches with unrelated edits are refused; interrupted creation can resume safely, and already-open PRs are reused without duplicate writes.
-- Closed PRs cannot be silently recreated. An already-up-to-date homepage is a no-op.
+- Check that automatic Pages preview builds are off on the exact owned project before every GitHub write. Protected preview builds require their own verified Access policy. A project policy change between providers is outside an atomic transaction.
+- A closed PR requires a fresh review. An already-current homepage leaves the repository unchanged.
 - Do not log tokens or embed credentials in PR text. Do not apply changes to customer forms or custom domains.
 
 ## Permissions / rollout
 
 The GitHub App currently planned by the domain agent has Repository creation and Contents write. **Maintenance PRs also require the appropriate GitHub App `Pull requests: write` permission** for the signed-in customer. Coordinate that permission change with the domain/OAuth agent on [Issue #2](https://github.com/mitchelldawkinsjr/launch-and-own/issues/2), obtain explicit approval for new scopes, and independently verify installation consent and behavior. Do not expand app permissions without the owner authorizing it.
 
-This code uses **mock GitHub APIs in CI**, not a live customer repository. The first production update acceptance test must show: reviewed page and base SHA → separate approval → only a feature branch and PR created → manual merge → exact-commit Cloudflare verification. Until then the hosted frontend does not offer live website change requests.
+This code uses **mock GitHub APIs in CI**, not a live customer repository. The first production update acceptance test must show: reviewed page and base SHA → separate approval → only a feature branch and PR created → manual merge → exact-commit Cloudflare verification. The editor is deployed with independent acceptance tracked in #21.
 
 The module works without any paid AI service. AI-generated proposed copy must pass the same preview and approval checks; the AI model is not authorized to create branches, PRs or publish sites.
 

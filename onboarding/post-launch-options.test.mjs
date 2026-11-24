@@ -75,6 +75,25 @@ test('toolkit links the options page and approvals store without provider writes
   assert.match(page, /Existing mailbox/);
 });
 
+test('a session revoked at the storage boundary cannot save an options request', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const {tenant, id} = await liveSite(h, t);
+  const {digest} = await prepareDomain(h, tenant, id);
+  const prepare = h.DB.prepare;
+  t.mock.method(h.DB, 'prepare', sql => {
+    if (sql.includes('INSERT INTO onboarding_option_approvals'))
+      h.sqlite.prepare('UPDATE onboarding_sessions SET authorization_epoch = authorization_epoch + 1').run();
+    return prepare(sql);
+  });
+
+  const result = await post(h, '/site-options-approve', tenant.cookie, {
+    csrf: tenant.csrf, id, kind: 'domain', hostname: 'www.example.com', digest
+  });
+  assert.equal(result.status, 409);
+  assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS n FROM onboarding_option_approvals').get().n, 0);
+});
+
 test('a bad digest does not store an options approval', async (t) => {
   const h = harness();
   t.after(() => h.sqlite.close());
@@ -383,3 +402,199 @@ test('SEO and redirect opt-ins store without publishing files or Page Rules', as
   assert.equal(JSON.parse(seoRow.payload_json).canWrite, false);
   assert.equal(JSON.parse(redirectRow.payload_json).plan.proposed.premiumWafIncluded, false);
 });
+
+async function storeAnalytics(h, tenant, id) {
+  const fields = {csrf: tenant.csrf, id, kind: 'analytics', analyticsConsent: 'true'};
+  const prepared = await post(h, '/site-options-prepare', tenant.cookie, fields);
+  assert.equal(prepared.status, 200);
+  const digest = (await prepared.text()).match(/name="digest" value="([a-f0-9]{64})"/)?.[1];
+  assert.ok(digest);
+  assert.equal((await post(h, '/site-options-approve', tenant.cookie, {...fields, digest})).status, 303);
+
+  const page = await h.request('/site-options?id=' + id, {cookie: tenant.cookie});
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  const analyticsRequest = html.match(/name="analyticsRequest" value="([a-f0-9]{64})"/)?.[1];
+  assert.ok(analyticsRequest);
+  assert.match(html, /name="privacyBeaconConsent" value="true" required/);
+  return {
+    csrf: tenant.csrf,
+    id,
+    kind: 'analytics',
+    intent: 'analytics-enablement-review',
+    analyticsRequest,
+    privacyBeaconConsent: 'true'
+  };
+}
+
+const analyticsRow = h => h.sqlite.prepare(
+  "SELECT * FROM onboarding_option_approvals WHERE kind = 'analytics'"
+).get();
+const reviewAnalytics = (h, tenant, fields) => post(h, '/site-options-prepare', tenant.cookie, fields);
+
+test('current Analytics consent and a separate privacy acknowledgment yield a read-only review', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const {tenant, id} = await liveSite(h, t);
+  const initial = await h.request('/site-options?id=' + id, {cookie: tenant.cookie});
+  assert.doesNotMatch(await initial.text(), /privacyBeaconConsent/);
+  const fields = await storeAnalytics(h, tenant, id);
+  const stored = analyticsRow(h);
+  const callsBefore = h.calls.length;
+
+  const denied = await reviewAnalytics(h, tenant, {...fields, privacyBeaconConsent: 'false'});
+  assert.equal(denied.status, 400);
+  assert.match(await denied.text(), /separate privacy and beacon/);
+  assert.equal(h.calls.length, callsBefore);
+
+  const forged = await reviewAnalytics(h, tenant, {...fields, csrf: 'invalid'});
+  assert.equal(forged.status, 400);
+  assert.equal(h.calls.length, callsBefore);
+
+  const result = await reviewAnalytics(h, tenant, fields);
+  assert.equal(result.status, 200);
+  assert.match(result.headers.get('cache-control'), /no-store/);
+  const html = await result.text();
+  assert.match(html, /Review Web Analytics enablement/);
+  const proposalDigest = html.match(/Review fingerprint <code>([a-f0-9]{64})<\/code>/)?.[1];
+  assert.ok(proposalDigest);
+  assert.match(html, /next deployment/);
+  assert.match(html, /separate operator grant/);
+  assert.match(html, /Open Cloudflare project/);
+  assert.doesNotMatch(html, /<form|cf_secret_example|ghu_secret_example|pages-stable-101/);
+  assert.ok(!html.includes(stored.id));
+  assert.deepEqual(analyticsRow(h), stored);
+
+  const reads = h.calls.slice(callsBefore);
+  assert.ok(reads.some(c => c.url === 'https://api.github.com/repos/tester/esp-willow-studio'));
+  assert.ok(reads.some(c => c.url === 'https://api.cloudflare.com/client/v4/accounts/' + accountId +
+    '/pages/projects/esp-willow-studio-site'));
+  assert.ok(reads.every(c => c.method === 'GET'));
+
+  const executeAttempt = await post(h, '/site-options-approve', tenant.cookie, {
+    ...fields, digest: proposalDigest, analyticsConsent: 'true'
+  });
+  assert.equal(executeAttempt.status, 400);
+  assert.deepEqual(analyticsRow(h), stored);
+});
+
+test('the Analytics review refuses a stale request with the same opt-in digest', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const {tenant, id} = await liveSite(h, t);
+  const stale = await storeAnalytics(h, tenant, id);
+  const first = analyticsRow(h);
+  const current = await storeAnalytics(h, tenant, id);
+  const second = analyticsRow(h);
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.approval_digest, second.approval_digest);
+  assert.notEqual(stale.analyticsRequest, current.analyticsRequest);
+
+  const callsBefore = h.calls.length;
+  const response = await reviewAnalytics(h, tenant, stale);
+  assert.equal(response.status, 409);
+  assert.doesNotMatch(await response.text(), /Review fingerprint|Open Cloudflare project/);
+  assert.equal(h.calls.length, callsBefore);
+
+  const projectId = jobRow(h).pages_project_id;
+  const replaceProject = h.sqlite.prepare('UPDATE onboarding_launch_jobs SET pages_project_id = ? WHERE id = ?');
+  replaceProject.run('replacement-project', id);
+  const replaced = await reviewAnalytics(h, tenant, current);
+  assert.equal(replaced.status, 409);
+  assert.doesNotMatch(await replaced.text(), /Review fingerprint|Open Cloudflare project/);
+  assert.equal(h.calls.length, callsBefore);
+  replaceProject.run(projectId, id);
+
+  h.sqlite.prepare("UPDATE onboarding_option_approvals SET payload_json = '{}' WHERE kind = 'analytics'").run();
+  const invalid = await reviewAnalytics(h, tenant, current);
+  assert.equal(invalid.status, 409);
+  assert.doesNotMatch(await invalid.text(), /Review fingerprint|Open Cloudflare project/);
+  assert.equal(h.calls.length, callsBefore);
+});
+
+test('the Analytics review binds the current private repository and exact Pages project', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const {tenant, id} = await liveSite(h, t);
+  const fields = await storeAnalytics(h, tenant, id);
+  const stored = analyticsRow(h);
+  const site = h.resourceState;
+  const originalRepoId = site.repo.id;
+  site.repo.id = originalRepoId + 1;
+  const wrongRepo = await reviewAnalytics(h, tenant, fields);
+  assert.equal(wrongRepo.status, 409);
+  assert.doesNotMatch(await wrongRepo.text(), /Review fingerprint|Open Cloudflare project/);
+  site.repo.id = originalRepoId;
+
+  const originalProjectId = site.pages.id;
+  site.pages.id = 'replaced-project';
+  const wrongProject = await reviewAnalytics(h, tenant, fields);
+  assert.equal(wrongProject.status, 409);
+  assert.doesNotMatch(await wrongProject.text(), /Review fingerprint|Open Cloudflare project/);
+  site.pages.id = originalProjectId;
+
+  site.pages.build_config.web_analytics_tag = 'provider-tag';
+  const tagged = await reviewAnalytics(h, tenant, fields);
+  assert.equal(tagged.status, 200);
+  const taggedHtml = await tagged.text();
+  assert.match(taggedHtml, /Verify the live beacon and traffic/);
+  assert.doesNotMatch(taggedHtml, /Review fingerprint|provider-tag|<form/);
+  assert.deepEqual(analyticsRow(h), stored);
+});
+
+test('another tenant cannot prepare an Analytics enablement review with a copied request', async (t) => {
+  const h = harness();
+  t.after(() => h.sqlite.close());
+  const {tenant, id} = await liveSite(h, t);
+  const fields = await storeAnalytics(h, tenant, id);
+  h.resourceState.githubUserId = 99;
+  const other = await connectTenant(h);
+  const before = h.calls.length;
+  const response = await reviewAnalytics(h, other, {...fields, csrf: other.csrf});
+  assert.equal(response.status, 404);
+  assert.doesNotMatch(await response.text(), /Review fingerprint|Open Cloudflare project/);
+  assert.equal(h.calls.length, before);
+});
+
+for (const change of ['replace the stored request', 'log out']) {
+  test('Analytics review is withheld when owners ' + change + ' during the final authorization await', async (t) => {
+    const h = harness();
+    t.after(() => h.sqlite.close());
+    const {tenant, id} = await liveSite(h, t);
+    const fields = await storeAnalytics(h, tenant, id);
+
+    let reads = 0;
+    let changeOnRead;
+    const prepare = h.DB.prepare.bind(h.DB);
+    t.mock.method(h.DB, 'prepare', sql => {
+      const stmt = prepare(sql);
+      if (!sql.includes("o.kind = 'analytics'") ||
+          !sql.includes('JOIN onboarding_sessions s')) return stmt;
+      return {...stmt, bind(...params) {
+        const bound = stmt.bind(...params);
+        return {...bound, async first() {
+          reads += 1;
+          if (reads === changeOnRead) {
+            await Promise.resolve();
+            if (change === 'log out')
+              h.sqlite.prepare('DELETE FROM onboarding_sessions').run();
+            else h.sqlite.prepare("UPDATE onboarding_option_approvals SET id = ? WHERE kind = 'analytics'")
+              .run('99999999-9999-4999-8999-999999999999');
+          }
+          return bound.first();
+        }};
+      }};
+    });
+    const baseline = await reviewAnalytics(h, tenant, fields);
+    assert.equal(baseline.status, 200);
+    assert.match(await baseline.text(), /Review fingerprint/);
+    assert.ok(reads >= 2);
+    changeOnRead = reads;
+    reads = 0;
+
+    const raced = await reviewAnalytics(h, tenant, fields);
+    assert.equal(raced.status, 409);
+    assert.equal(reads, changeOnRead);
+    assert.doesNotMatch(await raced.text(), /Review fingerprint|Open Cloudflare project/);
+  });
+}

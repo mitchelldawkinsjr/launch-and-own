@@ -107,7 +107,7 @@ function onlyHomepageChanged(current,prior) {
   if (current.get(PATH).sha === prior.get(PATH).sha)
     fail('no_homepage_change_to_revert');
 }
-async function gitBlobSha(content) {
+export async function gitBlobSha(content) {
   const body = bytes(content);
   const prefix = bytes('blob '+body.byteLength+'\0');
   const packed = new Uint8Array(prefix.byteLength+body.byteLength);

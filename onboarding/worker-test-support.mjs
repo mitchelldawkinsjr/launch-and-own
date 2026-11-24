@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import worker from './worker.mjs';
 
 const origin='https://onboard.example.com';
@@ -115,15 +116,25 @@ function harness({withJobs=true}={}){
     return resourceState.updateBranch===name?Response.json({commit:{sha:resourceState.updateHtml?'f'.repeat(40):GENERATED_SHA}}):new Response('{}',{status:404});
   }
   if(url===root+'/git/refs'&&opts.method==='POST'){
-    resourceState.updateBranch=JSON.parse(opts.body).ref.replace(/^refs\/heads\//,'');
+    const payload=JSON.parse(opts.body);
+    resourceState.updateBranch=payload.ref.replace(/^refs\/heads\//,'');
+    resourceState.updateBaseSha=payload.sha;
     return Response.json({ref:'refs/heads/'+resourceState.updateBranch},{status:201});
+  }
+  if(url===root+'/commits/'+'f'.repeat(40)&&resourceState.updateHtml){
+    const body=Buffer.from(resourceState.updateHtml,'utf8');
+    const sha=createHash('sha1').update('blob '+body.byteLength+'\0').update(body).digest('hex');
+    return Response.json({sha:'f'.repeat(40),parents:[{sha:resourceState.updateBaseSha}],
+      files:[{filename:'public/index.html',status:'modified',sha}]});
   }
   if(url.startsWith(root+'/pulls?')&&opts.method==='GET')return Response.json(resourceState.updatePr?[resourceState.updatePr]:[]);
   if(url===root+'/pulls'&&opts.method==='POST'){
     if(resourceState.denyPullRequests)return new Response('{}',{status:403});
     const payload=JSON.parse(opts.body);
     resourceState.updatePr={number:55,state:'open',html_url:'https://github.com/tester/esp-willow-studio/pull/55',
-      head:{ref:payload.head,repo:{full_name:'tester/esp-willow-studio'}},base:{ref:'main'},merged_at:null,merge_commit_sha:null};
+      head:{ref:payload.head,sha:'f'.repeat(40),repo:{id:101,full_name:'tester/esp-willow-studio'}},
+      base:{ref:'main',sha:resourceState.headSha??GENERATED_SHA,repo:{id:101}},
+      merged_at:null,merge_commit_sha:null};
     return Response.json(resourceState.updatePr,{status:201});
   }
   if(url===root+'/pulls/55')return resourceState.updatePr?Response.json(resourceState.updatePr):new Response('{}',{status:404});
