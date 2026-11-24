@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {approvePreview,connectTenant,GENERATED_SHA,harness,newPreview,originalFetch,post,csrfFrom} from './worker-test-support.mjs';
+import {accountId,approvePreview,connectTenant,GENERATED_SHA,harness,newPreview,originalFetch,post,csrfFrom} from './worker-test-support.mjs';
 
 const UPDATE_COMMIT='f'.repeat(40);
+const PROJECT='https://api.cloudflare.com/client/v4/accounts/'+accountId+'/pages/projects/esp-willow-studio-site';
 async function liveSite(h){
   const tenant=await connectTenant(h);
   const id=await newPreview(h,tenant,{tagline:'Original homepage headline'});
@@ -60,8 +61,14 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   const tenant=await liveSite(h),before=h.resourceState.homepageHtml;
   const ticket=await reviewedEdit(h,tenant);
   const beforeWrites=updateWrites(h).length;
+  const beforeApproval=h.calls.length;
   const approval=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
   assert.equal(approval.status,303);
+  const approvalCalls=h.calls.slice(beforeApproval);
+  const writeIndexes=approvalCalls.flatMap((call,index)=>call.method==='GET'?[]:[index]);
+  assert.equal(writeIndexes.length,3);
+  for(const index of writeIndexes)
+   assert.deepEqual(approvalCalls[index-1],{method:'GET',url:PROJECT});
   assert.match(h.resourceState.updateBranch,/^launch-and-own\/site-/);
   assert(h.resourceState.updatePr);
   assert.equal(h.resourceState.homepageHtml,before,'main website must not be directly edited');
@@ -96,6 +103,103 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   assert.equal(status.status,400);
   assert.doesNotMatch(await status.text(),/Live and checked/);
  }finally{globalThis.fetch=originalFetch}
+});
+
+test('a public, scoped or unknown preview policy blocks the first GitHub write',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
+  const beforeWrites=updateWrites(h).length;
+  const config=h.resourceState.pages.source.config;
+  config.preview_branch_includes=['launch-and-own/site-*'];
+  config.preview_branch_excludes=['main'];
+  config.pr_comments_enabled=false;
+  for(const setting of ['all','custom',undefined]){
+   config.preview_deployment_setting=setting;
+   const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+   assert.equal(r.status,409);
+   assert.match(await r.text(),/Confirm automatic preview builds are disabled/);
+   assert.equal(updateWrites(h).length,beforeWrites);
+  }
+  assert.equal(h.resourceState.updateBranch,null);
+  assert.equal(h.resourceState.updatePr,null);
+  const exact=await h.request('/site-update-html?ticket='+ticket,{cookie:tenant.cookie});
+  assert.equal(exact.status,200);
+  assert.match(await exact.text(),/New customer-approved headline/);
+ }finally{globalThis.fetch=originalFetch;h.sqlite.close()}
+});
+
+test('a replacement Pages project with preview builds off cannot authorize a GitHub update',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
+  h.resourceState.pages.id='replacement-with-the-same-source';
+  const beforeWrites=updateWrites(h).length;
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  assert.equal(r.status,409);
+  assert.match(await r.text(),/Confirm automatic preview builds are disabled/);
+  assert.equal(updateWrites(h).length,beforeWrites);
+  assert.equal(h.resourceState.updateBranch,null);
+ }finally{globalThis.fetch=originalFetch;h.sqlite.close()}
+});
+
+test('a preview policy change after branch or content staging stops the next write',async()=>{
+ for(const point of [
+  {suffix:'/git/refs',method:'POST',setting:'all',fileWrites:0},
+  {suffix:'/contents/public/index.html',method:'PUT',setting:undefined,fileWrites:1}
+ ]){
+  const h=harness();globalThis.fetch=h.fetchFn;
+  try{
+   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
+   globalThis.fetch=async(url,options)=>{
+    const response=await h.fetchFn(url,options);
+    if(url.endsWith(point.suffix)&&options.method===point.method)
+     h.resourceState.pages.source.config.preview_deployment_setting=point.setting;
+    return response;
+   };
+   const paused=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+   assert.equal(paused.status,409);
+   assert.match(await paused.text(),/The update paused before the next GitHub change/);
+   assert.match(h.resourceState.updateBranch,/^launch-and-own\/site-/);
+   assert.equal(h.resourceState.updateFileWrites,point.fileWrites);
+   assert.equal(h.resourceState.updatePr,null);
+
+   globalThis.fetch=h.fetchFn;
+   h.resourceState.pages.source.config.preview_deployment_setting='none';
+   const retried=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+   assert.equal(retried.status,303);
+   assert.equal(h.calls.filter(x=>x.url.endsWith('/git/refs')).length,1);
+   assert.equal(h.resourceState.updateFileWrites,1);
+   assert.equal(h.calls.filter(x=>x.url.endsWith('/pulls')&&x.method==='POST').length,1);
+  }finally{globalThis.fetch=originalFetch;h.sqlite.close()}
+ }
+});
+
+test('approval reuses freshly renewed GitHub and Cloudflare grants',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  h.resourceState.issueExpiringGrants=true;
+  const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
+  h.sqlite.prepare('UPDATE onboarding_sessions SET github_token_expires_at=1, cloudflare_token_expires_at=1').run();
+  const afterPreview=h.calls.length;
+  const pagesReads=[];
+  globalThis.fetch=async(url,options)=>{
+   if(url===PROJECT)
+    pagesReads.push({bearer:options.headers.authorization,cache:options.cache});
+   if(url.startsWith('https://api.github.com/repos/')&&options.method!=='GET')
+    assert.equal(options.headers.authorization,'Bearer ghu_rotated_access');
+   return h.fetchFn(url,options);
+  };
+  const approved=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  assert.equal(approved.status,303);
+  assert.equal(pagesReads.length,3);
+  for(const request of pagesReads)
+   assert.deepEqual(request,{bearer:'Bearer cf_rotated_access',cache:'no-store'});
+  const renewals=h.calls.slice(afterPreview).filter(x=>x.method==='POST'&&
+   (x.url.endsWith('/oauth/access_token')||x.url.endsWith('/oauth2/token')));
+  assert.equal(renewals.length,2);
+  assert.notEqual(renewals[0].url,renewals[1].url);
+ }finally{globalThis.fetch=originalFetch;h.sqlite.close()}
 });
 
 test('approval requires same-origin CSRF and a session-bound untampered review receipt',async()=>{

@@ -5,9 +5,11 @@ import {previewWebsiteUpdate,proposeWebsiteUpdate} from '../pipeline/propose-sit
 import {readManagedSiteBase,readApprovedUpdatePr} from '../pipeline/site-update-read.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {getOwnedJob,isLaunchId,approvalSnapshot,hasCurrentOwnerSession} from './launch-jobs.mjs';
-import {getFreshAccessToken} from './token-lifecycle.mjs';
 import {seal,unseal} from './crypto.mjs';
 import {renderUpdateStatusBody} from './post-launch-toolkit.mjs';
+import {readToolkitPreviewStatus} from './toolkit-preview.mjs';
+
+class PreviewBuildPolicyUnavailable extends Error {}
 
 const SHA=/^[a-f0-9]{40}$/i, DIGEST=/^[a-f0-9]{64}$/i;
 const REVIEW_LIFETIME=15*60,STATUS_LIFETIME=30*24*60*60;
@@ -24,6 +26,34 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       if(!await hasCurrentOwnerSession(env,current,now()))
         throw Error('Connected account authorization changed during update');
       return await fetch(url,{...options,signal:options.signal??AbortSignal.timeout(8000)});
+    };
+  }
+  function previewFencedFetch(env,current,job,cloudflareAccessToken) {
+    const fetchFn=fencedFetch(env,current);
+    const repositoryName='esp-'+job.site_slug;
+    const previewRequest={
+      site:{
+        githubUserId:job.github_user_id,githubOwner:job.github_login,
+        repositoryId:job.repository_id,repositoryName,
+        cloudflareAccountId:job.cloudflare_account_id,pagesProjectId:job.pages_project_id,
+        pagesProjectName:repositoryName+'-site',branch:job.production_branch
+      },
+      principal:{
+        githubUserId:current.github_user_id,githubLogin:current.github_login,
+        cloudflareAccountId:current.cloudflare_account_id
+      },
+      cloudflareAccessToken,
+      assertCurrentAuthorization:()=>hasCurrentOwnerSession(env,current,now()),
+      fetchFn:(url,options)=>fetch(url,{...options,cache:'no-store'})
+    };
+    // A GitHub branch push can trigger a separate Pages preview. Recheck the
+    // owner's project setting before each write, including a retry's writes.
+    return async(url,options={})=>{
+      if((options.method??'GET')!=='GET'){
+        const preview=await readToolkitPreviewStatus(previewRequest);
+        if(preview.state!=='disabled')throw new PreviewBuildPolicyUnavailable();
+      }
+      return await fetchFn(url,options);
     };
   }
   const account=input=>({name:input.customer_name,githubOwner:input.github_login,
@@ -47,8 +77,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
   async function requireOwned(env,current,id) {
     const item=await ownedSite(env,current,id);
     if(!item)return null;
-    await assertHistoryAccess(env,current);
-    return item;
+    const grants=await assertHistoryAccess(env,current);
+    return {...item,grants};
   }
   function inputFor(job,site) {
     return {name:job.customer_name,githubOwner:job.github_login,
@@ -120,8 +150,7 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       about:form.get('about')||'',services:form.get('services')||'',
       theme:form.get('theme')||'ocean',contactEmail:form.get('contactEmail')||''});
     const fetchFn=fencedFetch(env,current);
-    const githubToken=await getFreshAccessToken({env,session:current,provider:'github',fetchFn});
-    const base=await readManagedSiteBase(account(item.job),{githubToken,fetchFn});
+    const base=await readManagedSiteBase(account(item.job),{githubToken:item.grants.githubAccessToken,fetchFn});
     const preview=await previewWebsiteUpdate(inputFor(item.job,site));
     const ticket=await encodeTicket(env,'review',current,{jobId:item.job.id,
       repositoryId:item.job.repository_id,baseCommitSha:base.baseCommitSha,
@@ -138,7 +167,7 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     return view('Review your update',
       '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
       '<p><a href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener"><strong>See exactly how it will look</strong></a></p>'+
-      '<p>If you approve, we open a change request on GitHub. Nothing goes live until you open that request and click <strong>Merge</strong>. After you merge, Launch &amp; Own checks the public site.</p>'+
+      '<p>After you approve, we confirm automatic Cloudflare Pages preview builds are off before opening a change request on GitHub. To publish the update, open the request and click <strong>Merge</strong>. After you merge, Launch &amp; Own checks the public site.</p>'+
       '<details><summary>Technical details</summary><p>Starting version: <code>'+escape(ticket.baseCommitSha)+
       '</code></p><p>Exact preview code: <code>'+escape(ticket.approvedHtmlSha256)+'</code></p></details>'+
       button('/site-update-approve','Approve this update',current.csrf,
@@ -155,14 +184,15 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     await limitAttempts(request,env);
     const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
     const {item,site,ticket}=await reviewData(env,current,form.get('ticket'));
-    const fetchFn=fencedFetch(env,current);
-    const githubToken=await getFreshAccessToken({env,session:current,provider:'github',fetchFn});
+    const fetchFn=previewFencedFetch(env,current,item.job,item.grants.cloudflareAccessToken);
     let proposal;
     try{
       proposal=await proposeWebsiteUpdate({...inputFor(item.job,site),explicitlyApproved:true,
         approvedHtmlSha256:ticket.approvedHtmlSha256,expectedBaseCommitSha:ticket.baseCommitSha,
-        expectedRepositoryId:item.job.repository_id},{githubToken,fetchFn});
-    }catch {
+        expectedRepositoryId:item.job.repository_id},{githubToken:item.grants.githubAccessToken,fetchFn});
+    }catch(error){
+      if(error instanceof PreviewBuildPolicyUnavailable)
+        return fail('The update paused before the next GitHub change. Confirm automatic preview builds are disabled in the linked Cloudflare Pages project, then review and approve again.',409);
       return fail('GitHub could not prepare the approved PR. Confirm the GitHub App has Pull requests: write permission and try a fresh preview. No merge or publication was performed.',409);
     }
     if(proposal.status==='already-current')return view('No changes needed',
@@ -183,11 +213,10 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     if(!item||item.job.repository_id!==receipt.repositoryId)
       return fail('This update does not belong to your connected accounts.',404);
     const fetchFn=fencedFetch(env,current);
-    const githubToken=await getFreshAccessToken({env,session:current,provider:'github',fetchFn});
+    const {githubAccessToken:githubToken,cloudflareAccessToken:cloudflareToken}=item.grants;
     const pr=await readApprovedUpdatePr({...account(item.job),...receipt},{githubToken,fetchFn});
     let result;
     if(pr.status==='merged'){
-      const cloudflareToken=await getFreshAccessToken({env,session:current,provider:'cloudflare',fetchFn});
       result=await verifyWebsite(inputFor(item.job,item.site),{cloudflareToken,fetchFn,
         expectedProject:{projectId:item.job.pages_project_id,repositoryId:item.job.repository_id,
           githubUserId:item.job.github_user_id,branch:item.job.production_branch},
