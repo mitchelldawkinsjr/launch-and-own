@@ -96,9 +96,9 @@ async function formData(request){
   if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(request.headers.get('content-type')||''))throw Error('Unsupported form submission');
   const len=Number(request.headers.get('content-length')||0);
   if(len>4096)throw Error('Form submission is too large');
-  const raw=await request.text();
-  if(raw.length>4096)throw Error('Form submission is too large');
-  return new URLSearchParams(raw);
+  const bytes=await readBounded(request.body,4096);
+  if(!bytes)throw Error('Form submission is too large');
+  return new URLSearchParams(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
 }
 async function saveFlow(env,{provider,binding,state,codeVerifier}){
   const key=await sha256(state);
@@ -496,12 +496,19 @@ async function sitePreview(env,current,id){
     if(!zipPreviewConfigured(env))return fail('Website ZIP previews are unavailable.',503);
     const stage=item.job_id?'approved':'draft';
     await readZipManifest(env.ZIP_ARTIFACTS,zip,stage);
-    const {origin,ticket}=await createZipPreview(env,zip,stage,current.expires_at);
-    return view('Open private website preview',`<p>Open a private look at the site you uploaded. Forms and outside links stay limited in this preview.</p>
-      <form action="${escape(origin)}/_open" method="POST"><input name="ticket" type="hidden" value="${escape(ticket)}">
-      <button type="submit">Open uploaded website</button></form>`,200,{
+    const [bundled,interactive]=await Promise.all([
+      createZipPreview(env,zip,stage,current.expires_at),
+      createZipPreview(env,zip,stage,current.expires_at,{externalAssets:true})
+    ]);
+    return view('Open private website preview',`<p>View the uploaded pages and bundled assets. Scripts and external assets are blocked in the private preview.</p>
+      <form action="${escape(bundled.origin)}/_open" method="POST"><input name="ticket" type="hidden" value="${escape(bundled.ticket)}">
+      <button type="submit">Open private preview</button></form>
+      <form action="${escape(interactive.origin)}/_open" method="POST"><input name="ticket" type="hidden" value="${escape(interactive.ticket)}">
+      <p>Use the interactive preview for a site that needs JavaScript or external fonts, styles, or images. Scripts can read your preview files and send them to third parties.</p>
+      <label><input type="checkbox" name="externalAssets" value="true" required> I trust these scripts and external resources</label>
+      <button type="submit">Open interactive preview</button></form>`,200,{
       ...textHeaders,'referrer-policy':'origin',
-      'content-security-policy':textHeaders['content-security-policy'].replace("form-action 'self'",`form-action ${origin}`)
+      'content-security-policy':textHeaders['content-security-policy'].replace("form-action 'self'",`form-action ${bundled.origin} ${interactive.origin}`)
     });
   }
   return new Response(html,{status:200,headers:{

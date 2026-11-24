@@ -8,6 +8,9 @@ import {pathToFileURL} from "node:url";
 import {planCustomer} from "./plan-customer.mjs";
 import {matchesApprovedPagesProject} from "./approved-pages-project.mjs";
 import {ProviderRequestError} from "./provider-errors.mjs";
+import {readBounded} from "./bounded-body.mjs";
+
+const MAX_PUBLIC_HOMEPAGE_BYTES = 2 * 1024 * 1024; // The largest supported ZIP homepage.
 
 export async function responseMatchesBytes(response, expected) {
   const reader = response.body?.getReader();
@@ -111,14 +114,15 @@ export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedC
     return {status:"pending-deployment",website,project:projectName,latestStage:latestStage?.name||null,latestStatus:latestStage?.status||null};
   // A previously live deployment does not prove the newly approved revision is live.
   // Cloudflare exposes the GitHub revision on the canonical production deployment.
-  const deployedCommit=canonical?.deployment_trigger?.metadata?.commit_hash||null;
+  const reportedCommit=canonical?.deployment_trigger?.metadata?.commit_hash;
+  const deployedCommit=typeof reportedCommit==="string"&&/^[a-f0-9]{40}$/i.test(reportedCommit)?reportedCommit:null;
   if(expectedCommitSha&&deployedCommit?.toLowerCase()!==expectedCommitSha.toLowerCase())
     return {status:"pending-expected-commit",website,project:projectName,expectedCommit:expectedCommitSha,deployedCommit};
   const page=await fetchFn(website+"/",{method:"GET",redirect:"manual",signal:AbortSignal.timeout(15000)});
   if(page.status!==200)
     return {status:"pending-public-reachability",website,project:projectName,httpStatus:page.status};
   const contentType=page.headers.get("content-type")||"";
-  if(!/text\/html\b/i.test(contentType))
+  if(!/^text\/html(?:\s*;|$)/i.test(contentType))
     return {status:"unexpected-public-content",website,project:projectName,contentType};
   let homepageBytes;
   try{
@@ -126,7 +130,7 @@ export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedC
       const expectedBytes=approved.htmlBytes??new TextEncoder().encode(approved.html);
       if(await responseMatchesBytes(page,expectedBytes))homepageBytes=expectedBytes;
     }else{
-      homepageBytes=new Uint8Array(await page.arrayBuffer());
+      homepageBytes=await readBounded(page.body,MAX_PUBLIC_HOMEPAGE_BYTES);
     }
   }catch(error){
     if(approved)throw new ProviderRequestError();

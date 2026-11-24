@@ -116,6 +116,29 @@ test('logout deletes encrypted session credentials and prevents further account 
   const home=await h.request('/',{cookie:sessionCookie});assert.match(await home.text(),/Connect GitHub/);
  }finally{globalThis.fetch=originalFetch}
 });
+test('onboarding forms enforce the streaming byte limit without Content-Length',async t=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ t.after(()=>{globalThis.fetch=originalFetch;h.sqlite.close()});
+ const {sessionCookie}=await bootstrap(h);
+ const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+ const encode=value=>new TextEncoder().encode(value);
+ let reads=0,cancelled=false;
+ const body=new ReadableStream({
+  pull(controller){
+   if(reads++===0)controller.enqueue(encode('csrf='+csrf+'&note='));
+   else if(reads===2)controller.enqueue(encode('é'.repeat(2050)));
+   else controller.close();
+  },
+  cancel(){cancelled=true}
+ },{highWaterMark:0});
+ const response=await worker.fetch(new Request(origin+'/logout',{method:'POST',duplex:'half',body,headers:{
+  'content-type':'application/x-www-form-urlencoded',origin,cookie:sessionCookie
+ }}),h.env);
+ assert.equal(response.status,400);
+ assert.equal(cancelled,true);
+ assert.equal(reads,2);
+ assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS c FROM onboarding_sessions').get().c,1);
+});
 test('scheduled maintenance removes expired flow and session records',async()=>{
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
