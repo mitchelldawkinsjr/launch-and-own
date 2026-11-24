@@ -29,7 +29,7 @@ function harness({repoExisting=false,projectExisting=false,otherOwner=false,coll
        if(failPages)return json({success:false},500);
        assert.equal(body.source.type,"github");assert.equal(body.source.config.repo_name,repoName);
        assert.equal(body.build_config.destination_dir,"public");
-       state.project={name:pagesName,production_branch:"main",source:{type:"github",config:{owner:"tester",repo_name:repoName,repo_id:"321"}}};
+       state.project={name:pagesName,production_branch:"main",source:{type:"github",config:{...body.source.config,repo_id:"321"}}};
        return json({success:true,result:state.project},201);
      }
    }
@@ -42,7 +42,7 @@ test("preview makes no requests and flags forms as gated",()=>{
  assert.equal(previewWebsite(input).executable,true);
  assert.equal(previewWebsite({...input,forms:true,ownerEmail:"owner@example.com"}).executable,false);
 });
-test("fresh customer creates only private repo, homepage and git-linked Pages project",async()=>{
+test("fresh customer creates a private repo, homepage and Pages project with preview builds off",async()=>{
  const h=harness();
  const result=await applyWebsite(input,{...tokens,fetchFn:h.fetchFn});
  assert.equal(result.status,"awaiting-live-deployment-verification");
@@ -50,6 +50,7 @@ test("fresh customer creates only private repo, homepage and git-linked Pages pr
  assert.equal(result.website,"https://"+pagesName+".pages.dev");
  assert.equal(result.headCommitSha,EXPECTED_SHA);
  assert.equal(h.state.repo.private,true);
+ assert.equal(h.state.project.source.config.preview_deployment_setting,"none");
  assert(h.state.file&&h.state.project);
 });
 test("retry reuses managed resources and never overwrites existing content",async()=>{
@@ -61,9 +62,11 @@ test("retry reuses managed resources and never overwrites existing content",asyn
 });
 test("legacy beta customer owned repository remains safely resumable after brand change",async()=>{
  const h=harness({repoExisting:true,legacyMarker:true,projectExisting:true});
+ h.state.project.source.config.preview_deployment_setting="all";
  const result=await applyWebsite(input,{...tokens,fetchFn:h.fetchFn});
  assert.deepEqual(result.journal.map(e=>e.action),["reused","preserved","reused"]);
  assert(h.history.every(entry=>entry.method==="GET"));
+ assert.equal(h.state.project.source.config.preview_deployment_setting,"all");
 });
 test("partially completed repo resumes without duplicating resources",async()=>{
  const h=harness({repoExisting:true});

@@ -185,7 +185,7 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn,ap
     }
     project=await api.cloudflare(cloudPath,{method:"POST",body:{
       name:pages,production_branch:branch,
-      source:{type:"github",config:{owner,repo_name:name,production_branch:branch,production_deployments_enabled:true,preview_deployment_setting:approved?"none":"all"}},
+      source:{type:"github",config:{owner,repo_name:name,production_branch:branch,production_deployments_enabled:true,preview_deployment_setting:"none"}},
       build_config:{build_command:"",destination_dir:"public",root_dir:"/"}
     }});
     if(approved&&!matchesApprovedPagesProject(project,expectedProject))
