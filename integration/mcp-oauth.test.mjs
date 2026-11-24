@@ -162,16 +162,18 @@ test('OAuth + MCP flow: unlinked session, browser link, then owner-scoped tools'
     {name: 'get_connection_status'})).json()).result.structuredContent;
   assert.equal(again.linked, true);
   assert.equal(again.github_user_id, 42);
-  const replay = await call('/token', form({
-    grant_type: 'refresh_token', client_id: grant.client_id, refresh_token
-  }));
-  assert.equal((await replay.json()).error, 'invalid_grant');
-
   const unknown = await (await rpc(call, access_token, 'tools/call', {name: 'nope'})).json();
   assert.equal(unknown.error.code, -32602);
   const forged = (await (await rpc(call, access_token, 'tools/call',
     {name: 'get_connection_status', arguments: {subject: 'x'}})).json()).result;
   assert.equal(forged.isError, true);
+
+  const replay = await call('/token', form({
+    grant_type: 'refresh_token', client_id: grant.client_id, refresh_token
+  }));
+  assert.equal((await replay.json()).error, 'invalid_grant');
+  assert.equal((await rpc(call, access_token, 'ping')).status, 401);
+  assert.equal((await rpc(call, next.access_token, 'ping')).status, 401);
 });
 
 test('authorization codes are single-use and PKCE-bound', async () => {
@@ -339,4 +341,29 @@ test('refresh revocation clears the exact client grant, even with a concurrent r
   assert.equal((await refresh(initial.refresh_token)).status, 400);
   assert.equal(sqlite.prepare('SELECT count(*) AS n FROM bridge_owner_links').get().n, 0);
   assert.equal((await link()).status, 400);
+});
+
+test('concurrent refresh replay revokes only the affected grant and its link challenges', async (t) => {
+  const {sqlite, call} = setup();
+  t.after(() => sqlite.close());
+  const grant = await authorize(call);
+  const independent = await authorize(call);
+  const initial = await (await exchange(call, grant)).json();
+  const other = await (await exchange(call, independent)).json();
+  const refresh = (refreshToken, clientId = grant.client_id) => call('/token', form({
+    grant_type: 'refresh_token', client_id: clientId, refresh_token: refreshToken
+  }));
+  const prompt = await (await rpc(call, initial.access_token, 'tools/call', {name: 'start_connect_accounts'})).json();
+  const challenge = prompt.result.structuredContent.challenge_id;
+
+  assert.equal((await refresh(initial.refresh_token, independent.client_id)).status, 400);
+  assert.equal((await rpc(call, initial.access_token, 'ping')).status, 200);
+  const responses = await Promise.all([refresh(initial.refresh_token), refresh(initial.refresh_token)]);
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 400]);
+  const remaining = await responses.find(response => response.status === 200).json();
+  assert.equal((await refresh(remaining.refresh_token)).status, 400);
+  for (const token of [initial.access_token, remaining.access_token])
+    assert.equal((await rpc(call, token, 'ping')).status, 401);
+  assert.equal((await rpc(call, other.access_token, 'ping')).status, 200);
+  assert.notEqual(sqlite.prepare('SELECT consumed_at FROM bridge_link_challenges WHERE id=?').get(challenge).consumed_at, null);
 });

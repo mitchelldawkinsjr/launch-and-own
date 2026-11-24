@@ -213,11 +213,29 @@ async function issueTokens({db, tokens, nowSeconds}, claim, subject, clientId) {
   // A losing code/refresh claim runs both INSERTs as no-ops. If an INSERT
   // fails, the batch rolls back the claim so the client can retry safely.
   const result = await db.batch(statements);
-  if (!result.every(step => step.meta?.changes === 1)) return oauthError('invalid_grant');
+  if (result.length !== statements.length || !result.every(step => step.meta?.changes === 1))
+    return null;
   return json({
     access_token: access.token, token_type: 'Bearer', expires_in: ACCESS_TTL,
     refresh_token: refreshToken, scope: SCOPE
   });
+}
+
+async function revokeGrant({db, nowSeconds}, subject, clientId) {
+  // Any rotation either completes before this batch or loses its token claim.
+  await db.batch([
+    db.prepare(`UPDATE bridge_refresh_tokens SET revoked_at = ?
+      WHERE subject = ? AND client_id = ? AND revoked_at IS NULL`)
+      .bind(nowSeconds, subject, clientId),
+    db.prepare(`UPDATE bridge_agent_tokens SET revoked_at = ?
+      WHERE subject = ? AND client_id = ? AND revoked_at IS NULL`)
+      .bind(nowSeconds, subject, clientId),
+    db.prepare(`UPDATE bridge_link_challenges SET consumed_at = ?
+      WHERE subject = ? AND client_id = ? AND consumed_at IS NULL`)
+      .bind(nowSeconds, subject, clientId),
+    db.prepare('DELETE FROM bridge_owner_links WHERE subject = ? AND client_id = ?')
+      .bind(subject, clientId)
+  ]);
 }
 
 async function token(request, ctx) {
@@ -245,7 +263,7 @@ async function token(request, ctx) {
     const claim = db.prepare(`UPDATE bridge_oauth_codes SET used_at = ?
       WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?`)
       .bind(nowSeconds, row.code_hash, nowSeconds);
-    return issueTokens(ctx, claim, row.subject, clientId);
+    return await issueTokens(ctx, claim, row.subject, clientId) ?? oauthError('invalid_grant');
   }
 
   if (form.get('grant_type') === 'refresh_token') {
@@ -254,13 +272,19 @@ async function token(request, ctx) {
       return oauthError('invalid_grant');
     const row = await d1First(db,
       'SELECT * FROM bridge_refresh_tokens WHERE token_hash = ?', hash(presented));
-    if (!row || row.revoked_at !== null || row.expires_at <= nowSeconds ||
-        row.client_id !== clientId)
+    if (!row || row.expires_at <= nowSeconds || row.client_id !== clientId)
       return oauthError('invalid_grant');
-    const claim = db.prepare(`UPDATE bridge_refresh_tokens SET revoked_at = ?
-      WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?`)
-      .bind(nowSeconds, row.token_hash, nowSeconds);
-    return issueTokens(ctx, claim, row.subject, clientId);
+    if (row.revoked_at === null) {
+      const claim = db.prepare(`UPDATE bridge_refresh_tokens SET revoked_at = ?
+        WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?`)
+        .bind(nowSeconds, row.token_hash, nowSeconds);
+      const response = await issueTokens(ctx, claim, row.subject, clientId);
+      if (response) return response;
+    }
+    // A matching, unexpired token has already been used. Invalidate its whole
+    // grant so a previously issued replacement cannot keep it active.
+    await revokeGrant(ctx, row.subject, clientId);
+    return oauthError('invalid_grant');
   }
 
   return oauthError('unsupported_grant_type');
@@ -280,23 +304,7 @@ async function revoke(request, ctx) {
   if (REFRESH_TOKEN.test(token)) {
     const grant = await d1First(db, `SELECT subject FROM bridge_refresh_tokens
       WHERE token_hash = ? AND client_id = ? AND expires_at > ?`, hash(token), clientId, nowSeconds);
-    if (grant) {
-      // A rotation either finishes before this batch (both new tokens are
-      // revoked) or loses its conditional claim. No linked owner is reusable.
-      await db.batch([
-        db.prepare(`UPDATE bridge_refresh_tokens SET revoked_at = ?
-          WHERE subject = ? AND client_id = ? AND revoked_at IS NULL`)
-          .bind(nowSeconds, grant.subject, clientId),
-        db.prepare(`UPDATE bridge_agent_tokens SET revoked_at = ?
-          WHERE subject = ? AND client_id = ? AND revoked_at IS NULL`)
-          .bind(nowSeconds, grant.subject, clientId),
-        db.prepare(`UPDATE bridge_link_challenges SET consumed_at = ?
-          WHERE subject = ? AND client_id = ? AND consumed_at IS NULL`)
-          .bind(nowSeconds, grant.subject, clientId),
-        db.prepare('DELETE FROM bridge_owner_links WHERE subject = ? AND client_id = ?')
-          .bind(grant.subject, clientId)
-      ]);
-    }
+    if (grant) await revokeGrant(ctx, grant.subject, clientId);
   } else if (ACCESS_TOKEN.test(token)) {
     await d1Run(db, `UPDATE bridge_agent_tokens SET revoked_at = ?
       WHERE token_hash = ? AND client_id = ? AND revoked_at IS NULL`,
