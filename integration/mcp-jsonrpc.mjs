@@ -19,9 +19,9 @@ export const SERVER_INFO = Object.freeze({
   description: 'Build and launch websites you own using ChatGPT, GitHub, and Cloudflare. Create a website draft, preview the exact result, approve publication securely in your browser, and verify when your site is live.',
   websiteUrl: 'https://onboard.360web.cloud',
   icons: Object.freeze([Object.freeze({
-    src: 'https://onboard.360web.cloud/logo.png',
+    src: 'https://raw.githubusercontent.com/mitchelldawkinsjr/launch-and-own/main/branding/launch-and-own-icon.png',
     mimeType: 'image/png',
-    sizes: Object.freeze(['256x256'])
+    sizes: Object.freeze(['128x128'])
   })])
 });
 

@@ -98,9 +98,9 @@ test('OAuth + MCP flow: unlinked session, browser link, then owner-scoped tools'
   assert.match(init.result.serverInfo.description, /Build and launch websites you own/);
   assert.equal(init.result.serverInfo.websiteUrl, 'https://onboard.360web.cloud');
   assert.deepEqual(init.result.serverInfo.icons, [{
-    src: 'https://onboard.360web.cloud/logo.png',
+    src: 'https://raw.githubusercontent.com/mitchelldawkinsjr/launch-and-own/main/branding/launch-and-own-icon.png',
     mimeType: 'image/png',
-    sizes: ['256x256']
+    sizes: ['128x128']
   }]);
   const note = await call('/mcp', {method: 'POST',
     headers: {'content-type': 'application/json', authorization: 'Bearer ' + access_token},
