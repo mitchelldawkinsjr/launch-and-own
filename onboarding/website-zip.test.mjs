@@ -240,7 +240,13 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   const preview = await openPrivatePreview(h, tenant, id);
   const page = await preview.fetch('/');
   assert.equal(await page.text(), home);
-  assert.match(page.headers.get('content-security-policy'), /sandbox/);
+  const previewCsp = page.headers.get('content-security-policy');
+  assert.match(previewCsp, /sandbox/);
+  assert.match(previewCsp, /script-src[^;]*https:/);
+  assert.match(previewCsp, /style-src[^;]*https:/);
+  assert.match(previewCsp, /img-src[^;]*https:/);
+  assert.match(previewCsp, /font-src[^;]*https:/);
+  assert.match(previewCsp, /form-action 'none'/);
   assert.equal(await (await preview.fetch('/about/index.html')).text(), '<h1>About Willow</h1>');
   assert.equal((await preview.fetch('/about')).headers.get('location'), preview.host + '/about/');
   const image = await preview.fetch('/assets/Willow%20Photo.png');
