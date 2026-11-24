@@ -4,7 +4,8 @@ import {ProviderRequestError} from "./provider-errors.mjs";
 
 const SLUG=/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
-/** Cloudflare's separate app that Pages uses to read the customer's GitHub folder. */
+/** Cloudflare's separate app that Pages uses to read the customer's GitHub folder.
+ *  Launch & Own user-to-server tokens cannot list this install; treat UI links as guidance. */
 export const CLOUDFLARE_WORKERS_PAGES_APP_SLUG="cloudflare-workers-and-pages";
 
 export function githubAppInstallUrl(appSlug){
