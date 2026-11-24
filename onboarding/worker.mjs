@@ -556,7 +556,7 @@ async function review(env,current,id){
     }
     if(['failed','needs_reauthorization'].includes(status)){
       output='<p>This launch paused. <a href="/history">Open your launches</a> to reconnect and continue when you are ready.</p>';
-      if(item.job_error==='cloudflare_pages_http_401')
+      if(typeof item.job_error==='string'&&item.job_error.startsWith('cloudflare_pages_http_401'))
         output+='<p role="alert">Cloudflare blocked Pages access for this grant. In Cloudflare open <strong>My Profile → Connected Applications</strong>, revoke Launch &amp; Own, then <a href="/connect/cloudflare">reconnect Cloudflare</a>, pick the same account, and continue again. Also confirm that account allows public OAuth apps under Members → Settings.</p>';
     }
     if(item.job_error)output+=`<p>Last result code: <code>${escape(item.job_error)}</code></p>`;
