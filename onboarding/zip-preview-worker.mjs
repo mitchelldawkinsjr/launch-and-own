@@ -3,14 +3,17 @@ import { verifyZipPreview } from './zip-preview-access.mjs';
 import { contentType, readBounded } from './website-zip.mjs';
 
 const cookieName = '__Host-website_zip_preview';
+// Private preview is ticket-gated and sandboxed. Allow HTTPS CDNs so Stitch/Tailwind
+// /font/image exports render; keep forms, framing, and workers locked down.
 const headers = {
   'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow', 'x-frame-options': 'DENY',
   'cross-origin-resource-policy': 'same-origin', 'cross-origin-opener-policy': 'same-origin',
   'content-security-policy': "sandbox allow-scripts allow-same-origin; default-src 'none'; "
-    + "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-    + "font-src 'self' data:; media-src 'self' blob:; connect-src 'self'; manifest-src 'self'; "
-    + "worker-src 'none'; form-action 'none'; base-uri 'self'; frame-ancestors 'none'"
+    + "script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; "
+    + "img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; "
+    + "connect-src 'self' https:; manifest-src 'self'; worker-src 'none'; form-action 'none'; "
+    + "base-uri 'self'; frame-ancestors 'none'"
 };
 
 const unavailable = () => new Response('This private preview is unavailable. Open the preview again from Launch & Own.', {
