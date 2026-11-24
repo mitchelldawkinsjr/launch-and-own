@@ -12,8 +12,10 @@ import {
 import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 import { createD1OptionExecutionStore, isOptionExecutionConfigured, optionExecutionSchemaReady } from './option-execution-store.mjs';
+import { currentAnalyticsRequestFingerprint, reviewAnalyticsOptions } from './toolkit-analytics-options.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
+const ANALYTICS_REVIEW = 'analytics-enablement-review';
 const KINDS = new Set([
   'domain', 'email', 'forms', 'analytics', 'pr_previews', 'seo', 'redirects'
 ]);
@@ -381,6 +383,9 @@ export function createSiteOptionsRoutes({
         '<label><input type="checkbox" name="formsConsent" value="true" required> ' +
         'I want a separate form plan reviewed later. This does not create a working form.</label>') +
       '</section>';
+    const analyticsRequest = byKind.analytics?.status === 'stored'
+      ? await currentAnalyticsRequestFingerprint(env, current, job, now())
+      : null;
     const analyticsSection =
       '<section><h2>Visitor insights</h2>' +
       '<p>Save a request to enable Cloudflare Web Analytics on this Pages project later. No beacon is turned on here.</p>' +
@@ -389,6 +394,16 @@ export function createSiteOptionsRoutes({
         hidden(job.id, 'analytics') +
         '<label><input type="checkbox" name="analyticsConsent" value="true" required> ' +
         'I want visitor insights reviewed later. This does not enable analytics yet.</label>') +
+      (analyticsRequest
+        ? '<p>Review Web Analytics separately. Enabling it can add a browser beacon on the next deployment.</p>' +
+          button('/site-options-prepare', 'Review Web Analytics enablement', current.csrf,
+            hidden(job.id, 'analytics') +
+            '<input type="hidden" name="intent" value="' + ANALYTICS_REVIEW + '">' +
+            '<input type="hidden" name="analyticsRequest" value="' + escape(analyticsRequest) + '">' +
+            '<label><input type="checkbox" name="privacyBeaconConsent" value="true" required> ' +
+            'I have reviewed my privacy notice and understand the next deployment may add a beacon ' +
+            'that collects visitor and performance data.</label>')
+        : '') +
       '</section>';
     const previewSection =
       '<section><h2>Private update previews</h2>' +
@@ -460,6 +475,12 @@ export function createSiteOptionsRoutes({
       return fail('This options form is incomplete.');
     const job = await ownedLiveJob(env, current, id, time);
     if (!job) return fail('Open an owned, verified live website from your toolkit.', 404);
+    if (form.has('intent')) {
+      if (kind !== 'analytics' || form.getAll('intent').length !== 1 ||
+          form.get('intent') !== ANALYTICS_REVIEW)
+        return fail('This options form is incomplete.');
+      return analyticsEnablementReview(env, current, job, form);
+    }
     await assertHistoryAccess(env, current);
     const rows = await listOptionApprovals(env, job.id);
     const built = buildReview(job, current, kind, form, rows);
@@ -476,6 +497,34 @@ export function createSiteOptionsRoutes({
       '<p><a href="/site-options?id=' + encodeURIComponent(job.id) + '">Back</a></p>');
   }
 
+  async function analyticsEnablementReview(env, current, job, form) {
+    if (form.getAll('privacyBeaconConsent').length !== 1 ||
+        form.get('privacyBeaconConsent') !== 'true')
+      return fail('Confirm the separate privacy and beacon acknowledgment.');
+    const fingerprint = form.get('analyticsRequest');
+    if (form.getAll('analyticsRequest').length !== 1 || !DIGEST.test(fingerprint || ''))
+      return fail('Reload your site options to review the current Analytics request.', 409);
+
+    const review = await reviewAnalyticsOptions(env, current, job, {
+      fingerprint, privacyBeaconConsent: true, now, assertHistoryAccess
+    });
+    const back = '<p><a href="/site-options?id=' + encodeURIComponent(job.id) + '">Back to site options</a></p>';
+    if (review.status === 'manual-review-required')
+      return view('Review existing Web Analytics settings',
+        '<p>Cloudflare reports Web Analytics configuration. Verify the live beacon and traffic in Cloudflare.</p>' + back);
+    if (review.status !== 'review-required')
+      return fail('Could not verify the current Analytics request and Pages project. Reopen your site options.', 409);
+
+    return view('Review Web Analytics enablement',
+      '<p>Pages project <code>' + escape(review.binding.pagesProjectName) + '</code></p>' +
+      '<p>Review fingerprint <code>' + escape(review.proposalSha256) + '</code></p>' +
+      '<p>Enabling Web Analytics may add a browser beacon on the next deployment. ' +
+      'Approval from the site owner and a separate operator grant are required before activation. ' +
+      'Review and approve any production deployment separately.</p>' +
+      '<p><a href="' + escape(review.projectDashboardUrl) + '" rel="noreferrer">Open Cloudflare project</a> ' +
+      'and choose Metrics to review its settings.</p>' + back);
+  }
+
   async function approve(request, env, current) {
     await limitAttempts(request, env);
     const blocked = await requireReady(env);
@@ -486,7 +535,7 @@ export function createSiteOptionsRoutes({
     const id = form.get('id');
     const kind = form.get('kind');
     const posted = form.get('digest');
-    if (!KINDS.has(kind) || form.getAll('kind').length !== 1 ||
+    if (form.has('intent') || !KINDS.has(kind) || form.getAll('kind').length !== 1 ||
         form.getAll('id').length !== 1 || form.getAll('digest').length !== 1 ||
         !DIGEST.test(posted || ''))
       return fail('This options form is incomplete.');
