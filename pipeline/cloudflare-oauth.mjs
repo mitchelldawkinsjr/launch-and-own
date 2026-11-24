@@ -120,14 +120,26 @@ export async function verifyCloudflarePagesAccess({accessToken,accountId,fetchFn
   const headers={authorization:"Bearer "+accessToken,accept:"application/json"};
   const url=API+"/accounts/"+encodeURIComponent(accountId)+"/pages/projects?per_page=1";
   const r=await fetchFn(url,{method:"GET",headers,redirect:"manual"});
+  let providerCode="";
+  let body=null;
+  try{body=await r.clone().json()}catch{/* non-JSON */}
   if(r.ok){
-    const data=await r.json();
-    if(data.success===true&&Array.isArray(data.result))return {ok:true};
+    if(body?.success===true&&Array.isArray(body.result))return {ok:true};
   }
+  const first=Array.isArray(body?.errors)&&body.errors[0];
+  if(first&&Number.isFinite(first.code))providerCode=String(first.code);
+  // Operator-only: status + Cloudflare error code; never log tokens or bodies.
+  console.error(JSON.stringify({
+    event:"cloudflare_pages_preflight_denied",
+    httpStatus:r.status,
+    providerCode:providerCode||null,
+    success:body?.success===false?false:body?.success===true?true:null
+  }));
   if(strict){
     const err=new ProviderRequestError(r);
-    err.code="cloudflare_pages_http_"+r.status;
+    err.code="cloudflare_pages_http_"+r.status+(providerCode?"_cf"+providerCode:"");
     throw err;
   }
-  throw Error("Cloudflare Pages access is unavailable for this account (HTTP "+r.status+")");
+  throw Error("Cloudflare Pages access is unavailable for this account (HTTP "+r.status+
+    (providerCode?" cf"+providerCode:"")+")");
 }

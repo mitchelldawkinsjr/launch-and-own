@@ -147,6 +147,6 @@ test("Pages list preflight confirms Pages API access on the selected account",as
 test("Pages list denial is a distinct Pages authorization failure",async()=>{
  const id="0123456789abcdef0123456789abcdef";
  await assert.rejects(verifyCloudflarePagesAccess({accessToken:"private-token",accountId:id,strict:true,
-   fetchFn:async()=>new Response(JSON.stringify({success:false}),{status:401})
- }),error=>error instanceof Error&&error.code==="cloudflare_pages_http_401");
+   fetchFn:async()=>new Response(JSON.stringify({success:false,errors:[{code:10000,message:"Authentication error"}]}),{status:401})
+ }),error=>error instanceof Error&&error.code==="cloudflare_pages_http_401_cf10000");
 });
