@@ -1,4 +1,5 @@
-import { sameBytes, sha256Bytes } from './bytes.mjs';
+import { sha256Bytes } from './bytes.mjs';
+import { matchesApprovedBytes, projectBeaconToken, withoutProjectBeacon } from '../pipeline/web-analytics.mjs';
 import { ImportedEditError } from './errors.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
@@ -40,6 +41,7 @@ export async function verifyPublishedRevision({ accountId, projectName, expected
   const payload = await response.json().catch(() => { throw new ImportedEditError('verification-unreadable'); });
   if (!payload?.success || payload.result?.name !== projectName) throw new ImportedEditError('verification-unreadable');
   const assessed = assessPublishedRevision({ expectedCommitSha, project: payload.result });
+  const beaconToken = projectBeaconToken(payload.result);
   if (!assessed.live || (expectedBytes === undefined && !Array.isArray(changedFiles))) return assessed;
   if (typeof publicUrl !== 'string' || !publicUrl.startsWith('https://')) throw new ImportedEditError('verification-target-required');
   if (Array.isArray(changedFiles)) {
@@ -52,13 +54,17 @@ export async function verifyPublishedRevision({ accountId, projectName, expected
       const page = await fetchFn(root + servedPath(path).split('/').map(encodeURIComponent).join('/'), { method: 'GET', redirect: 'manual' });
       if (page.status !== 200) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
       const bytes = new Uint8Array(await page.arrayBuffer());
-      if (await sha256Bytes(bytes) !== file.sha256) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
+      // Allow only the project's own Pages analytics beacon on top of the approved bytes.
+      const candidates = [bytes, ...withoutProjectBeacon(bytes, beaconToken)];
+      let matched = false;
+      for (const candidate of candidates) if (await sha256Bytes(candidate) === file.sha256) { matched = true; break; }
+      if (!matched) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
     }
     return assessed;
   }
   const page = await fetchFn(publicUrl, { method: 'GET', redirect: 'manual' });
   if (page.status !== 200) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
   const bytes = new Uint8Array(await page.arrayBuffer());
-  if (!sameBytes(bytes, expectedBytes)) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
+  if (!matchesApprovedBytes(bytes, expectedBytes, beaconToken)) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
   return assessed;
 }

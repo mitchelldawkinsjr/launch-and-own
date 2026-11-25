@@ -108,6 +108,18 @@ function harness({withJobs=true}={}){
     if(resourceState.cloudflareRevoked)return new Response(null,{status:403});
     return Response.json({success:true,result:{id:acct[1],name:'Demo Account'}});
   }
+  const rum=url.match(/^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/([a-f0-9]{32})\/rum\/site_info(\/list\?per_page=100)?$/);
+  if(rum){
+    if(resourceState.cloudflareRevoked)return new Response(null,{status:401});
+    if(resourceState.denyAnalytics)return Response.json({success:false,errors:[{code:10000}]},{status:403});
+    resourceState.rumSites??=[];
+    if(rum[2])return Response.json({success:true,result:resourceState.rumSites});
+    if(opts.method==='POST'){
+      const site={site_tag:'7a'.repeat(16),site_token:'7b'.repeat(16),host:JSON.parse(opts.body).host,auto_install:false};
+      resourceState.rumSites.push(site);
+      return Response.json({success:true,result:site});
+    }
+  }
   const pagesAccount=url.match(/^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/([a-f0-9]{32})\/pages\/projects(?:[/?]|$)/);
   if(pagesAccount){
     const bearer=new Headers(opts.headers).get('authorization');
@@ -255,7 +267,14 @@ function harness({withJobs=true}={}){
     resourceState.emailRules=[rule];
     return page(rule);
   }
-  if(url==='https://esp-willow-studio-site.pages.dev/')return new Response(resourceState.publicHtml??resourceState.homepageHtml,{status:200,headers:{'content-type':'text/html'}});
+  if(url==='https://esp-willow-studio-site.pages.dev/'){
+    // Like Pages: a project with Web Analytics gets the beacon added before </body> on deploy.
+    const token=resourceState.pages?.build_config?.web_analytics_token;
+    const served=resourceState.publicHtml??resourceState.homepageHtml;
+    const beacon='<!-- Cloudflare Pages Analytics --><script defer src=\'https://static.cloudflareinsights.com/beacon.min.js\' data-cf-beacon=\'{"token": "'+token+'"}\'></script><!-- Cloudflare Pages Analytics -->';
+    const html=token&&typeof served==='string'&&served.includes('</body>')?served.replace('</body>',beacon+'</body>'):served;
+    return new Response(html,{status:200,headers:{'content-type':'text/html'}});
+  }
   throw Error('unmocked external request: '+url);
  };
  const request=async(path,opts={})=>{

@@ -4,7 +4,9 @@ import {createHash} from 'node:crypto';
 import {readBounded} from './bounded-body.mjs';
 import { matchesApprovedPagesProject } from './approved-pages-project.mjs';
 import { isManagedRepositoryDescription } from './managed-site-repository.mjs';
-import { responseMatchesBytes } from './verify-site.mjs';
+import { matchesApprovedBytes, projectBeaconToken } from './web-analytics.mjs';
+
+const BEACON_ALLOWANCE = 2048; // The Pages analytics script tag and its comments.
 
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const LOGIN = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i;
@@ -317,7 +319,7 @@ function productionSnapshot(project) {
   return commit && typeof id === 'string' && OPAQUE.test(id) ? {id, commit} : null;
 }
 
-async function checkPublicHomepage(read, fetchFn, url, bytes) {
+async function checkPublicHomepage(read, fetchFn, url, bytes, beaconToken) {
   await read.authorized();
   let state = 'public_check_unavailable';
   try {
@@ -326,7 +328,8 @@ async function checkPublicHomepage(read, fetchFn, url, bytes) {
       headers: {accept: 'text/html', 'cache-control': 'no-cache'}
     });
     if (response.status === 200 && /^text\/html(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) {
-      state = await responseMatchesBytes(response, bytes) ? 'verified_homepage' : 'public_content_differs';
+      const served = await readBounded(response.body, bytes.length + BEACON_ALLOWANCE);
+      state = served && matchesApprovedBytes(served, bytes, beaconToken) ? 'verified_homepage' : 'public_content_differs';
     } else {
       await response.body?.cancel();
     }
@@ -389,7 +392,7 @@ export async function readCurrentManagedHomepage({
   const website = 'https://' + verified.project.name + '.pages.dev/';
   const production = includePublication === true ? productionSnapshot(verified.project) : null;
   const checked = production?.commit === verified.baseCommitSha
-    ? {id: production.id, state: await checkPublicHomepage(read, options.fetchFn ?? fetch, website, bytes)}
+    ? {id: production.id, state: await checkPublicHomepage(read, options.fetchFn ?? fetch, website, bytes, projectBeaconToken(verified.project))}
     : null;
 
   // A same-name repository/project swap or moving main is never authorized by

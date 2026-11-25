@@ -113,6 +113,7 @@ test('sealed managed-site tickets bind session epoch and reject forgery', async 
 
 test('GET /toolkit soft-loads current managed sites without provider writes', async (t) => {
   const h = harness();
+  h.resourceState.denyAnalytics = true; // Launched without visitor insights (opted out or older grant).
   t.after(() => h.sqlite.close());
   t.mock.method(globalThis, 'fetch', h.fetchFn);
   h.resourceState.issueExpiringGrants = true;

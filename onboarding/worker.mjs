@@ -386,7 +386,7 @@ async function preview(request,env,current){
     (id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,created_at,updated_at,preview_html)
     VALUES(?,?,?,?,?,?,'preview',?,?,?)`)
     .bind(id,current.hash,site.name,current.cloudflare_account_id,current.github_login,
-      JSON.stringify({...plan,site}),ts,ts,renderSite(site)).run();
+      JSON.stringify({...plan,site,analytics:true}),ts,ts,renderSite(site)).run();
   return redirect('/review?id='+encodeURIComponent(id));
 }
 async function uploadZip(request,env,current){
@@ -419,7 +419,7 @@ async function uploadZip(request,env,current){
     SELECT ?,id_hash,?,cloudflare_account_id,github_login,?,'preview',?,? FROM onboarding_sessions
     WHERE id_hash=? AND authorization_epoch=? AND cloudflare_account_id=? AND cloudflare_token_ct IS NOT NULL
       AND expires_at>? RETURNING id`)
-    .bind(id,name,JSON.stringify({...plan,zip}),time,time,current.hash,current.authorization_epoch,current.cloudflare_account_id,time).first();
+    .bind(id,name,JSON.stringify({...plan,zip,analytics:true}),time,time,current.hash,current.authorization_epoch,current.cloudflare_account_id,time).first();
   if(!staged)return fail('Your connection changed. Review your account selection and upload again.',409);
   return redirect(reviewPath(id));
 }
@@ -446,6 +446,22 @@ async function assertHistoryAccess(env,current){
 
 const launchIdField=id=>'<input type="hidden" name="id" value="'+escape(id)+'">';
 const reviewPath=id=>'/review?id='+encodeURIComponent(id);
+// Visitor insights are on by default. The owner can switch them off (or back on) before approving;
+// the choice is part of plan_json, which the approval digest covers. Reapprovals keep the job's plan.
+async function setReviewAnalytics(request,env,current){
+  await limitAttempts(request,env);
+  const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
+  const id=form.get('id'),value=form.get('analytics');
+  if(!isLaunchId(id)||!['true','false'].includes(value))return fail('Choose whether to turn visitor insights on.');
+  const item=await getLaunch(env,current,id);
+  if(!item||item.status!=='preview'||item.job_id||item.legacy_receipt_id)return fail('This launch can no longer be changed.',409);
+  const plan=JSON.parse(item.plan_json);
+  const changed=await env.DB.prepare(`UPDATE onboarding_launches SET plan_json=?,updated_at=?
+    WHERE id=? AND session_hash=? AND status='preview' AND job_id IS NULL AND legacy_receipt_id IS NULL AND plan_json=?`)
+    .bind(JSON.stringify({...plan,analytics:value==='true'}),now(),id,current.hash,item.plan_json).run();
+  if(!changed.meta?.changes)return fail('This launch can no longer be changed.',409);
+  return redirect(reviewPath(id));
+}
 const receiptOwner=(current,time)=>({
   githubUserId:current.github_user_id,cloudflareAccountId:current.cloudflare_account_id,time
 });
@@ -594,10 +610,12 @@ async function review(env,current,id){
     failed:'Needs attention',
     needs_reauthorization:'Reconnect required'
   };
+  const analyticsOn=JSON.parse(item.plan_json).analytics===true;
   const details=`<p><strong>Website name:</strong> ${escape(item.customer_name)}</p>`+
     `<p><strong>GitHub account:</strong> ${escape(item.github_login)}</p>`+
     `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
     `<p><strong>Public website address:</strong> ${escape(website)}</p>`+
+    `<p><strong>Visitor insights:</strong> ${analyticsOn?'On. Cloudflare Web Analytics counts visits and page speed in your own Cloudflare account. It uses no cookies and collects no personal data from visitors.':'Off.'}</p>`+
     (verifyExisting
       ? '<p>With your approval, Launch &amp; Own will check the existing Pages project and verify that it published the exact version you reviewed.</p>'
       : '<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>')+
@@ -624,7 +642,9 @@ async function review(env,current,id){
       output='<p>This launch needs its private GitHub files first. '+pagesAccessLink+' with Pages Edit to create them and launch.</p>';
     }else{
       const accessField=pagesAccess?'<input type="hidden" name="pagesAccessId" value="'+escape(pagesAccess.access_id)+'">':'';
-      controls=button('/approve',verifyExisting?'Approve and verify existing project':'Approve and create website',current.csrf,
+      const analyticsToggle=item.job_id||item.legacy_receipt_id?'':button('/review-analytics',analyticsOn?'Turn off visitor insights':'Turn on visitor insights',current.csrf,
+        launchIdField(id)+'<input type="hidden" name="analytics" value="'+(analyticsOn?'false':'true')+'">');
+      controls=analyticsToggle+button('/approve',verifyExisting?'Approve and verify existing project':'Approve and create website',current.csrf,
         launchIdField(id)+accessField+'<input type="hidden" name="digest" value="'+escape(digest)+'">');
     }
   }else{
@@ -819,6 +839,7 @@ export default {
         if(url.pathname==='/preview')return await preview(request,env,current);
         if(url.pathname==='/draft')return await draft(request,env,current);
         if(url.pathname==='/approve')return await approve(request,env,current,context);
+        if(url.pathname==='/review-analytics')return await setReviewAnalytics(request,env,current);
         if(url.pathname==='/launch')return await runDueStep(request,env,current,context,'queued');
         if(url.pathname==='/verify')return await runDueStep(request,env,current,context,'pending_deployment');
         if(url.pathname==='/logout')return await logout(request,env,current);

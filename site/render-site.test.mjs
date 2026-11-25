@@ -44,6 +44,7 @@ test("does not load external scripts, images or remote fonts",()=>{
  assert(!/<script\b/i.test(html));
  assert(!/<img\b/i.test(html));
  assert(!/@import/i.test(html));
- assert(!/https:\/\//i.test(html));
+ // Only the Cloudflare Web Analytics origins in the CSP, no other remote address.
+ assert(!/https:\/\//i.test(html.replace(/script-src https:\/\/static\.cloudflareinsights\.com; connect-src &#39;self&#39; https:\/\/cloudflareinsights\.com; /,"")));
  assert.match(html,/Content-Security-Policy/);
 });
