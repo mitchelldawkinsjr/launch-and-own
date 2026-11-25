@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "launch-and-own": {
+      "type": "streamable-http",
+      "url": "https://mcp.360web.cloud/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "dcr"
+            },
+            "baseScopes": [
+              "launch_and_own.bridge"
+            ],
+            "defaultScopes": [
+              "launch_and_own.bridge"
+            ],
+            "oidcEnabled": false
+          }
+        }
+      }
+    }
+  }
+}

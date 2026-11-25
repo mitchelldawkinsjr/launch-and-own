@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {createHash} from "node:crypto";
 import {previewWebsiteUpdate,proposeWebsiteUpdate} from "./propose-site-update.mjs";
 import {managedRepositoryDescription} from "./managed-site-repository.mjs";
 import {renderSite} from "../site/render-site.mjs";
@@ -11,11 +12,12 @@ const oldHtml=renderSite({name,tagline:"Old website headline"});
 const input={name,githubOwner:owner,accountId:"0123456789abcdef0123456789abcdef",
   site:{tagline:"Brand new website headline",about:"Local family portraits and photography.",
     services:["Portraits","Events"],theme:"forest"}};
+const blobSha=html=>createHash('sha1').update('blob '+Buffer.byteLength(html)+'\0').update(html).digest('hex');
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});
 
 function harness(options={}){
  const state={currentHtml:options.currentHtml??oldHtml,mainSha:options.mainSha??BASE_SHA,
-   repo:{name:repoName,private:true,default_branch:"main",
+   repo:{id:101,name:repoName,private:true,default_branch:"main",
     description:options.unmanaged?"Somebody else's repo":"Launch & Own managed site: willow-studio",
     owner:{login:options.otherOwner?"someone-else":owner,id:42}},
    branch:null,branchSha:null,branchHtml:null,prs:[],createdRefs:0,updates:0,prsCreated:0,
@@ -31,7 +33,7 @@ function harness(options={}){
    if(path===root+"/branches/main"&&method==="GET")return json({commit:{sha:state.mainSha}});
    if(path===root+"/contents/public/index.html"&&method==="GET"){
      const ref=u.searchParams.get("ref");
-     if(ref==="main")return json({type:"file",sha:BLOB_SHA,encoding:"base64",
+     if(ref===state.mainSha)return json({type:"file",sha:BLOB_SHA,encoding:"base64",
        content:Buffer.from(state.currentHtml).toString("base64")});
      if(ref===state.branch)return json({type:"file",sha:BLOB_SHA,encoding:"base64",
        content:Buffer.from(state.branchHtml).toString("base64")});
@@ -56,6 +58,11 @@ function harness(options={}){
      state.branchSha=UPDATE_SHA;state.updates++;
      return json({commit:{sha:UPDATE_SHA}},200);
    }
+   if(path===root+"/commits/"+UPDATE_SHA&&method==="GET"){
+     const files=[{filename:"public/index.html",status:"modified",sha:blobSha(state.branchHtml)}];
+     if(state.extraFile)files.push({filename:"public/unreviewed.html",status:"added",sha:BLOB_SHA});
+     return json({sha:UPDATE_SHA,parents:[{sha:state.updateParent??BASE_SHA}],files});
+   }
    if(path===root+"/pulls"&&method==="GET"){
      assert.equal(u.searchParams.get("base"),"main");
      assert.equal(u.searchParams.get("state"),"all");
@@ -65,7 +72,8 @@ function harness(options={}){
      assert.equal(payload.head,state.branch);assert.equal(payload.base,"main");
      assert.match(payload.body,/Approval preview SHA-256/);
      const item={number:55,state:"open",html_url:"https://github.com/"+owner+"/"+repoName+"/pull/55",
-       head:{ref:state.branch},base:{ref:"main"}};
+       head:{ref:state.branch,sha:state.branchSha,repo:{id:state.repo.id}},
+       base:{ref:"main",sha:state.mainSha,repo:{id:state.repo.id}}};
      state.prs.push(item);state.prsCreated++;
      return json(item,201);
    }
@@ -101,6 +109,7 @@ test("customer-approved update makes only a GitHub feature branch plus reviewabl
  const r=await proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn});
  assert.equal(r.status,"awaiting-customer-merge");
  assert.equal(r.number,55);assert.equal(r.reused,false);
+ assert.equal(r.headCommitSha,UPDATE_SHA);
  assert.equal(r.pullRequest,"https://github.com/tester/esp-willow-studio/pull/55");
  assert.equal(h.state.createdRefs,1);assert.equal(h.state.updates,1);assert.equal(h.state.prsCreated,1);
  assert.equal(h.state.currentHtml,oldHtml,"The live main branch must not change");
@@ -130,6 +139,16 @@ test("approved updates accept a valid durable launch marker for the same slug",a
  assert.equal(result.status,"awaiting-customer-merge");
  assert.equal(h.state.currentHtml,oldHtml);
 });
+test("a replaced GitHub repository with the same slug/owner cannot receive an approved edit",async()=>{
+ const h=harness(),approved={...await approvedInput(),expectedRepositoryId:101};
+ h.state.repo.id=102;
+ await assert.rejects(proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn}),/repository identity changed/);
+ assert(h.history.every(x=>x.method==="GET"));
+ assert.equal(h.state.prsCreated,0);
+ h.state.repo.id=101;
+ const valid=await proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn});
+ assert.equal(valid.status,"awaiting-customer-merge");
+});
 test("unmanaged repositories and mismatched immutable GitHub owners fail closed",async()=>{
  for(const options of [{unmanaged:true},{otherOwner:true}]){
   const h=harness(options);
@@ -150,6 +169,18 @@ test("an existing branch with unrelated content is never overwritten",async()=>{
  await assert.rejects(proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn}),/unrelated changes/);
  assert.equal(h.state.updates,previous);
  assert.equal(first.reused,false);
+});
+test("an exact homepage on a branch with unrelated changes or the wrong parent cannot be reused",async()=>{
+ for(const change of [{extraFile:true},{updateParent:"f".repeat(40)}]){
+   const h=harness(),approved=await approvedInput();
+   await proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn});
+   h.state.prs=[];
+   Object.assign(h.state,change);
+   const before=h.history.length;
+   await assert.rejects(proposeWebsiteUpdate(approved,{...auth,fetchFn:h.fetchFn}),/unrelated changes/);
+   assert(h.history.slice(before).every(call=>call.method==="GET"));
+   assert.equal(h.state.prsCreated,1);
+ }
 });
 test("interrupted update after branch creation resumes, without duplicating Git references",async()=>{
  const h=harness(),approved=await approvedInput();

@@ -41,30 +41,7 @@ export function utf8Contents(bytes) {
   try { return utf8Decoder.decode(bytes); } catch { return null; }
 }
 
-export async function readBounded(stream, maxBytes) {
-  if (!stream) return new Uint8Array();
-  const reader = stream.getReader();
-  const chunks = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maxBytes) return null;
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel();
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
-}
+export {readBounded} from '../pipeline/bounded-body.mjs';
 
 function zipDirectory(view) {
   // The end record is followed only by its optional, length-prefixed comment.

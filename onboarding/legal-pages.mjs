@@ -1,6 +1,6 @@
 // Plain-language beta privacy policy and terms, linked from the OAuth consent screens.
 // Keep these statements in sync with what worker.mjs actually stores and does.
-export const LEGAL_UPDATED='November 22, 2026';
+export const LEGAL_UPDATED='November 24, 2026';
 const CONTACT='https://github.com/mitchelldawkinsjr/launch-and-own/issues';
 
 export const privacyHtml=`<p class="muted">Beta policy · Last updated ${LEGAL_UPDATED}</p>
@@ -8,6 +8,7 @@ export const privacyHtml=`<p class="muted">Beta policy · Last updated ${LEGAL_U
 <section><h2>What we collect</h2><ul>
 <li><strong>GitHub identity:</strong> your GitHub user ID and username, to confirm who is signed in.</li>
 <li><strong>Provider authorizations:</strong> the access and refresh tokens GitHub and Cloudflare issue when you approve Launch &amp; Own. They are encrypted (AES-GCM) before storage and are never shown to you, other users, or logs.</li>
+<li><strong>Optional Cloudflare Pages access:</strong> if you supply a Pages API token in the signed-in setup page, we encrypt it for this session. We use it only for Pages requests on the account you selected and according to the access you choose.</li>
 <li><strong>Cloudflare account choice:</strong> the ID of the Cloudflare account you select.</li>
 <li><strong>Website content you enter:</strong> business name, headline, description, services, optional contact email and theme, plus the plan you approve.</li>
 <li><strong>Website uploads</strong> include the static pages and assets from your ZIP and the file list and integrity hashes used to preview and launch your site.</li>
@@ -22,7 +23,7 @@ export const privacyHtml=`<p class="muted">Beta policy · Last updated ${LEGAL_U
 <li>Approved launch history: kept for 30 days, and you can delete entries sooner. Launch history does not contain your tokens.</li>
 <li>Draft uploads are scheduled for deletion after one day. Files retained for an approved launch are scheduled for deletion after 32 days. Your copies in GitHub and Cloudflare stay in your accounts.</li>
 </ul></section>
-<section><h2>Your control</h2><p><strong>Disconnect and sign out</strong> deletes your session and asks GitHub and Cloudflare to revoke Launch &amp; Own's access. You can also revoke access at any time in your GitHub and Cloudflare settings. The repositories and websites created for you stay in your accounts, and you own them.</p></section>
+<section><h2>Your control</h2><p><strong>Disconnect and sign out</strong> deletes your session and asks GitHub and Cloudflare to revoke Launch &amp; Own's OAuth access. You can remove the optional Pages connection during your session, and you can revoke OAuth access or a Pages API token in your provider settings. The repositories and websites created for you stay in your accounts, and you own them.</p></section>
 <section><h2>Third parties</h2><p>We rely on GitHub and Cloudflare, which process data under their own privacy policies, and on the AI provider only if you use AI drafting.</p></section>
 <section><h2>Contact and changes</h2><p>Questions or requests: <a href="${CONTACT}">open an issue</a>. We will update this page and its date when practices change.</p></section>
 <p><a href="/terms">Terms of Service</a> · <a href="/">Back to setup</a></p>`;

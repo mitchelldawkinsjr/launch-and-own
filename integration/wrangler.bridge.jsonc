@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "launch-and-own-mcp-bridge",
+  "main": "bridge-worker.mjs",
+  "compatibility_date": "2026-11-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "mcp.360web.cloud",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "BRIDGE_DEPLOYMENT": "approved",
+    "ONBOARDING_ORIGIN": "https://onboard.360web.cloud"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "launch-and-own-mcp-bridge",
+      "database_id": "384a87b9-8f7c-4477-acbd-29d0c5d08465",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  }
+}

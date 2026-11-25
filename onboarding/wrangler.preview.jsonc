@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "launch-and-own-zip-preview",
+  "main": "zip-preview-worker.mjs",
+  "compatibility_date": "2026-11-21",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "*-zp.360web.cloud/*",
+      "zone_name": "360web.cloud"
+    }
+  ],
+  "vars": {
+    "ONBOARDING_ORIGIN": "https://onboard.360web.cloud",
+    "ZIP_PREVIEW_DOMAIN": "-zp.360web.cloud"
+  },
+  "r2_buckets": [
+    {
+      "binding": "ZIP_ARTIFACTS",
+      "bucket_name": "launch-and-own-zip-artifacts"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  }
+}

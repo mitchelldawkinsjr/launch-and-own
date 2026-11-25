@@ -6,7 +6,7 @@ import worker from './worker.mjs';
 import previewWorker from './zip-preview-worker.mjs';
 import { createZipPreview } from './zip-preview-access.mjs';
 import { extractWebsiteZip } from './website-zip.mjs';
-import { approvePreview, connectTenant, harness, jobRow, launchId, makeDue, origin,
+import { accountId, approvePreview, connectTenant, harness, jobRow, launchId, makeDue, moveLeaseIntoPast, origin,
   originalFetch, post, reviewDigest, writes } from './worker-test-support.mjs';
 
 function zip(entries) {
@@ -135,7 +135,8 @@ function zipHarness(t) {
   const h = harness();
   const state = h.resourceState;
   Object.assign(h.env, { ZIP_ARTIFACTS: localBucket(), ZIP_PREVIEW_DOMAIN: 'preview.example.test', ZIP_PREVIEW_KEY: 'cd'.repeat(32) });
-  const imported = { files: null, commits: 0, lostResponse: false, foreignHead: false, moveHead: false, publicBytes: null };
+  const imported = { files: null, commits: 0, lostResponse: false, foreignHead: false, moveHead: false,
+    publicBytes: null, currentCommit: approvedSha, currentHomepage: null };
   const fetchFn = async (url, options = {}) => {
     if (url === 'https://api.github.com/graphql') {
       const { query, variables } = JSON.parse(options.body);
@@ -174,7 +175,12 @@ function zipHarness(t) {
       if (imported.foreignHead) tree.push({ path: 'customer-file.txt', mode: '100644', type: 'blob' });
       return Response.json({ truncated: false, tree });
     }
-    if (url === repoRoot + '/branches/main') return Response.json({ commit: { sha: approvedSha } });
+    if (url === repoRoot + '/branches/main') return Response.json({ commit: { sha: imported.currentCommit } });
+    if (url === repoRoot + '/contents/public/index.html?ref=' + imported.currentCommit && imported.files) {
+      const bytes = imported.currentHomepage ?? imported.files.get('public/index.html');
+      const sha = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
+      return Response.json({type: 'file', encoding: 'base64', size: bytes.length, sha, content: bytes.toString('base64')});
+    }
     if (url === liveRoot) return new Response(imported.publicBytes ?? imported.files.get('public/index.html'),
       { headers: { 'content-type': 'text/html' } });
     const response = await h.fetchFn(url, options);
@@ -203,14 +209,21 @@ async function upload(h, tenant, options = {}) {
   } }), h.env);
 }
 
-async function openPrivatePreview(h, tenant, id) {
+async function privatePreviewChoices(h, tenant, id) {
   const interstitial = await h.request('/site-preview?id=' + id, { cookie: tenant.cookie });
   assert.equal(interstitial.status, 200);
   const html = await interstitial.text();
-  const [, host] = html.match(/action="(https:[^"]+)\/_open"/);
-  const [, ticket] = html.match(/name="ticket" type="hidden" value="([A-Za-z0-9_-]+)"/);
-  assert.match(interstitial.headers.get('content-security-policy'), new RegExp(`form-action ${host}`));
+  const matches = html.matchAll(/action="(https:[^"]+)\/_open" method="POST"><input name="ticket" type="hidden" value="([A-Za-z0-9_-]+)"/g);
+  const choices = Array.from(matches, ([, host, ticket]) => ({ host, ticket }));
+  assert.equal(choices.length, 2);
+  assert.ok(interstitial.headers.get('content-security-policy').includes('form-action ' + choices.map(choice => choice.host).join(' ')));
   assert.equal(interstitial.headers.get('referrer-policy'), 'origin');
+  assert.match(html, /name="externalAssets" value="true" required/);
+  return choices;
+}
+
+async function openPrivatePreview(h, tenant, id) {
+  const [{ host, ticket }] = await privatePreviewChoices(h, tenant, id);
   const request = (path, options = {}) => previewWorker.fetch(new Request(host + path, options), h.env);
   const go = await request('/_open', { method: 'POST', headers: { origin }, body: new URLSearchParams({ ticket }) });
   assert.equal(go.status, 303);
@@ -225,7 +238,7 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   const h = zipHarness(t);
   const tenant = await connectTenant(h);
   const setup = await (await h.request('/', { cookie: tenant.cookie })).text();
-  assert(setup.indexOf('Upload a built website') < setup.indexOf('Create a site'));
+  assert(setup.indexOf('Upload a website you already built') < setup.indexOf('Create a simple website'));
   assert.equal((await upload(h, tenant, { origin: 'https://unrelated.example' })).status, 403);
   assert.equal((await upload(h, tenant, { csrf: 'wrong' })).status, 400);
   assert.equal((await upload(h, tenant, { bytes: Buffer.alloc(7 * 1024 * 1024) })).status, 413);
@@ -240,7 +253,15 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   const preview = await openPrivatePreview(h, tenant, id);
   const page = await preview.fetch('/');
   assert.equal(await page.text(), home);
-  assert.match(page.headers.get('content-security-policy'), /sandbox/);
+  const previewCsp = page.headers.get('content-security-policy');
+  assert.match(previewCsp, /sandbox/);
+  assert.match(previewCsp, /script-src 'none'/);
+  assert.doesNotMatch(previewCsp, /allow-scripts|https:/);
+  assert.match(previewCsp, /style-src 'self'/);
+  assert.match(previewCsp, /img-src 'self'/);
+  assert.match(previewCsp, /font-src 'self'/);
+  assert.match(previewCsp, /connect-src 'none'/);
+  assert.match(previewCsp, /form-action 'none'/);
   assert.equal(await (await preview.fetch('/about/index.html')).text(), '<h1>About Willow</h1>');
   assert.equal((await preview.fetch('/about')).headers.get('location'), preview.host + '/about/');
   const image = await preview.fetch('/assets/Willow%20Photo.png');
@@ -275,6 +296,42 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   assert.equal(jobRow(h).status, 'live');
 });
 
+test('interactive ZIP preview needs explicit consent and an origin-bound ticket', async t => {
+  const h = zipHarness(t);
+  const tenant = await connectTenant(h);
+  const id = launchId(await upload(h, tenant));
+  const [bundled, interactive] = await privatePreviewChoices(h, tenant, id);
+  assert.notEqual(interactive.host, bundled.host);
+  const open = (host, fields, source = origin) => previewWorker.fetch(new Request(host + '/_open', {
+    method: 'POST', headers: { origin: source }, body: new URLSearchParams(fields)
+  }), h.env);
+  for (const rejected of [
+    await open(interactive.host, { ticket: interactive.ticket }),
+    await open(interactive.host, { ticket: bundled.ticket, externalAssets: 'true' }),
+    await open(bundled.host, { ticket: interactive.ticket }),
+    await open(interactive.host, { ticket: interactive.ticket, externalAssets: 'true' }, 'https://unrelated.example')
+  ]) {
+    assert.equal(rejected.status, 404);
+    assert.equal(rejected.headers.get('set-cookie'), null);
+  }
+  const accepted = await open(interactive.host, { ticket: interactive.ticket, externalAssets: 'true' });
+  assert.equal(accepted.status, 303);
+  const cookie = accepted.headers.get('set-cookie').split(';')[0];
+  const fetchOn = host => previewWorker.fetch(new Request(host + '/', { headers: { cookie } }), h.env);
+  assert.equal((await fetchOn(bundled.host)).status, 404);
+  const page = await fetchOn(interactive.host);
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), home);
+  const csp = page.headers.get('content-security-policy');
+  assert.match(csp, /sandbox allow-scripts allow-same-origin/);
+  for (const directive of ['script-src', 'style-src', 'img-src', 'font-src', 'connect-src'])
+    assert.match(csp, new RegExp(directive + '[^;]*https:'));
+  for (const directive of ['worker-src', 'form-action', 'frame-ancestors'])
+    assert.match(csp, new RegExp(directive + " 'none'"));
+  assert.equal(page.headers.get('cache-control'), 'private, no-store');
+  assert.equal(writes(h).length, 0);
+});
+
 test('expired preview capabilities cannot read or reopen a staged upload', async t => {
   const h = zipHarness(t);
   const tenant = await connectTenant(h);
@@ -286,6 +343,69 @@ test('expired preview capabilities cannot read or reopen a staged upload', async
     headers: { origin }, body: new URLSearchParams({ ticket: preview.ticket }) }), h.env);
   assert.equal(response.status, 404);
   assert.equal(response.headers.get('set-cookie'), null);
+});
+
+test('a stalled ZIP launch verifies a dashboard-created Pages project, and the toolkit checks its later commit', async t => {
+  const h = zipHarness(t);
+  const tenant = await connectTenant(h);
+  h.resourceState.denyPagesOAuthAtCreate = true;
+  const id = launchId(await upload(h, tenant));
+  assert.equal((await approvePreview(h, tenant.cookie, tenant.csrf, id)).status, 303);
+  const stalled = jobRow(h);
+  assert.equal(stalled.status, 'needs_reauthorization');
+  assert.equal(stalled.error_code, 'cloudflare_pages_http_401_cf10000');
+  assert.equal(stalled.expected_commit_sha, approvedSha);
+  assert.equal(stalled.pages_project_id, null);
+  assert.equal(h.imported.commits, 1);
+  assert.match(await (await h.request('/toolkit', {cookie: tenant.cookie})).text(), /Connect Cloudflare Pages access/);
+
+  // Simulate the owner's separate Cloudflare dashboard creation.
+  const token = 'fixture_dashboard_pages_access_token';
+  h.resourceState.pagesAccessToken = token;
+  const created = await h.fetchFn('https://api.cloudflare.com/client/v4/accounts/' + accountId + '/pages/projects', {
+    method: 'POST', headers: {authorization: 'Bearer ' + token},
+    body: JSON.stringify({build_config: {build_command: '', destination_dir: 'public', root_dir: '/'}})
+  });
+  assert.equal(created.status, 201);
+  const project = h.resourceState.pages;
+  project.source.config.preview_deployment_setting = 'all';
+  project.canonical_deployment.deployment_trigger.metadata.commit_hash = approvedSha;
+  const readsOnlyAfter = h.calls.length;
+  assert.equal((await post(h, '/cloudflare-pages-access', tenant.cookie, {csrf: tenant.csrf, token, mode: 'read'})).status, 303);
+  const accessId = h.sqlite.prepare('SELECT access_id FROM onboarding_pages_access').get().access_id;
+  moveLeaseIntoPast(h);
+  const restored = await post(h, '/restore', tenant.cookie, {csrf: tenant.csrf, id});
+  assert.equal(restored.status, 303);
+  const restoredId = launchId(restored);
+  assert.match(await (await h.request('/review?id=' + restoredId, {cookie: tenant.cookie})).text(),
+    /Approve and verify existing project/);
+  h.imported.publicBytes = Buffer.from('<h1>Different live content</h1>');
+  assert.equal((await post(h, '/approve', tenant.cookie, {csrf: tenant.csrf, id: restoredId,
+    digest: await reviewDigest(h, tenant.cookie, restoredId), pagesAccessId: accessId})).status, 303);
+  assert.equal(jobRow(h).status, 'pending_deployment');
+  makeDue(h);
+  h.imported.publicBytes = null;
+  assert.equal((await post(h, '/verify', tenant.cookie, {csrf: tenant.csrf, id: restoredId})).status, 303);
+  assert.equal(jobRow(h).status, 'live');
+  assert.equal(jobRow(h).pages_project_id, project.id);
+  assert.equal(jobRow(h).approval_digest, stalled.approval_digest);
+
+  // A later GitHub merge is current inventory evidence. The original job keeps its original approval.
+  h.imported.currentCommit = 'a'.repeat(40);
+  h.imported.currentHomepage = Buffer.from('<!doctype html><html><h1>Current website</h1></html>');
+  h.imported.publicBytes = h.imported.currentHomepage;
+  project.canonical_deployment.id = 'later-owner-deployment';
+  project.canonical_deployment.deployment_trigger.metadata.commit_hash = h.imported.currentCommit;
+  const inventory = await (await h.request('/toolkit', {cookie: tenant.cookie})).text();
+  const detailUrl = inventory.match(/href="(\/toolkit\/source\?ticket=[^"]+)"/)?.[1];
+  assert.ok(detailUrl);
+  const detail = await (await h.request(detailUrl, {cookie: tenant.cookie})).text();
+  assert.match(detail, /Open verified homepage/);
+  assert.match(detail, new RegExp(h.imported.currentCommit));
+  assert.equal(jobRow(h).expected_commit_sha, approvedSha);
+  assert.equal(project.source.config.preview_deployment_setting, 'all');
+  assert.equal(h.imported.commits, 1);
+  assert(h.calls.slice(readsOnlyAfter).every(request => request.method === 'GET'));
 });
 
 test('scheduled retry recovers a lost commit response using retained, byte-exact files', async t => {

@@ -8,11 +8,11 @@ const EXPECTED_SHA="a".repeat(40),NEXT_SHA="b".repeat(40);
 const DEFAULT_HTML="<html><body>Test Client</body></html>";
 const htmlHash=html=>createHash("sha256").update(html,"utf8").digest("hex");
 function mock({canonical=true,environment="production",latestQueued=false,htmlStatus=200,
-  htmlType="text/html",html=DEFAULT_HTML,otherSource=false}={}) {
+  htmlType="text/html",html=DEFAULT_HTML,otherSource=false,commit=EXPECTED_SHA}={}) {
  const calls=[];
  const project={name:projectName,source:{type:"github",config:{owner:"tester",repo_name:otherSource?"another-repo":"esp-test-client"}},
   canonical_deployment:canonical?{id:"deploy-success",environment,latest_stage:{name:"deploy",status:"success"},
-    deployment_trigger:{metadata:{commit_hash:EXPECTED_SHA}}}:null,
+    deployment_trigger:{metadata:{commit_hash:commit}}}:null,
   latest_deployment:latestQueued?{id:"newer",latest_stage:{name:"queued",status:"idle"}}:{id:"deploy-success",latest_stage:{name:"deploy",status:"success"}}};
  const fetchFn=async(url,opts={})=>{
   calls.push(url);
@@ -51,8 +51,26 @@ test("public site not yet reachable does not claim deployment success",async()=>
  assert.equal(r.status,"pending-public-reachability");assert.equal(r.httpStatus,404);
 });
 test("unexpected public content is treated as a verification failure",async()=>{
- const h=mock({htmlType:"application/json"});
- assert.equal((await verifyWebsite(input,{cloudflareToken:"token",fetchFn:h.fetchFn})).status,"unexpected-public-content");
+ for(const htmlType of ["application/json","application/text/html","text/html-extra"]){
+  const h=mock({htmlType});
+  assert.equal((await verifyWebsite(input,{cloudflareToken:"token",fetchFn:h.fetchFn})).status,"unexpected-public-content");
+ }
+});
+test("read-only verification cancels an oversized streamed homepage",async()=>{
+ let reads=0,cancelled=false;
+ const html=new ReadableStream({
+  pull(controller){
+   if(reads++===0)controller.enqueue(new TextEncoder().encode(DEFAULT_HTML));
+   else if(reads===2)controller.enqueue(new Uint8Array(2*1024*1024));
+   else controller.close();
+  },
+  cancel(){cancelled=true}
+ },{highWaterMark:0});
+ const h=mock({html});
+ const result=await verifyWebsite(input,{cloudflareToken:"token",fetchFn:h.fetchFn});
+ assert.equal(result.status,"unexpected-public-content");
+ assert.equal(cancelled,true);
+ assert.equal(reads,2);
 });
 test("html content must contain html markup",async()=>{
  const h=mock({html:"not an html document"});
@@ -92,6 +110,13 @@ test("older successful production deploy cannot satisfy a newer approved revisio
  assert.equal(result.expectedCommit,NEXT_SHA);
  assert.equal(result.deployedCommit,EXPECTED_SHA);
  assert.equal(h.calls.length,1,"Do not check stale homepage while awaiting expected commit");
+});
+test("a malformed deployment commit does not verify or fetch public content",async()=>{
+ const h=mock({commit:{sha:EXPECTED_SHA}});
+ const result=await verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,fetchFn:h.fetchFn});
+ assert.equal(result.status,"pending-expected-commit");
+ assert.equal(result.deployedCommit,null);
+ assert.equal(h.calls.length,1);
 });
 test("invalid expected commit fails before any Cloudflare or public requests",async()=>{
  const h=mock();
@@ -180,6 +205,25 @@ function approvedProjectMock({latest=null,startStatus=200,repositoryId=42,headSh
 }
 const approvedTarget={repositoryId:42,githubUserId:12,branch:"main",projectId:"proj-1",html:DEFAULT_HTML};
 const firstBuildOptions={cloudflareToken:"token",githubToken:"github-grant",expectedCommitSha:EXPECTED_SHA,approved:approvedTarget};
+test("read-only verification of a pinned project cannot start the first build",async()=>{
+ const h=approvedProjectMock();
+ const {html,...expectedProject}=approvedTarget;
+ const r=await verifyWebsite(input,{cloudflareToken:"token",expectedCommitSha:EXPECTED_SHA,
+  expectedHtmlSha256:htmlHash(html),expectedProject,fetchFn:h.fetchFn});
+ assert.equal(r.status,"pending-deployment");
+ assert.deepEqual(h.posts,[]);
+ assert.equal(h.requests.length,1);
+});
+test("read-only adoption checks the approved GitHub source and does not start a Pages build",async()=>{
+ const h=approvedProjectMock();
+ const r=await verifyWebsite(input,{...firstBuildOptions,allowFirstBuild:false,
+  approved:{...approvedTarget,projectId:null},fetchFn:h.fetchFn});
+ assert.equal(r.status,"pending-deployment");
+ assert.equal(r.pagesProjectId,"proj-1");
+ assert.deepEqual(h.posts,[]);
+ assert.match(h.requests[1],/\/branches\/main$/);
+ assert.equal(h.requests.length,3);
+});
 test("approved project that never deployed gets exactly one production build started",async()=>{
  const h=approvedProjectMock();
  const r=await verifyWebsite(input,{...firstBuildOptions,fetchFn:h.fetchFn});

@@ -6,11 +6,15 @@ Launch & Own is a customer-owned website launch and maintenance platform with **
 
 > **Hosted browser beta — independent customer acceptance still under QA.** Visit **https://onboard.360web.cloud** to connect your own GitHub and Cloudflare accounts and inspect a one-page website preview. The owner-account B13 rehearsal has created a private GitHub repository and a successful Cloudflare Pages production deployment at the approved commit. Approved HTML matches the repository bytes. **The owner B13 job has since reached `live`, and public HTML SHA-256 matches the approved bytes; a separately consenting customer's launch and approved website edit remain pending** ([Issue #21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21)). A green CI run or successful Pages build alone is not end-to-end acceptance. Custom forms/domains, bespoke AI designs and a public ChatGPT plugin are not available end-to-end.
 
+**Portable instructions-only Agent Skill:** [skills/launch-and-own/SKILL.md](skills/launch-and-own/SKILL.md) is available to compatible agents for preparation and safe browser handoff. It is **not** an authenticated Claude/ChatGPT publishing connector.
+
+**For agent and connector builders:** [the shared distribution/release contract](docs/AGENT_DISTRIBUTION_RELEASE.md) tracks portable skills, Claude/ChatGPT connectors, owner-approval gates, and beta verification independently. Run `npm run qa:distribution` for current machine-checked status. Skills-only instructions are not authenticated publishing tools.
+
 ## Two ways to build and manage a website
 
-**ChatGPT flow (planned integration):** ask to create a site or make changes in conversational language; ChatGPT proposes copy/design changes and hands a structured plan to Launch & Own. The customer sees the **exact prepared site**, authorizes their own GitHub/Cloudflare accounts through official consent, separately approves publication, and receives verified deployment status. The current private `elite-site-pipeline` ChatGPT plugin is **skills-only** without hosted MCP/API tools; this production integration is tracked in [Issue #43](https://github.com/mitchelldawkinsjr/launch-and-own/issues/43).
+**ChatGPT flow (private connected-plugin package; customer rollout pending):** [the Launch & Own plugin package](clients/chatgpt/) is now source-controlled and a personal **private** ChatGPT plugin has been created with the same deployed, OAuth-gated MCP backend (`https://mcp.360web.cloud/mcp`). A customer may describe a simple one-page site, request its exact preview, and be sent to the hosted browser for separate GitHub/Cloudflare linking and explicit launch approval. **Creation of the private plugin does not verify its ChatGPT OAuth connection or complete a live end-to-end launch.** ChatGPT customer availability remains `not_available` in the [release matrix](distribution/release-matrix.json) until connected-client tests, owner acceptance, and orchestration signoff (#43/#55/#21). The older private `elite-site-pipeline` plugin remains skills-only and separate; this integration does not silently replace it. Custom HTML/ZIP files still belong in the browser upload flow.
 
-**Standalone web flow (hosted browser beta):** visit **https://onboard.360web.cloud** to create a simple site manually, or—after [ZIP production rollout #45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45) passes QA—upload an existing static website ZIP, privately preview it, and approve publication. [ZIP implementation PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40) is **merged in code**, but hosted uploads remain disabled until isolated private R2 storage and preview-host configuration are approved. No ChatGPT account or paid model is required for this path. Web onboarding UI improvements are tracked in [Issue #41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41).
+**Standalone web flow (hosted browser beta):** visit **https://onboard.360web.cloud** to create a simple one-page site **or upload a static website ZIP**, privately preview exact content and separately approve launch. Domain completed a real owner-consented ZIP upload and multi-page publication with **5/5 files matching the public Pages deployment** ([#45 evidence](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896)); independent customer acceptance is still pending. A near-limit upload took 95 ms Worker CPU ([#45 measurement](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087096052)), which may exceed free-tier CPU allowances. No ChatGPT or paid AI model is needed for the browser path. UI improvements are tracked in [#41](https://github.com/mitchelldawkinsjr/launch-and-own/issues/41).
 
 **Shared product, not separate silos:** both entry points will use the same tenant/site ownership, provider connections, exact site preview, durable jobs and production-verification pipeline. Read the [two-flow product architecture](docs/TWO_FLOW_PRODUCT_ARCHITECTURE.md) for the complete product contract and coordination.
 
@@ -44,6 +48,9 @@ Launch & Own has a **ChatGPT-first conversational experience (planned)** and a *
 | --- | --- |
 | `pipeline/` | Customer planning, guarded GitHub and Cloudflare provisioning, OAuth primitives, deployment verification and tests |
 | `onboarding/` | Hosted beta OAuth onboarding Worker, D1 migrations, account selection, encrypted sessions, explicit approval and recoverable launch jobs |
+| `skills/launch-and-own/` | Portable instructions-only agent skill (browser handoff; not connected publishing) |
+| `clients/claude-plugin/` | Thin Claude Code plugin wrapper around that skill (`claude --plugin-dir`; not marketplace-published) |
+| `clients/chatgpt/` | Private OAuth-connected plugin package for the shared MCP bridge; ChatGPT client OAuth/owner linking and release acceptance still pending |
 | `.github/workflows/test.yml` | Independent product CI |
 | `EXPORT-MANIFEST.json` | Provenance and customer-data exclusions |
 
@@ -51,7 +58,7 @@ Launch & Own has a **ChatGPT-first conversational experience (planned)** and a *
 
 ## Use standalone hosted browser onboarding — no coding needed
 
-Open **https://onboard.360web.cloud** with your own GitHub and Cloudflare accounts. Follow the [plain-language tester guide](docs/BETA_TESTER_HANDOFF.md) to review OAuth permissions, choose a provider account, preview one-page content and decide whether to approve resource creation. **An owner-account live launch has passed exact SHA/HTML verification; independently consenting customer acceptance and post-launch editing remain open in #21.** The customer owns the resulting private GitHub and Cloudflare resources if provisioned.
+Open **https://onboard.360web.cloud** with your own GitHub and Cloudflare accounts. Follow the [plain-language tester guide](docs/BETA_TESTER_HANDOFF.md) to review OAuth permissions, choose a provider account, create a one-page site **or upload a static ZIP**, inspect the exact preview and decide whether to approve resource creation. **An owner-account live launch has passed exact SHA/HTML verification; independently consenting customer acceptance and post-launch editing remain open in #21.** The customer owns the resulting private GitHub and Cloudflare resources if provisioned.
 
 ## Optional offline developer preview
 
@@ -94,7 +101,7 @@ This option is **disabled unless the backend operator configures** an approved C
 
 The reusable [safe website update module](docs/SAFE_WEBSITE_UPDATES.md) binds customer-reviewed HTML SHA-256 and an observed base commit to a managed GitHub repository and creates/reuses **only** a feature-branch pull request. The customer reviews and manually merges it; Cloudflare must then show the exact merged commit **and** approved public HTML.
 
-Authenticated one-page editing, exact previews, separately approved PR creation and post-merge verification have been implemented and CI-tested in [**draft PR #31**](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31). They are **not yet merged or deployed**. GitHub App `Pull requests: write` is now granted, but live acceptance must follow the first successful launch and a coordinated release window.
+Authenticated one-page editing, exact previews, separately approved PR creation and post-merge verification are implemented in onboarding (`/site-update*`; see [PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31) and [docs/SAFE_WEBSITE_UPDATES.md](docs/SAFE_WEBSITE_UPDATES.md)). GitHub App `Pull requests: write` is granted. Matrix access stays gated until an owner-live edit walkthrough on [#21](https://github.com/mitchelldawkinsjr/launch-and-own/issues/21).
 
 
 ## Operator onboarding prerequisites
@@ -113,7 +120,7 @@ All live Worker releases are coordinated by Domain and QA on [Issue #2](https://
 - **Optional AI-assisted website copy:** structured and editable, but unavailable unless an operator explicitly configures an approved Workers AI binding/model.
 - **Reviewable website maintenance UI:** implemented and tested in [draft PR #31](https://github.com/mitchelldawkinsjr/launch-and-own/pull/31); **not yet released**.
 - **Four-page Home/About/Services/Contact bundles:** deterministically rendered and locally previewable, but not exposed in the hosted editor.
-- **ZIP import:** backend code merged in [PR #40](https://github.com/mitchelldawkinsjr/launch-and-own/pull/40), but **not enabled on the hosted beta** until [#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45) private storage, isolated preview service and real-provider acceptance.
+- **ZIP import:** **enabled in hosted browser beta**, with owner-tested private preview, separate approval, and exact 5/5-file deployment matching ([#45](https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896)); independently consenting customer acceptance and quota/CPU review remain open.
 - **Forms, customer domains, bespoke AI design and ChatGPT plugin:** separate future milestones; not yet available end to end.
 - **Offline preview/demo:** available with Node 22.5+ (developer option); see [tester handoff](docs/BETA_TESTER_HANDOFF.md).
 - **Source reuse license:** not yet selected. Public GitHub visibility is not a license.

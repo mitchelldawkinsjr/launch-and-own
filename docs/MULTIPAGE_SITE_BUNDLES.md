@@ -49,6 +49,8 @@ The existing guarded `applyWebsite` creates or checks the owner's exact private 
 
 An existing single-page website **cannot be silently converted to a different multi-page design through provisioning**; the existing homepage mismatch intentionally blocks overwrite. Future site modifications should use the reviewable GitHub PR workflow in [SAFE_WEBSITE_UPDATES.md](SAFE_WEBSITE_UPDATES.md), with owner approval and exact deployment verification.
 
+New Pages projects have preview builds disabled. A protected preview needs separate owner approval and verified Access coverage. [Preview acceptance guide](TOOLKIT_PREVIEW_ACCEPTANCE.md)
+
 ## Not yet implemented
 
 - **Onboarding UI:** The Worker still normalizes and previews a one-page template. A later coordinated PR must add full four-page preview selection, record the approved bundle digest, and pass it into provisioning. Codex Max is changing launch-job orchestration, so avoid overlapping edits to `onboarding/worker.mjs` until coordinated.

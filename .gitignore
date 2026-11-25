@@ -8,3 +8,6 @@ coverage/
 
 # Local preview artifacts may contain personal website/contact details.
 site-preview/
+
+# Playwright visual walkthrough output (screenshots + gallery).
+visual-walkthrough/

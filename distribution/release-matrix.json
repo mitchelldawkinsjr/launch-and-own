@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "project": "Launch & Own by 360Web",
+  "ownerConsent": {
+    "mode": "hosted-human-explicit",
+    "approvalBoundToExactArtifact": true,
+    "providerCredentialsExposedToAgent": false,
+    "agentMayPublishUnilaterally": false,
+    "ownerIdentityValidatedServerSide": true,
+    "publicationVerification": [
+      "approved-artifact-digest",
+      "canonical-production-github-commit",
+      "public-html-digest"
+    ]
+  },
+  "surfaces": {
+    "browser_manual": {
+      "label": "Browser: manual one-page creation",
+      "implementation": "deployed",
+      "access": "hosted_beta",
+      "verification": "owner_live",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/21#issuecomment-7086107082"
+      ],
+      "blockers": [
+        "Independent consenting customer acceptance and post-launch update walkthrough (#21)"
+      ]
+    },
+    "browser_zip": {
+      "label": "Browser: static ZIP upload",
+      "implementation": "deployed",
+      "access": "hosted_beta",
+      "verification": "owner_live",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087063896",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/45#issuecomment-7087096052"
+      ],
+      "blockers": [
+        "Independent consenting customer acceptance and post-launch update acceptance remain pending (#21/#45)",
+        "Near-limit 5.19 MiB upload used 95 ms Worker CPU; confirm Workers plan and quotas before claiming free large-ZIP capacity (#45)"
+      ]
+    },
+    "site_updates": {
+      "label": "Owner: approved post-launch edits",
+      "implementation": "deployed",
+      "access": "not_available",
+      "verification": "ci_only",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/31"
+      ],
+      "blockers": [
+        "Code merged and Worker deployable; owner-live edit walkthrough still required before hosted_beta (#21)"
+      ]
+    },
+    "portable_skill": {
+      "label": "Portable agent skill (instructions only)",
+      "implementation": "merged",
+      "access": "instructions_only",
+      "verification": "ci_only",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/56"
+      ],
+      "blockers": [
+        "Claude Code + Cursor install smoke recorded (#65/#72); connected MCP publisher still blocked on deployed #43 API and independent customer acceptance (#21/#55)"
+      ]
+    },
+    "shared_mcp_api": {
+      "label": "Shared authenticated MCP/API",
+      "implementation": "deployed",
+      "access": "not_available",
+      "verification": "ci_only",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/43",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/79",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/77",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/76"
+      ],
+      "blockers": [
+        "Hosted Worker at https://mcp.360web.cloud is BRIDGE_DEPLOYMENT=approved (metadata deployed_gated) but customer access stays not_available",
+        "Consenting-user /agent-link E2E and MCP OAuth client registration still outstanding",
+        "Update-draft re-render and independent consenting-user QA still required (#43/#21)"
+      ]
+    },
+    "claude_plugin": {
+      "label": "Claude Code plugin (instructions-only local packaging)",
+      "implementation": "merged",
+      "access": "not_available",
+      "verification": "ci_only",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/60",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/65"
+      ],
+      "blockers": [
+        "Local --plugin-dir packaging only; no store listing; connected publishing tools await deployed shared MCP (#43), independent connected-client QA, and owner distribution approval"
+      ]
+    },
+    "chatgpt_connector": {
+      "label": "ChatGPT integration with publishing tools",
+      "implementation": "merged",
+      "access": "not_available",
+      "verification": "ci_only",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/74"
+      ],
+      "blockers": [
+        "Packaging notes only (clients/chatgpt); elite-site-pipeline remains skills-only",
+        "Connected tools need deployed shared MCP, owner linking, store/distribution approval, and ChatGPT beta QA (#43/#55)"
+      ]
+    }
+  }
+}

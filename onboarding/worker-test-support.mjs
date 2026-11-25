@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import worker from './worker.mjs';
 
 const origin='https://onboard.example.com';
@@ -15,7 +16,16 @@ function harness({withJobs=true}={}){
  sqlite.exec(readFileSync(new URL('./migrations/0001_initial.sql',import.meta.url),'utf8'));
  sqlite.exec(readFileSync(new URL('./migrations/0002_token_rotation.sql',import.meta.url),'utf8'));
  sqlite.exec(readFileSync(new URL('./migrations/0003_launch_receipts.sql',import.meta.url),'utf8'));
- const migrateJobs=()=>sqlite.exec(readFileSync(new URL('./migrations/0004_launch_jobs.sql',import.meta.url),'utf8'));
+ const migrateJobs=()=>{
+  sqlite.exec(readFileSync(new URL('./migrations/0004_launch_jobs.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0005_option_approvals.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0006_option_executions.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0007_option_kinds_analytics_previews.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0008_forms_cost_privacy_approvals.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0009_option_kinds_seo_redirects.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0010_forms_provisioning_receipts.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('./migrations/0011_cloudflare_pages_access.sql',import.meta.url),'utf8'));
+ };
  if(withJobs)migrateJobs();
  const DB={
   prepare(sql){
@@ -42,8 +52,10 @@ function harness({withJobs=true}={}){
  };
  const env={DB,ONBOARDING_LIMITER:{limit:async()=>({success:true})},ONBOARDING_ORIGIN:origin,TOKEN_ENCRYPTION_KEY:'abababababababababababababababababababababababababababababababab',GH_CLIENT_ID:'Iv1.example',GH_CLIENT_SECRET:'dummy-gh-secret',GH_APP_SLUG:'launch-and-own',CF_CLIENT_ID:'cf-client-id',CF_CLIENT_SECRET:'dummy-cf-secret',CF_SCOPES:'workers-platform.read workers-platform.write'};
  const calls=[];
- const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,failPagesOnce:false,
-  failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42};
+ const resourceState={repo:null,homepage:false,homepageHtml:null,pages:null,customDomain:null,failPagesOnce:false,
+  failGitHubRevokeOnce:false,issueExpiringGrants:false,failRefreshOnce:false,githubUserId:42,
+  updateBranch:null,updateHtml:null,updatePr:null,updateFileWrites:0,denyPullRequests:false,
+  denyPagesOAuth:false,denyPagesOAuthAtCreate:false,pagesAccessToken:null};
  const fetchFn=async(url,opts={})=>{
   calls.push({url,method:opts.method||'GET'});
   if(url==='https://github.com/login/oauth/access_token'){
@@ -67,6 +79,10 @@ function harness({withJobs=true}={}){
       app_slug:'launch-and-own',
       account:{login:'tester',type:'User'},
       permissions:{repository_creation:'write',contents:'write',metadata:'read',pull_requests:'write'}
+    },{
+      app_slug:'cloudflare-workers-and-pages',
+      account:{login:'tester',type:'User'},
+      permissions:{administration:'write',contents:'write',metadata:'read',pull_requests:'write'}
     }]});
   }
   if(url==='https://api.github.com/applications/Iv1.example/grant'){
@@ -82,19 +98,75 @@ function harness({withJobs=true}={}){
       Response.json({access_token:'cf_secret_example',token_type:'bearer',expires_in:180,refresh_token:'cf_initial_refresh'}):
       Response.json({access_token:'cf_secret_example',token_type:'bearer'});
   }
-  if(url.includes('/accounts?page=1'))return Response.json({success:true,result:[{id:accountId,name:'Demo Account'}]});
+  if(url.includes('/accounts?page=1')){
+    if(resourceState.cloudflareRevoked)return new Response(null,{status:403});
+    return Response.json({success:true,result:[{id:accountId,name:'Demo Account'},{id:'f'.repeat(32),name:'Alt Account'}]});
+  }
   const acct=url.match(/\/accounts\/([a-f0-9]{32})$/);
   if(acct){
     if(resourceState.cloudflareRevoked)return new Response(null,{status:403});
     return Response.json({success:true,result:{id:acct[1],name:'Demo Account'}});
   }
+  const pagesAccount=url.match(/^https:\/\/api\.cloudflare\.com\/client\/v4\/accounts\/([a-f0-9]{32})\/pages\/projects(?:[/?]|$)/);
+  if(pagesAccount){
+    const bearer=new Headers(opts.headers).get('authorization');
+    const hasPagesAccess=resourceState.pagesAccessToken&&pagesAccount[1]===accountId&&
+      bearer==='Bearer '+resourceState.pagesAccessToken;
+    if(opts.method==='POST'&&url.endsWith('/pages/projects')&&resourceState.denyPagesOAuthAtCreate&&!hasPagesAccess)
+      resourceState.denyPagesOAuth=true;
+    if(resourceState.denyPagesOAuth&&!hasPagesAccess)
+      return Response.json({success:false,errors:[{code:10000,message:'Test fixture denied Pages access'}]},{
+        status:401,headers:{'cf-ray':'0123456789abcdef-IAD'}
+      });
+  }
+  const pagesList=url.match(/\/accounts\/([a-f0-9]{32})\/pages\/projects(?:\?|$)/);
+  if(pagesList&&(opts.method||'GET')==='GET'&&!url.includes('/pages/projects/')){
+    if(resourceState.cloudflareRevoked)return new Response(null,{status:401});
+    const listed=resourceState.pages&&pagesList[1]===accountId
+      ?[{id:resourceState.pages.id,name:resourceState.pages.name}]:[];
+    return Response.json({success:true,result:listed,result_info:{
+      page:1,per_page:3,total_pages:listed.length?1:0,total_count:listed.length}});
+  }
   const root='https://api.github.com/repos/tester/esp-willow-studio';
   const pages='https://api.cloudflare.com/client/v4/accounts/'+accountId+'/pages/projects';
-  if(url===root && opts.method!=='POST')return resourceState.repo?Response.json(resourceState.repo):new Response('{}',{status:404});
+  if(url===root && opts.method!=='POST'){
+    if(resourceState.invalidateSessionOnRepoRead){
+      resourceState.invalidateSessionOnRepoRead=false;
+      sqlite.prepare('UPDATE onboarding_sessions SET authorization_epoch=authorization_epoch+1').run();
+    }
+    return resourceState.repo?Response.json(resourceState.repo):new Response('{}',{status:404});
+  }
   if(url==='https://api.github.com/user/repos' && opts.method==='POST'){
     resourceState.repo={id:101,owner:{login:'tester',id:resourceState.githubUserId},name:'esp-willow-studio',description:JSON.parse(opts.body).description,private:true,default_branch:'main'};
     return Response.json(resourceState.repo,{status:201});
   }
+  if(url.startsWith(root+'/branches/')&&decodeURIComponent(url.slice((root+'/branches/').length)).startsWith('launch-and-own/site-')){
+    const name=decodeURIComponent(url.slice((root+'/branches/').length));
+    return resourceState.updateBranch===name?Response.json({commit:{sha:resourceState.updateHtml?'f'.repeat(40):GENERATED_SHA}}):new Response('{}',{status:404});
+  }
+  if(url===root+'/git/refs'&&opts.method==='POST'){
+    const payload=JSON.parse(opts.body);
+    resourceState.updateBranch=payload.ref.replace(/^refs\/heads\//,'');
+    resourceState.updateBaseSha=payload.sha;
+    return Response.json({ref:'refs/heads/'+resourceState.updateBranch},{status:201});
+  }
+  if(url===root+'/commits/'+'f'.repeat(40)&&resourceState.updateHtml){
+    const body=Buffer.from(resourceState.updateHtml,'utf8');
+    const sha=createHash('sha1').update('blob '+body.byteLength+'\0').update(body).digest('hex');
+    return Response.json({sha:'f'.repeat(40),parents:[{sha:resourceState.updateBaseSha}],
+      files:[{filename:'public/index.html',status:'modified',sha}]});
+  }
+  if(url.startsWith(root+'/pulls?')&&opts.method==='GET')return Response.json(resourceState.updatePr?[resourceState.updatePr]:[]);
+  if(url===root+'/pulls'&&opts.method==='POST'){
+    if(resourceState.denyPullRequests)return new Response('{}',{status:403});
+    const payload=JSON.parse(opts.body);
+    resourceState.updatePr={number:55,state:'open',html_url:'https://github.com/tester/esp-willow-studio/pull/55',
+      head:{ref:payload.head,sha:'f'.repeat(40),repo:{id:101,full_name:'tester/esp-willow-studio'}},
+      base:{ref:'main',sha:resourceState.headSha??GENERATED_SHA,repo:{id:101}},
+      merged_at:null,merge_commit_sha:null};
+    return Response.json(resourceState.updatePr,{status:201});
+  }
+  if(url===root+'/pulls/55')return resourceState.updatePr?Response.json(resourceState.updatePr):new Response('{}',{status:404});
   if(url===root+'/branches/main')return Response.json({commit:{
     sha:resourceState.headSha??(resourceState.homepage?GENERATED_SHA:BASE_SHA),
     commit:{tree:{sha:resourceState.homepage?GENERATED_TREE:BASE_TREE}}
@@ -107,22 +179,80 @@ function harness({withJobs=true}={}){
   }
   if(url.startsWith(root+'/contents/public/index.html')){
     if(opts.method==='PUT'){
-      resourceState.homepage=true;resourceState.homepageHtml=Buffer.from(JSON.parse(opts.body).content,'base64').toString('utf8');
+      const payload=JSON.parse(opts.body),html=Buffer.from(payload.content,'base64').toString('utf8');
+      if(payload.branch&&payload.branch!=='main'){
+        if(payload.branch!==resourceState.updateBranch)throw Error('Wrong update branch');
+        resourceState.updateHtml=html;resourceState.updateFileWrites++;
+        return Response.json({commit:{sha:'f'.repeat(40)}},{status:200});
+      }
+      resourceState.homepage=true;resourceState.homepageHtml=html;
       return Response.json({commit:{sha:GENERATED_SHA,tree:{sha:GENERATED_TREE}}},{status:201});
     }
-    return resourceState.homepage&&new URL(url).searchParams.get('ref')!==BASE_SHA
-      ?Response.json({type:'file',encoding:'base64',content:Buffer.from(resourceState.homepageHtml).toString('base64')})
+    const ref=new URL(url).searchParams.get('ref');
+    const file=(html)=>({
+      type:'file',sha:'e'.repeat(40),encoding:'base64',
+      content:Buffer.from(html).toString('base64'),size:Buffer.byteLength(html)
+    });
+    if(ref===resourceState.updateBranch&&resourceState.updateBranch)
+      return Response.json(file(resourceState.updateHtml??resourceState.homepageHtml));
+    return resourceState.homepage&&ref!==BASE_SHA
+      ?Response.json(file(resourceState.homepageHtml))
       :new Response('{}',{status:404});
   }
   if(url===pages+'/esp-willow-studio-site')return resourceState.pages?Response.json({success:true,result:resourceState.pages}):new Response('{}',{status:404});
+  if(url===pages+'/esp-willow-studio-site/domains/www.example.com' && opts.method!=='POST'){
+    if(resourceState.replaceOptionWhileReadingDomain){
+      resourceState.replaceOptionWhileReadingDomain=false;
+      sqlite.prepare("UPDATE onboarding_option_approvals SET id = ? WHERE kind = 'domain'")
+        .run('99999999-9999-4999-8999-999999999999');
+    }
+    return resourceState.customDomain
+      ?Response.json({success:true,result:resourceState.customDomain})
+      :new Response('{}',{status:404});
+  }
+  if(url===pages+'/esp-willow-studio-site/domains' && opts.method==='POST'){
+    const body=JSON.parse(opts.body);
+    if(body.name!=='www.example.com')throw Error('Unexpected domain attachment');
+    resourceState.customDomain={name:body.name,status:'pending'};
+    return Response.json({success:true,result:resourceState.customDomain},{status:201});
+  }
   if(url===pages && opts.method==='POST'){
     if(resourceState.pagesError)return Response.json({success:false},{status:resourceState.pagesError});
     if(resourceState.failPagesOnce){resourceState.failPagesOnce=false;return Response.json({success:false},{status:503})}
     resourceState.pages={id:'pages-stable-101',name:'esp-willow-studio-site',
-     subdomain:'esp-willow-studio-site.pages.dev',production_branch:'main',
-     build_config:JSON.parse(opts.body).build_config,source:{type:'github',config:{owner:'tester',repo_name:'esp-willow-studio',repo_id:'101'}},
+     subdomain:'esp-willow-studio-site.pages.dev',production_branch:'main',uses_functions:false,
+     build_config:JSON.parse(opts.body).build_config,source:{type:'github',config:{
+       owner:'tester',owner_id:String(resourceState.githubUserId),repo_name:'esp-willow-studio',
+       repo_id:'101',production_deployments_enabled:true,preview_deployment_setting:'none'}},
      canonical_deployment:{id:'deploy-success',environment:'production',latest_stage:{name:'deploy',status:'success'},deployment_trigger:{metadata:{commit_hash:GENERATED_SHA}}}};
     return Response.json({success:true,result:resourceState.pages},{status:201});
+  }
+  // Owned-zone + pre-existing ready email routing mocks. No MX/DNS mutation handler.
+  const parsed=new URL(url);
+  const zoneId='b'.repeat(32);
+  const page=result=>Response.json({success:true,result,
+    result_info:{page:1,total_pages:1}});
+  const accountPage=result=>Response.json({success:true,result,
+    result_info:{page:1,per_page:50,count:result.length,total_count:result.length}});
+  if(parsed.pathname==='/client/v4/zones'&&parsed.searchParams.get('account.id')===accountId)
+    return page([{id:zoneId,name:'example.com',status:'active',account:{id:accountId}}]);
+  if(parsed.pathname==='/client/v4/zones/'+zoneId+'/email/routing'&&opts.method!=='POST')
+    return page({enabled:true,status:'ready'});
+  if(parsed.pathname==='/client/v4/zones/'+zoneId+'/dns_records'&&opts.method==='GET'&&
+      parsed.searchParams.get('type')==='MX') {
+    const hostname=parsed.searchParams.get('name.exact');
+    return accountPage(resourceState.routingMxRecords ?? [1,2,3].map((n,i)=>({
+      type:'MX',name:hostname,content:'route'+n+'.mx.cloudflare.net',priority:10+i*10
+    })));
+  }
+  if(parsed.pathname==='/client/v4/accounts/'+accountId+'/email/routing/addresses'&&opts.method!=='POST')
+    return accountPage([{email:'existing@example.net',verified:'2026-11-22T01:00:00Z'}]);
+  if(parsed.pathname==='/client/v4/accounts/'+accountId+'/email/routing/rules'&&opts.method!=='POST')
+    return accountPage(resourceState.emailRules||[]);
+  if(parsed.pathname==='/client/v4/zones/'+zoneId+'/email/routing/rules'&&opts.method==='POST'){
+    const rule={...JSON.parse(opts.body),id:'rule-1',zone:{tag:zoneId}};
+    resourceState.emailRules=[rule];
+    return page(rule);
   }
   if(url==='https://esp-willow-studio-site.pages.dev/')return new Response(resourceState.publicHtml??resourceState.homepageHtml,{status:200,headers:{'content-type':'text/html'}});
   throw Error('unmocked external request: '+url);

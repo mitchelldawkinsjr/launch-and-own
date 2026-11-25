@@ -33,7 +33,7 @@ test('customer connects both providers, selects verified account, previews and e
   home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Demo Account/);
   const csrf=csrfFrom(html);
   const selected=await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});assert.equal(selected.status,303);
-  home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Generate website preview/);
+  home=await h.request('/',{cookie:sessionCookie});html=await home.text();assert.match(html,/Preview my website/);
   const pre=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});assert.equal(pre.status,303);
   const reviewUrl=pre.headers.get('location');assert.match(reviewUrl,/^\/review\?id=/);
   const review=await h.request(reviewUrl,{cookie:sessionCookie});assert.equal(review.status,200);assert.match(await review.text(),/Approve and create website/);
@@ -115,6 +115,29 @@ test('logout deletes encrypted session credentials and prevents further account 
   assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS c FROM onboarding_sessions').get().c,0);
   const home=await h.request('/',{cookie:sessionCookie});assert.match(await home.text(),/Connect GitHub/);
  }finally{globalThis.fetch=originalFetch}
+});
+test('onboarding forms enforce the streaming byte limit without Content-Length',async t=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ t.after(()=>{globalThis.fetch=originalFetch;h.sqlite.close()});
+ const {sessionCookie}=await bootstrap(h);
+ const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+ const encode=value=>new TextEncoder().encode(value);
+ let reads=0,cancelled=false;
+ const body=new ReadableStream({
+  pull(controller){
+   if(reads++===0)controller.enqueue(encode('csrf='+csrf+'&note='));
+   else if(reads===2)controller.enqueue(encode('é'.repeat(2050)));
+   else controller.close();
+  },
+  cancel(){cancelled=true}
+ },{highWaterMark:0});
+ const response=await worker.fetch(new Request(origin+'/logout',{method:'POST',duplex:'half',body,headers:{
+  'content-type':'application/x-www-form-urlencoded',origin,cookie:sessionCookie
+ }}),h.env);
+ assert.equal(response.status,400);
+ assert.equal(cancelled,true);
+ assert.equal(reads,2);
+ assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS c FROM onboarding_sessions').get().c,1);
 });
 test('scheduled maintenance removes expired flow and session records',async()=>{
  const h=harness();globalThis.fetch=h.fetchFn;
@@ -215,7 +238,7 @@ test('disconnect revokes GitHub grant and Cloudflare OAuth token and removes the
   assert(h.calls.some(c=>c.url==='https://api.github.com/applications/Iv1.example/grant'&&c.method==='DELETE'));
   assert(h.calls.some(c=>c.url==='https://dash.cloudflare.com/oauth2/revoke'&&c.method==='POST'));
   const notice=await (await h.request('/?disconnect=complete')).text();
-  assert.match(notice,/provider revocation was confirmed/);
+  assert.match(notice,/Launch &amp; Own OAuth access was removed/);
   const old=await (await h.request('/',{cookie:sessionCookie})).text();
   assert.match(old,/Connect GitHub/);
  }finally{globalThis.fetch=originalFetch}
@@ -231,7 +254,7 @@ test('a remote revocation failure still signs out locally and displays an honest
   assert.equal(result.headers.get('location'),'/?disconnect=unconfirmed');
   assert.equal(h.sqlite.prepare('SELECT COUNT(*) AS count FROM onboarding_sessions').get().count,0);
   const msg=await (await h.request('/?disconnect=unconfirmed')).text();
-  assert.match(msg,/could not be revoked automatically/);
+  assert.match(msg,/may still show Launch &amp; Own as connected/);
   assert(!msg.includes('ghu_secret_example'));
  }finally{globalThis.fetch=originalFetch}
 });
@@ -375,7 +398,7 @@ test('site preview shows exactly the approved copy, and deployed HTML matches it
   assert.match(html,/Portraits/);
   assert.match(html,/--accent:#994936/);
   const review=await (await h.request('/review?id='+id,{cookie:sessionCookie})).text();
-  assert.match(review,/Open your website preview/);
+  assert.match(review,/Open the exact preview/);
   const approved=await approvePreview(h,sessionCookie,csrf,id);
   assert.equal(approved.status,303);
   assert.equal(h.resourceState.homepageHtml,html);
@@ -440,7 +463,7 @@ test('approved job survives logout and reapproval resumes the same pinned deploy
   const csrf2=csrfFrom(await (await h.request('/',{cookie:second.sessionCookie})).text());
   await h.request('/account',{method:'POST',cookie:second.sessionCookie,body:form({csrf:csrf2,accountId})});
   const history=await (await h.request('/history',{cookie:second.sessionCookie})).text();
-  assert.match(history,/Willow Studio/);assert.match(history,/Review and reapprove/);
+  assert.match(history,/Willow Studio/);assert.match(history,/Review and continue/);
   const restored=await h.request('/restore',{method:'POST',cookie:second.sessionCookie,body:form({csrf:csrf2,id})});
   assert.equal(restored.status,303);
   const newId=new URL(origin+restored.headers.get('location')).searchParams.get('id');
@@ -537,7 +560,7 @@ test("AI drafting is invisible until operator configures optional model binding"
   await h.request("/account",{method:"POST",cookie:sessionCookie,body:form({csrf,accountId})});
   const page=await (await h.request("/",{cookie:sessionCookie})).text();
   assert(!page.includes("Draft my website copy"));
-  assert.match(page,/Generate website preview/);
+  assert.match(page,/Preview my website/);
   const disabled=await h.request("/draft",{method:"POST",cookie:sessionCookie,body:form({
     csrf,name:"Willow Studio",description:"Photography services for local families and community events."
   })});
@@ -651,4 +674,65 @@ test('logo is served publicly as a PNG for the provider consent screens',async()
  assert.equal(res.status,200);assert.equal(res.headers.get('content-type'),'image/png');
  const bytes=new Uint8Array(await res.arrayBuffer());
  assert.deepEqual([...bytes.slice(0,4)],[0x89,0x50,0x4e,0x47]);
+});
+
+test('pressing Run due launch steps after the job already advanced shows the review page, not an error',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const {sessionCookie}=await bootstrap(h);await connectCloudflare(h,sessionCookie);
+  const csrf=csrfFrom(await (await h.request('/',{cookie:sessionCookie})).text());
+  await h.request('/account',{method:'POST',cookie:sessionCookie,body:form({csrf,accountId})});
+  const p=await h.request('/preview',{method:'POST',cookie:sessionCookie,body:form({csrf,name:'Willow Studio'})});
+  const id=new URL('https://onboard.example.com'+p.headers.get('location')).searchParams.get('id');
+  await approvePreview(h,sessionCookie,csrf,id);
+  assert.notEqual(jobRow(h).status,'queued');
+  const attempts=jobRow(h).attempts;
+  const r=await post(h,'/launch',sessionCookie,{csrf,id});
+  assert.equal(r.status,303);assert.match(r.headers.get('location'),/^\/review\?id=/);
+  assert.equal(jobRow(h).attempts,attempts);
+  // A different session (not the one that approved) is still refused.
+  const other=await bootstrap(h);
+  const o=await post(h,'/launch',other.sessionCookie,{csrf:csrfFrom(await (await h.request('/',{cookie:other.sessionCookie})).text()),id});
+  assert.notEqual(o.status,303);
+ }finally{globalThis.fetch=originalFetch}
+});
+
+
+test('connection explainer icons remain interactive and truthful through both provider OAuth steps',async()=>{
+  const h=harness();globalThis.fetch=h.fetchFn;
+  try{
+    const start=await h.request('/');
+    const startHtml=await start.text();
+    assert.equal(start.status,200);
+    assert.match(start.headers.get('content-security-policy'),/default-src 'none'/);
+    assert.match(start.headers.get('cache-control'),/no-store/);
+    assert.equal((startHtml.match(/class="provider-icon provider-icon-/g)||[]).length,2);
+    assert.equal((startHtml.match(/<details>/g)||[]).length,2);
+    assert.match(startHtml,/href="\/connect\/github">Connect GitHub<\/a>/);
+    assert.doesNotMatch(startHtml,/href="\/connect\/cloudflare"/);
+    assert.match(startHtml,/Both offer free options for simple sites within plan limits/);
+    assert.doesNotMatch(startHtml,/<script|src="https:\/\/cdn\./);
+
+    const {sessionCookie}=await bootstrap(h);
+    const afterGithub=await (await h.request('/',{cookie:sessionCookie})).text();
+    assert.match(afterGithub,/GitHub connected: tester/);
+    assert.match(afterGithub,/href="\/connect\/cloudflare">Connect Cloudflare<\/a>/);
+    assert.doesNotMatch(afterGithub,/href="\/connect\/github"/);
+    assert.match(afterGithub,/Click either icon to learn more/);
+
+    await connectCloudflare(h,sessionCookie);
+    const afterCloudflare=await (await h.request('/',{cookie:sessionCookie})).text();
+    assert.match(afterCloudflare,/Cloudflare connected — choose your hosting account/);
+    assert.doesNotMatch(afterCloudflare,/href="\/connect\/cloudflare"/);
+    const csrf=csrfFrom(afterCloudflare);
+    const choose=await h.request('/account',{
+      method:'POST',cookie:sessionCookie,body:form({csrf,accountId})
+    });
+    assert.equal(choose.status,303);
+    const selected=await (await h.request('/',{cookie:sessionCookie})).text();
+    assert.match(selected,/Cloudflare connected — hosting account selected/);
+    assert.equal((selected.match(/<summary /g)||[]).length,2);
+    assert.match(selected,/Preview my website/);
+    assert.doesNotMatch(selected,/href="\/connect\/cloudflare"/);
+  }finally{globalThis.fetch=originalFetch}
 });

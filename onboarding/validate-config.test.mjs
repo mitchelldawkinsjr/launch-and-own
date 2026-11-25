@@ -12,8 +12,15 @@ const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches
  "idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
  "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry","onboarding_launch_jobs","onboarding_launch_job_sessions",
  "idx_onboarding_jobs_due","idx_onboarding_jobs_owner","idx_onboarding_jobs_expiry",
- "idx_onboarding_job_sessions_session","idx_onboarding_launches_job","onboarding_jobs_delete_previews"];
-const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql","0004_launch_jobs.sql"];
+ "idx_onboarding_job_sessions_session","idx_onboarding_launches_job","onboarding_jobs_delete_previews",
+ "onboarding_option_approvals","idx_onboarding_option_approvals_owner","idx_onboarding_option_approvals_job",
+ "onboarding_option_executions","idx_option_executions_owner","idx_option_executions_job_kind",
+ "onboarding_forms_cost_privacy_approvals","idx_forms_cost_privacy_owner","idx_forms_cost_privacy_digest",
+ "onboarding_forms_provisioning","idx_forms_provisioning_owner","onboarding_pages_access","onboarding_clear_pages_access"];
+const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql","0004_launch_jobs.sql",
+ "0005_option_approvals.sql","0006_option_executions.sql","0007_option_kinds_analytics_previews.sql",
+ "0008_forms_cost_privacy_approvals.sql","0009_option_kinds_seo_redirects.sql","0010_forms_provisioning_receipts.sql",
+ "0011_cloudflare_pages_access.sql"];
 const tokenColumns=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
  "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
 const mock=(overrides={})=>{
@@ -58,8 +65,8 @@ test("remote readiness checks exact D1 metadata before read-only schema query",a
  const h=mock();
  const ready=await checkRemoteSchema({accountId,token:"test-secret",databaseId:expectedId,fetchFn:h.fetchFn});
  assert.equal(ready.status,"schema-ready");
- assert.equal(ready.tables,6);assert.equal(ready.indexes,10);assert.equal(ready.triggers,1);
- assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,4);
+ assert.equal(ready.tables,11);assert.equal(ready.indexes,17);assert.equal(ready.triggers,2);
+ assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,11);
  assert.equal(h.calls.length,5);
  assert.equal(h.calls[0].options.method,"GET");
  assert.equal(JSON.parse(h.calls[4].options.body).sql,LAUNCH_SCHEMA_PROBE);
@@ -114,7 +121,8 @@ test("missing durable receipt migration stops onboarding readiness",async()=>{
  assert.equal(h.calls.length,2);
 });
 test("missing job authorization table or preview cleanup trigger stops readiness",async()=>{
- for(const required of ["onboarding_launch_job_sessions","onboarding_jobs_delete_previews"]){
+ for(const required of ["onboarding_launch_job_sessions","onboarding_jobs_delete_previews",
+  "onboarding_pages_access","onboarding_clear_pages_access"]){
   const h=mock({schema:schemaNames.filter(name=>name!==required)});
   await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),
    {message:"D1 schema incomplete: "+required});
@@ -123,12 +131,14 @@ test("missing job authorization table or preview cleanup trigger stops readiness
 });
 
 test("empty or out-of-sync Wrangler migration registry blocks remote readiness",async()=>{
- const [initial,rotation,receipts,jobs]=migrationNames;
- for(const migrations of [[],[initial],[initial,rotation,receipts],[initial,receipts,rotation,jobs],[...migrationNames,"0005_surprise.sql"]]){
+ const [initial,rotation,receipts,jobs,options]=migrationNames;
+ for(const migrations of [[],[initial],[initial,rotation,receipts],[initial,receipts,rotation,jobs],
+  [initial,rotation,receipts,jobs],[...migrationNames,"0010_surprise.sql"]]){
   const h=mock({migrations});
   await assert.rejects(checkRemoteSchema({accountId,token:"t",databaseId:expectedId,fetchFn:h.fetchFn}),/migration ledger differs/);
   assert.equal(h.calls.length,4);
  }
+ assert.equal(options,"0005_option_approvals.sql");
 });
 test("missing D1 migration ledger fails closed even if physical schema is correct",async()=>{
  const h=mock({ledgerUnavailable:true});
@@ -154,4 +164,14 @@ test("required hostname, origin and isolation flags cannot be removed from Wrang
   const c=copy();mutate(c);
   assert.throws(()=>validateConfig(c),/Custom Domain|Disable workers.dev|ONBOARDING_ORIGIN/);
  }
+});
+
+test("ZIP preview Worker only gets its preview bindings, on the sibling-host route",()=>{
+  const p=JSON.parse(readFileSync(new URL("./wrangler.preview.jsonc",import.meta.url),"utf8"));
+  assert.equal(p.main,"zip-preview-worker.mjs");assert.equal(p.workers_dev,false);assert.equal(p.preview_urls,false);
+  assert.deepEqual(p.routes,[{pattern:"*-zp.360web.cloud/*",zone_name:"360web.cloud"}]);
+  assert.equal(p.d1_databases,undefined);assert.equal(p.ratelimits,undefined);assert.equal(p.triggers,undefined);
+  assert.deepEqual(Object.keys(p.vars).sort(),["ONBOARDING_ORIGIN","ZIP_PREVIEW_DOMAIN"]);
+  assert.equal(p.vars.ZIP_PREVIEW_DOMAIN,cfg.vars.ZIP_PREVIEW_DOMAIN);
+  assert.equal(p.r2_buckets[0].bucket_name,cfg.r2_buckets[0].bucket_name);
 });
