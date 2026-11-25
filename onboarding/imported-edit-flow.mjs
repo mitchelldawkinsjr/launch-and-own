@@ -456,7 +456,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       return view('Imported edit status',
         '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
         (screen||'<p>'+escape(detail)+'</p>')+follow+
-        (pull.pullRequest?'<p><a href="'+escape(pull.pullRequest)+'">Open the pull request</a></p>':'')+
+        (pull.pullRequest?'<p><a href="'+escape(pull.pullRequest)+'" target="_blank" rel="noopener noreferrer">Open the pull request</a> (opens in a new tab)</p>':'')+
         '<p><a href="/history">Back to your launches</a></p>');
     }catch(error){
       return safeFailure(error);

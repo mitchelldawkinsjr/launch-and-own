@@ -252,6 +252,7 @@ test('a live imported site can preview and approve one pull request without merg
     const statusHtml = await status.text();
     assert.equal(status.status, 200);
     assert.match(statusHtml, /Pull request open/);
+    assert.match(statusHtml, /<a href="https:\/\/github\.com\/tester\/esp-willow-studio\/pull\/7" target="_blank" rel="noopener noreferrer">Open the pull request<\/a> \(opens in a new tab\)/);
     assert.match(statusHtml, /does not publish the site/);
     assert.doesNotMatch(statusHtml, /Approve and open a pull request/);
     assert.doesNotMatch(statusHtml, /published production revision matches/);
