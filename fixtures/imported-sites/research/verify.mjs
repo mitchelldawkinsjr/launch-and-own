@@ -33,6 +33,9 @@ for (const f of metadata.fixtures) {
   const dir = new URL(f.name+'/',root), files = await walk(new URL('public/',dir));
   const expected = JSON.parse(await readFile(new URL('expected-inventory.json',dir)));
   assert.equal(expected.classification,f.expectedClassification);
+  assert.equal(expected.importable,f.expectedArchive === 'accepted');
+  assert.equal(expected.serveReady,f.expectedServeReady); // metadata agreement only; not a classifier test
+  assert.deepEqual(expected.reasons,[...new Set(expected.reasons)].sort());
   assert.deepEqual(expected.files.map(x=>[x.path,x.bytes]),files.map(([p,b])=>['public/'+p,b.length]));
   const archive = zip(files);
   let imported, error;
@@ -40,6 +43,7 @@ for (const f of metadata.fixtures) {
   if (f.expectedArchive === 'accepted') {
     assert.equal(error,undefined); assert.deepEqual(imported.map(x=>[x.path,Buffer.from(x.bytes)]),files);
   } else { assert.equal(error,f.expectedError); }
+  assert.equal(expected.importable,!error);
   results.push({name:f.name,observed:error?'rejected':'accepted',error:error??null,zipSha256:createHash('sha256').update(archive).digest('hex')});
 }
 console.log(JSON.stringify({node:process.version,importerBlobSha,results},null,2));

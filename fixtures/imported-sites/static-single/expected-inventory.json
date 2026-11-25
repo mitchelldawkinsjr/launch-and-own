@@ -1,6 +1,8 @@
 {
   "v": 1,
   "classification": "static",
+  "importable": true,
+  "serveReady": true,
   "reasons": [
     "has_index_html"
   ],

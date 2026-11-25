@@ -1,6 +1,8 @@
 {
   "v": 1,
   "classification": "source_project",
+  "importable": false,
+  "serveReady": false,
   "reasons": [
     "has_index_html",
     "source_project",

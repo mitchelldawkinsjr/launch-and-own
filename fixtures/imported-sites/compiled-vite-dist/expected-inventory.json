@@ -1,6 +1,8 @@
 {
   "v": 1,
   "classification": "compiled_bundle",
+  "importable": true,
+  "serveReady": true,
   "reasons": [
     "has_index_html",
     "minified_js_bundle"
