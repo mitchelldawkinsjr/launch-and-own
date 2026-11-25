@@ -20,7 +20,8 @@ test('checked-in matrix is valid and owner beta is not independent acceptance', 
   assert.equal(matrix.surfaces.browser_manual.verification, 'owner_live');
   assert.equal(matrix.surfaces.browser_zip.access, 'hosted_beta');
   assert.equal(matrix.surfaces.browser_zip.verification, 'owner_live');
-  assert.equal(matrix.surfaces.site_updates.access, 'not_available');
+  assert.equal(matrix.surfaces.site_updates.access, 'hosted_beta');
+  assert.equal(matrix.surfaces.site_updates.verification, 'owner_live', 'owner-live only, not independent acceptance');
   assert.equal(matrix.surfaces.chatgpt_connector.access, 'not_available');
   assert.equal(matrix.surfaces.claude_plugin.access, 'not_available');
   assert.equal(matrix.surfaces.shared_mcp_api.access, 'not_available');
@@ -43,7 +44,7 @@ test('PRs, merged ZIPs, and local rehearsals cannot be advertised as hosted', ()
     m.surfaces.site_updates.implementation = 'merged';
     m.surfaces.site_updates.access = 'hosted_beta';
   }, /PR or merged code does not constitute a hosted release/);
-  rejects(m => { m.surfaces.site_updates.access = 'hosted_beta'; },
+  rejects(m => { m.surfaces.site_updates.verification = 'ci_only'; },
     /hosted beta claim requires observed owner-live/);
   rejects(m => { m.surfaces.browser_zip.implementation = 'merged'; m.surfaces.browser_zip.access = 'public'; }, /code does not constitute a hosted release/);
 });
