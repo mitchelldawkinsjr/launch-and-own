@@ -66,8 +66,8 @@ export const landingCss = marketingPipelineCss + tabsCss + `
 
 /** What the verified ZIP import accepts today (onboarding/website-zip.mjs). Shared by the landing page and the upload form. */
 export const zipCompatibilityHtml =
-  '<div class="lp-compat"><div class="ok"><strong>Works today</strong><ul><li>A finished, built website with <code>index.html</code> at the top or in one folder</li><li>HTML, CSS, JavaScript, images and fonts</li><li>Up to 6 MB zipped, 128 files</li></ul></div>'+
-  '<div class="limited"><strong>Publishes, limited editing</strong><ul><li>Compiled or minified sites (for example a Vite <code>dist</code> folder)</li><li>These publish exactly as uploaded; editing generated code is harder and not automated</li></ul></div>'+
+  '<div class="lp-compat"><div class="ok"><strong>Works today</strong><ul><li>A finished, built website with <code>index.html</code> at the top or in one folder</li><li>HTML, CSS, JavaScript, images and fonts</li><li>Up to 6 MB zipped, 128 files</li><li>Publishes after checks. Launch &amp; Own editing for uploaded sites is not available yet</li></ul></div>'+
+  '<div class="limited"><strong>Publishes after checks</strong><ul><li>Compiled or minified sites (for example a Vite <code>dist</code> folder) can publish exactly as uploaded once they pass the same checks</li><li>You can edit them with your own AI coding tool. Launch &amp; Own editing for uploaded sites is not available yet</li></ul></div>'+
   '<div class="no"><strong>Not supported yet</strong><ul><li>Unbuilt project source (<code>package.json</code>, React or Vite source before building)</li><li>Sites that need a server, database or build step</li></ul></div></div>';
 
 const tab=(id,label,hint,checked)=>'<label class="lo-tab"><input class="lo-radio" type="radio" name="lo-explore" id="lo-tab-'+id+'" value="'+id+'"'+(checked?' checked':'')+'><span class="lo-tab-label">'+label+'</span><span class="lo-tab-hint">'+hint+'</span></label>';

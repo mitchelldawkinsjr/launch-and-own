@@ -9,3 +9,12 @@ Screenshots come from the mocked Worker test harness (fake `tester` account, pla
   - `exploreMarkup()` builds Launch / Maintain / Grow from #164's `marketingPipelineMarkup()`, `aiUpdateJourneyMarkup()` and `serviceExplorerMarkup()`, **consumed unchanged** (#164 owns those files). A test guards the markers it slices on.
   - Maintain adds two paths: own AI coding tool (available with your own tools) and the customer-owned website assistant (*planned · not released*, #165).
 - Tabs are native radio inputs styled with `:has()`. No script, no CSP change. Without `:has()` support all panels stay visible.
+
+## Accessibility audit (automated, Chromium, real Worker headers)
+Pages: landing (ZIP on and off), setup with the upload form, review, privacy. All disclosures open; reduced motion emulated.
+- Contrast (WCAG AA, effective background including alpha): 479 text elements, **0 failures**. Text over gradients appears only in the decorative, `aria-hidden` hero illustration.
+- Structure: one `<h1>` per page, no skipped heading levels, `banner` / `navigation` / `main` / `contentinfo` landmarks, skip link to `#main`, every form field labelled.
+- Keyboard: Tab through every focusable element on each page; all show a visible focus ring (tab labels draw the ring for their radio).
+- Screen-reader tree: the explorer reads as group "Choose what to explore" with three radios and the checked state; inactive panels are removed from the tree.
+- Reduced motion: smooth scrolling off.
+- Not yet done: a manual VoiceOver/NVDA walkthrough by a person. The automated checks don't replace it.
