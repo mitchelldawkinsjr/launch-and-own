@@ -663,7 +663,7 @@ test('privacy and terms pages are public and linked from every page footer',asyn
  const h=harness();
  for(const [path,title] of [['/privacy','Privacy Policy'],['/terms','Terms of Service']]){
   const res=await h.request(path);assert.equal(res.status,200);
-  const html=await res.text();assert.match(html,new RegExp('<h1>'+title+'</h1>'));assert.match(html,/Last updated/);
+  const html=await res.text();assert.match(html,new RegExp('<h1(?:\\s[^>]*)?>'+title+'</h1>'));assert.match(html,/Last updated/);
  }
  const home=await (await h.request('/')).text();
  assert.match(home,/href="\/privacy"/);assert.match(home,/href="\/terms"/);
@@ -707,8 +707,9 @@ test('connection explainer icons remain interactive and truthful through both pr
     assert.match(start.headers.get('content-security-policy'),/default-src 'none'/);
     assert.match(start.headers.get('cache-control'),/no-store/);
     assert.equal((startHtml.match(/class="provider-icon provider-icon-/g)||[]).length,2);
-    assert.equal((startHtml.match(/<details>/g)||[]).length,2);
-    assert.match(startHtml,/href="\/connect\/github">Connect GitHub<\/a>/);
+    const setupHtml=startHtml.slice(startHtml.indexOf('id="get-started"'));
+    assert.equal((setupHtml.match(/<details>/g)||[]).length,2);
+    assert.match(setupHtml,/href="\/connect\/github">Connect GitHub<\/a>/);
     assert.doesNotMatch(startHtml,/href="\/connect\/cloudflare"/);
     assert.match(startHtml,/Both offer free options for simple sites within plan limits/);
     assert.doesNotMatch(startHtml,/<script|src="https:\/\/cdn\./);
