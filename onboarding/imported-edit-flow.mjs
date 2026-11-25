@@ -3,6 +3,7 @@
 import {encodeUtf8,gitBlobSha,jcs,sha256Bytes,sha256Text,utf8} from '../imported/bytes.mjs';
 import {connectContactForm,formConnectSummary,FormConnectError} from './form-connect.mjs';
 import {detectContactForm} from './form-detection.mjs';
+import {readFormService} from './form-service.mjs';
 import {bindApproval,newApprovalId} from '../imported/approval.mjs';
 import {d1ApprovalStore} from '../imported/approval-store.mjs';
 import {ImportedEditError} from '../imported/errors.mjs';
@@ -493,13 +494,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     }
   }
   // Contact form connection: the same owned-site, ticket, approval and pull request path as an edit.
-  async function formService(env,current,job){
-    const row=await env.DB.prepare(`SELECT widget_sitekey,worker_url FROM onboarding_forms_provisioning
-      WHERE job_id=? AND github_user_id=? AND cloudflare_account_id=? AND worker_schedule_set=1
-        AND worker_url IS NOT NULL AND widget_sitekey IS NOT NULL ORDER BY updated_at DESC LIMIT 1`)
-      .bind(job.id,current.github_user_id,current.cloudflare_account_id).first();
-    return row?{sitekey:row.widget_sitekey,workerUrl:row.worker_url}:null;
-  }
+  const formService=(env,current,job)=>readFormService(env,current,job.id);
   async function connectedTree(env,current,item,{baseCommitSha,connect}={}){
     const service=await formService(env,current,item.job);
     if(!service)throw new ImportedEditError('form_service_not_ready');
@@ -530,7 +525,9 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
   }
   async function connectForm(env,current,id){
     const item=await ownedZip(env,current,id);
-    if(!item)return fail('Open a live uploaded website you own from your toolkit.',404);
+    // Sites Launch & Own created get the built-in contact form through their normal update preview.
+    if(!item)return isLaunchId(id)?new Response(null,{status:303,headers:{location:'/site-update?id='+encodeURIComponent(id),'cache-control':'no-store'}})
+      :fail('Open a live website you own from your toolkit.',404);
     try{
       const tree=await connectedTree(env,current,item);
       const value={approvalId:newApprovalId(),proposalDigest:tree.proposalDigest,artifactDigest:await artifactDigest(tree.nextFiles)};

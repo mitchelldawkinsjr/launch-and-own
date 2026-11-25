@@ -1,6 +1,7 @@
 // Customer-facing one-page maintenance workflow. Preview receipts are short-lived,
 // encrypted, session-bound, and never authorize a direct production branch write.
 import {normalizeSite} from '../site/render-site.mjs';
+import {readFormService} from './form-service.mjs';
 import {previewWebsiteUpdate,proposeWebsiteUpdate} from '../pipeline/propose-site-update.mjs';
 import {readManagedSiteBase,readApprovedUpdatePr} from '../pipeline/site-update-read.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
@@ -74,15 +75,17 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       throw Error('Website approval snapshot changed');
     return {job,site:normalizeSite({...stored.site,name:job.customer_name})};
   }
-  async function requireOwned(env,current,id) {
+  // withForm reads the deployed form service (one D1 query); later steps reuse the sealed ticket's copy
+  // so approval stays inside the Workers subrequest budget.
+  async function requireOwned(env,current,id,{withForm=false}={}) {
     const item=await ownedSite(env,current,id);
     if(!item)return null;
     const grants=await assertHistoryAccess(env,current);
-    return {...item,grants};
+    return {...item,grants,contactForm:withForm?await readFormService(env,current,item.job.id):null};
   }
-  function inputFor(job,site) {
+  function inputFor(job,site,contactForm=null) {
     return {name:job.customer_name,githubOwner:job.github_login,
-      accountId:job.cloudflare_account_id,forms:false,site};
+      accountId:job.cloudflare_account_id,forms:false,site,...(contactForm?{contactForm}:{})};
   }
   function ticketAad(kind,current){
     return kind==='review'?'site-update-review:'+current.hash:'site-update-status';
@@ -119,13 +122,14 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     if(!item||ticket.repositoryId!==item.job.repository_id)
       throw Error('The website ownership or update approval has changed');
     const site=normalizeSite({...ticket.site,name:item.job.customer_name});
-    const preview=await previewWebsiteUpdate(inputFor(item.job,site));
+    item.contactForm=ticket.contactForm??null;
+    const preview=await previewWebsiteUpdate(inputFor(item.job,site,item.contactForm));
     if(preview.htmlSha256!==ticket.approvedHtmlSha256)
       throw Error('The website content differs from the approved preview');
     return {item,site,ticket,preview};
   }
   async function editor(env,current,id) {
-    const item=await requireOwned(env,current,id);
+    const item=await requireOwned(env,current,id,{withForm:true});
     if(!item)return fail('Connect both accounts and open a live one-page website you own from your launches.',404);
     const s=item.site;
     const themes=['ocean','forest','sunset','graphite'];
@@ -137,7 +141,8 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       '<label for="theme">Theme</label><select id="theme" name="theme">'+themes.map(x=>'<option value="'+x+'"'+(x===s.theme?' selected':'')+'>'+escape(x)+'</option>').join('')+'</select>',
       '<label for="contactEmail">Contact email (optional)</label><input id="contactEmail" type="email" name="contactEmail" maxlength="254" value="'+escape(s.contactEmail)+'">'
     ].join('');
-    return view('Edit '+s.name,'<p>You are editing from the copy that was approved at launch. If you changed files on GitHub since then, read the preview carefully. Saving here never publishes straight to the live site.</p>'+
+    const formNote=item.contactForm?'<p role="status">Your form service is set up, so this update adds a contact form to the Contact section. Preview it before you approve.</p>':'';
+    return view('Edit '+s.name,formNote+'<p>You are editing from the copy that was approved at launch. If you changed files on GitHub since then, read the preview carefully. Saving here never publishes straight to the live site.</p>'+
       '<p><strong>Private files folder:</strong> '+escape('esp-'+item.job.site_slug)+'</p>'+
       button('/site-update-preview','Preview website changes',current.csrf,fields)+
       '<p><a href="/history">Back to your launches</a></p>');
@@ -145,17 +150,17 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
   async function prepare(request,env,current) {
     await limitAttempts(request,env);
     const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
-    const item=await requireOwned(env,current,form.get('id'));
+    const item=await requireOwned(env,current,form.get('id'),{withForm:true});
     if(!item)return fail('This live website is not available for editing.',404);
     const site=normalizeSite({name:item.job.customer_name,tagline:form.get('tagline')||'',
       about:form.get('about')||'',services:form.get('services')||'',
       theme:form.get('theme')||'ocean',contactEmail:form.get('contactEmail')||''});
     const fetchFn=fencedFetch(env,current);
     const base=await readManagedSiteBase(account(item.job),{githubToken:item.grants.githubAccessToken,fetchFn});
-    const preview=await previewWebsiteUpdate(inputFor(item.job,site));
+    const preview=await previewWebsiteUpdate(inputFor(item.job,site,item.contactForm));
     const ticket=await encodeTicket(env,'review',current,{jobId:item.job.id,
       repositoryId:item.job.repository_id,baseCommitSha:base.baseCommitSha,
-      approvedHtmlSha256:preview.htmlSha256,site});
+      approvedHtmlSha256:preview.htmlSha256,site,...(item.contactForm?{contactForm:{workerUrl:item.contactForm.workerUrl,sitekey:item.contactForm.sitekey}}:{})});
     return new Response(null,{status:303,headers:{
       location:'/site-update-review?ticket='+encodeURIComponent(ticket),'cache-control':'no-store','referrer-policy':'same-origin'
     }});
@@ -188,7 +193,7 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     const fetchFn=previewFencedFetch(env,current,item.job,item.grants.cloudflareAccessToken);
     let proposal;
     try{
-      proposal=await proposeWebsiteUpdate({...inputFor(item.job,site),explicitlyApproved:true,
+      proposal=await proposeWebsiteUpdate({...inputFor(item.job,site,item.contactForm),explicitlyApproved:true,
         approvedHtmlSha256:ticket.approvedHtmlSha256,expectedBaseCommitSha:ticket.baseCommitSha,
         expectedRepositoryId:item.job.repository_id},{githubToken:item.grants.githubAccessToken,fetchFn});
     }catch(error){
