@@ -222,6 +222,7 @@ test('product onboarding shows Launch & Own identity and customer ownership tagl
  const result=await h.request('/');
  const html=await result.text();
  assert.match(html,/Launch & Own/);
+ assert.match(html,/by 360 Web Solutions/);
  assert.match(html,/Describe it\. Launch it\. Own it\./);
 });
 
