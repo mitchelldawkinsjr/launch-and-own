@@ -240,7 +240,12 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
         calls.push('d1');
         return {id: '11111111-2222-3333-4444-555555555555'};
       },
-      async applyCustomerSchema() { calls.push('schema'); return {}; }
+      async applyCustomerSchema() { calls.push('schema'); return {}; },
+      async rotateTurnstileSecret() { return 'rotated-secret-value-0001'; },
+      async uploadFormWorker() { calls.push('upload'); return {}; },
+      async readWorkersSubdomain() { return 'acct'; },
+      async enableFormWorkerSubdomain() { return {enabled: true}; },
+      async setFormWorkerSchedule() { return {}; }
     },
     formsReceipts: (() => {
       let receipt = null;
@@ -265,7 +270,7 @@ test('verified #89 gate unlocks mocked forms consumer; weak gate still fails clo
 
   const out = await consumeStoredToolkitApproval(api);
   assert.equal(out.workingForm, false);
-  assert.equal(out.status, 'form_resources_staged');
+  assert.equal(out.status, 'form_worker_deployed');
   assert.deepEqual(
     calls.filter(c => ['turnstile', 'd1', 'schema'].includes(c)),
     ['turnstile', 'd1', 'schema']

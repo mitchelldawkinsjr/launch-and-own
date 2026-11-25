@@ -163,10 +163,18 @@ async function gitHubCallback(request,env,current){
   response.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
   return response;
 }
+// D1 and Workers scope IDs come from the Cloudflare OAuth client registration (Domain), only while forms are on.
+// A malformed ID is dropped rather than sent, so a typo cannot break sign-in for everyone.
+export function cloudflareScopes(env){
+  const scopes=String(env.CF_SCOPES).trim().split(/\s+/);
+  const forms=env.OPTION_FORMS_ENABLED==='true'?String(env.CF_FORMS_SCOPES||'').trim().split(/\s+/)
+    .filter(scope=>/^[a-z0-9-]+\.(?:read|write)$/.test(scope)):[];
+  return [...new Set([...scopes,...forms])];
+}
 async function cloudflareStart(request,env,current){
   await limitAttempts(request,env);
   if(!current)return fail('Connect GitHub before connecting Cloudflare.',401);
-  const origin=baseUrl(env),scopes=String(env.CF_SCOPES).trim().split(/\s+/);
+  const origin=baseUrl(env),scopes=cloudflareScopes(env);
   const {authorizationUrl,session:flow}=beginCloudflareOAuth({clientId:env.CF_CLIENT_ID,redirectUri:origin+'/oauth/cloudflare/callback',scopes});
   await saveFlow(env,{provider:'cloudflare',binding:current.hash,...flow});
   return redirect(authorizationUrl);
@@ -775,7 +783,9 @@ async function applyApprovedOption(request,env,current){
     throw error;
   }
   if(result.kind==='forms')return view('Contact form setup',
-    '<p>Your Turnstile widget and dedicated database are ready for Worker review. Publishing the form and testing a submission need separate approval.</p>'+
+    '<p>Your form service is set up in your own Cloudflare account: spam protection, a private database for messages, and a small Worker that receives them.</p>'+
+    '<p>Next, connect your site\'s contact form. You review the exact change and merge it yourself.</p>'+
+    (isLaunchId(result.jobId)?'<p><a href="/form-connect?id='+encodeURIComponent(result.jobId)+'">Connect your contact form</a></p>':'')+
     '<p>Worker <code>'+escape(result.workerReview.scriptName)+'</code></p>'+
     '<p>Code SHA-256 <code>'+escape(result.workerReview.moduleSha256)+'</code></p>'+
     '<p><a href="/toolkit">Back to toolkit</a></p>');
@@ -833,6 +843,7 @@ export default {
         if(url.pathname==='/imported-edit-review')return await importedEdits.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/imported-edit-file')return await importedEdits.file(env,current,url);
         if(url.pathname==='/imported-edit-status')return await importedEdits.status(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/form-connect')return await importedEdits.connectForm(env,current,url.searchParams.get('id'));
         if(url.pathname==='/site-options')return await siteOptions.page(env,current,url.searchParams.get('id'));
       }
       if(request.method==='POST'){
@@ -854,6 +865,7 @@ export default {
         if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
         if(url.pathname==='/imported-edit-preview')return await importedEdits.prepare(request,env,current);
         if(url.pathname==='/imported-edit-approve')return await importedEdits.approve(request,env,current);
+        if(url.pathname==='/form-connect-approve')return await importedEdits.connectFormApprove(request,env,current);
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
         if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);

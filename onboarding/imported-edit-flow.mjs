@@ -1,6 +1,8 @@
 // Hosted imported-site edits. The owner session, CSRF check, and launch record
 // decide who can ask. Model output is not accepted on these routes.
-import {gitBlobSha} from '../imported/bytes.mjs';
+import {encodeUtf8,gitBlobSha,jcs,sha256Bytes,sha256Text,utf8} from '../imported/bytes.mjs';
+import {connectContactForm,formConnectSummary,FormConnectError} from './form-connect.mjs';
+import {detectContactForm} from './form-detection.mjs';
 import {bindApproval,newApprovalId} from '../imported/approval.mjs';
 import {d1ApprovalStore} from '../imported/approval-store.mjs';
 import {ImportedEditError} from '../imported/errors.mjs';
@@ -28,6 +30,11 @@ const KINDS=new Set(['text','link','business_info','css_color']);
 const SAFE={
   'ambiguous_match':'That text appears more than once. Preview a unique phrase instead.',
   'no_match':'That text was not found once in the file. Preview the current text exactly.',
+  'form_service_not_ready':'Set up the form service first from Optional features. No pull request was opened.',
+  'form_not_found':'We could not find your contact form in the current files. No pull request was opened.',
+  'form_already_connected':'Your contact form is already connected.',
+  'page_body_missing':'That page has no body element, so the form could not be connected.',
+  'site_policy_unreadable':'The page\'s security settings could not be updated safely. No pull request was opened.',
   'not_found_anywhere':'We could not find that text on any page you can edit. Copy it exactly as it appears on your site.',
   'context_not_allowed':'That replacement is not an allowed text, link, business-info, or custom-property color edit.',
   'overlapping_edits':'Those edits overlap. Preview one unique phrase at a time.',
@@ -485,5 +492,107 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       return safeFailure(error);
     }
   }
-  return {editor,prepare,review,file,approve,status};
+  // Contact form connection: the same owned-site, ticket, approval and pull request path as an edit.
+  async function formService(env,current,job){
+    const row=await env.DB.prepare(`SELECT widget_sitekey,worker_url FROM onboarding_forms_provisioning
+      WHERE job_id=? AND github_user_id=? AND cloudflare_account_id=? AND worker_schedule_set=1
+        AND worker_url IS NOT NULL AND widget_sitekey IS NOT NULL ORDER BY updated_at DESC LIMIT 1`)
+      .bind(job.id,current.github_user_id,current.cloudflare_account_id).first();
+    return row?{sitekey:row.widget_sitekey,workerUrl:row.worker_url}:null;
+  }
+  async function connectedTree(env,current,item,{baseCommitSha,connect}={}){
+    const service=await formService(env,current,item.job);
+    if(!service)throw new ImportedEditError('form_service_not_ready');
+    const revision=await readCurrentRevision({
+      owner:item.job.github_login,repo:'esp-'+item.job.site_slug,token:item.grants.githubAccessToken,fetchFn:fencedFetch(env,current)
+    });
+    if(baseCommitSha&&revision.commitSha!==baseCommitSha)throw new ImportedEditError('stale_base');
+    if(revision.repositoryId!==item.job.repository_id||revision.githubUserId!==item.job.github_user_id)
+      throw new ImportedEditError('repository-mismatch');
+    const files=revision.files.map(file=>({path:file.path,bytes:file.bytes}));
+    const form=connect??detectContactForm(files);
+    if(!form)throw new ImportedEditError('form_not_found');
+    if(connect&&(connect.workerUrl!==service.workerUrl||connect.sitekey!==service.sitekey))
+      throw new ImportedEditError('approval_mismatch');
+    const source=files.find(file=>file.path===form.path);
+    if(!source)throw new ImportedEditError('form_not_found');
+    let html;
+    try{html=connectContactForm(utf8(source.bytes),{formIndex:form.formIndex,workerUrl:service.workerUrl,sitekey:service.sitekey});}
+    catch(error){throw error instanceof FormConnectError?new ImportedEditError(error.code):error;}
+    const nextFiles=files.map(file=>file===source?{path:file.path,bytes:encodeUtf8(html)}:file);
+    const changed=[{path:'public/'+source.path,beforeBlobSha:await gitBlobSha(source.bytes),afterSha256:await sha256Bytes(encodeUtf8(html))}];
+    const preview=await isolatePreview({files:nextFiles,baseCommitSha:revision.commitSha,githubUserId:revision.githubUserId,
+      repositoryId:revision.repositoryId,ownerLogin:revision.ownerLogin});
+    const target={path:source.path,formIndex:form.formIndex,workerUrl:service.workerUrl,sitekey:service.sitekey};
+    const proposalDigest=await sha256Text(jcs({v:1,kind:'form_connect',baseCommitSha:revision.commitSha,...target}));
+    return {revision,files,nextFiles,changed,preview,target,proposalDigest,form,
+      hasPolicy:/http-equiv\s*=\s*["']?content-security-policy/i.test(utf8(source.bytes))};
+  }
+  async function connectForm(env,current,id){
+    const item=await ownedZip(env,current,id);
+    if(!item)return fail('Open a live uploaded website you own from your toolkit.',404);
+    try{
+      const tree=await connectedTree(env,current,item);
+      const value={approvalId:newApprovalId(),proposalDigest:tree.proposalDigest,artifactDigest:await artifactDigest(tree.nextFiles)};
+      const ticket=await encodeTicket(env,'review',current,{
+        jobId:item.job.id,repositoryId:item.job.repository_id,baseCommitSha:tree.revision.commitSha,
+        previewDigest:tree.preview.digest,...value,requestId:crypto.randomUUID(),summary:'Connect contact form',edits:[],
+        changed:tree.changed,connect:tree.target
+      });
+      const where='/'+tree.target.path.replace(/(?:^|\/)index\.html?$/i,'').replace(/\.html?$/i,'');
+      const lines=formConnectSummary({path:where,workerUrl:tree.target.workerUrl,hasPolicy:tree.hasPolicy});
+      const hidden=(name,val)=>'<input type="hidden" name="'+name+'" value="'+escape(val)+'">';
+      return view('Connect your contact form',
+        '<p>This prepares a pull request in your GitHub account. Nothing changes on your site until you merge it.</p>'+
+        '<p><strong>Form:</strong> <code>'+escape(where)+'</code>'+(tree.form.id?' (<code>'+escape(tree.form.id)+'</code>)':'')+
+          ', fields '+tree.form.fields.map(field=>'<code>'+escape(field)+'</code>').join(', ')+'</p>'+
+        '<ul>'+lines.map(line=>'<li>'+escape(line)+'</li>').join('')+'</ul>'+
+        '<p>Messages are saved in a private database in your own Cloudflare account. Only <code>public/'+escape(tree.target.path)+'</code> changes.</p>'+
+        button('/form-connect-approve','Approve and open a pull request',current.csrf,
+          hidden('ticket',ticket)+hidden('approvalId',value.approvalId)+hidden('proposalDigest',value.proposalDigest)+hidden('artifactDigest',value.artifactDigest))+
+        '<p>This approval works once and expires in 15 minutes.</p><p><a href="/toolkit">Back to your toolkit</a></p>');
+    }catch(error){
+      return safeFailure(error);
+    }
+  }
+  async function connectFormApprove(request,env,current){
+    await limitAttempts(request,env);
+    const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
+    try{
+      const ticket=await decodeTicket(env,'review',current,oneField(form,'ticket',6000));
+      if(!ticket.connect||typeof ticket.connect!=='object')throw new ImportedEditError('approval-digest-mismatch');
+      const item=await ownedZip(env,current,ticket.jobId);
+      if(!item)return fail('This approval does not match a website you own.',404);
+      if(oneField(form,'approvalId',32)!==ticket.approvalId||oneField(form,'proposalDigest',64)!==ticket.proposalDigest||
+         oneField(form,'artifactDigest',64)!==ticket.artifactDigest)throw new ImportedEditError('approval_mismatch');
+      // Rebuild from the current files: the exact same change against the same commit, or nothing.
+      const tree=await connectedTree(env,current,item,{baseCommitSha:ticket.baseCommitSha,connect:ticket.connect});
+      if(tree.preview.digest!==ticket.previewDigest||tree.proposalDigest!==ticket.proposalDigest||
+         JSON.stringify(tree.changed)!==JSON.stringify(ticket.changed))throw new ImportedEditError('approval_mismatch');
+      const receipt=await bindApproval({
+        explicitlyApproved:true,preview:tree.preview,changed:tree.changed,
+        githubUserId:item.job.github_user_id,repositoryId:item.job.repository_id,
+        ownerLogin:item.job.github_login,repository:item.job.github_login+'/esp-'+item.job.site_slug,
+        baseCommitSha:ticket.baseCommitSha,proposalDigest:tree.proposalDigest,
+        approvalId:ticket.approvalId,expiresAt:ticket.expiresAt
+      });
+      const fetchFn=guardedFetch(env,current,item.job,item.grants.cloudflareAccessToken);
+      const proposal=await proposeImportedPullRequest(receipt,{baseFiles:tree.files,nextFiles:tree.nextFiles},{
+        githubToken:item.grants.githubAccessToken,fetchFn,approvalStore:d1ApprovalStore(env.DB)
+      });
+      if(proposal.live!==false||proposal.merged!==false)throw new ImportedEditError('pull-request-unreadable');
+      const status=await encodeTicket(env,'status',current,{
+        jobId:item.job.id,repositoryId:item.job.repository_id,baseCommitSha:ticket.baseCommitSha,
+        artifactDigest:receipt.artifactDigest,proposalDigest:ticket.proposalDigest,approvalDigest:receipt.digest,
+        summary:ticket.summary,edits:[],changed:tree.changed,number:proposal.number,headCommitSha:proposal.headCommitSha
+      });
+      return new Response(null,{status:303,headers:{
+        location:'/imported-edit-status?ticket='+encodeURIComponent(status),
+        'cache-control':'no-store','referrer-policy':'same-origin'
+      }});
+    }catch(error){
+      return safeFailure(error);
+    }
+  }
+  return {editor,prepare,review,file,approve,status,connectForm,connectFormApprove};
 }

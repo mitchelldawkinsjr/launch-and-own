@@ -39,35 +39,71 @@ async function readCapped(request, cap) {
   return out;
 }
 
+const FIELD_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+const MAX_FIELDS = 20;
+
+// A plain HTML form submit goes back to the page it came from with ?form=sent or ?form=error;
+// scripts that post with fetch keep getting JSON.
+function responder(request, origin) {
+  const type = request.headers.get('content-type') || '';
+  const page = /^(?:application\/x-www-form-urlencoded|multipart\/form-data)/i.test(type) &&
+    /text\/html/i.test(request.headers.get('accept') || '');
+  let back = origin + '/';
+  try {
+    const referer = new URL(request.headers.get('referer') || '');
+    if (referer.origin === origin) back = origin + referer.pathname;
+  } catch {}
+  return (ok, error, status) => {
+    if (!page) return json(ok ? {ok: true} : {ok: false, error}, status, origin);
+    const target = new URL(back);
+    target.searchParams.set('form', ok ? 'sent' : 'error');
+    if (!ok) target.searchParams.set('reason', error);
+    target.hash = ok ? 'form-sent' : 'form-error';
+    return new Response(null, {status: 303, headers: {location: target.href, 'cache-control': 'no-store'}});
+  };
+}
+
 async function submit(request, env) {
   const host = env.SITE_HOSTNAME, origin = 'https://' + host;
   if (request.headers.get('origin') !== origin) return json({ok: false, error: 'origin_forbidden'}, 403);
+  const reply = responder(request, origin);
   const maxBody = num(env.MAX_BODY_BYTES), maxDay = num(env.MAX_SUBMISSIONS_PER_DAY);
   // Envelope allowance covers field names, encoding and the Turnstile token (<= 2048).
   const raw = await readCapped(request, maxBody + 4096);
-  if (!raw) return json({ok: false, error: 'body_too_large'}, 413, origin);
+  if (!raw) return reply(false, 'body_too_large', 413);
   let form;
   try {
     form = await new Response(raw, {headers: {'content-type': request.headers.get('content-type') || ''}}).formData();
-  } catch { return json({ok: false, error: 'invalid_form_body'}, 400, origin); }
-  const name = String(form.get('name') || '').trim();
-  const email = String(form.get('email') || '').trim();
-  const message = String(form.get('message') || '').trim();
+  } catch { return reply(false, 'invalid_form_body', 400); }
+  // The site's own form fields are kept as sent: safe names only, bounded count and size.
+  const fields = {};
+  let count = 0;
+  for (const [key, value] of form.entries()) {
+    if (key === 'cf-turnstile-response') continue;
+    if (typeof value !== 'string') return reply(false, 'files_not_accepted', 400);
+    if (!FIELD_NAME.test(key) || Object.hasOwn(fields, key)) return reply(false, 'field_invalid', 400);
+    if (++count > MAX_FIELDS) return reply(false, 'too_many_fields', 400);
+    const text = value.trim();
+    if (text.length > 4000) return reply(false, 'field_too_long', 400);
+    fields[key] = text;
+  }
+  if (!Object.values(fields).some(Boolean)) return reply(false, 'form_empty', 400);
+  const emailKey = Object.keys(fields).find(key => /e-?mail/i.test(key) && fields[key]);
+  const email = emailKey ? fields[emailKey] : null;
+  if (email !== null && (!EMAIL.test(email) || email.length > 254)) return reply(false, 'email_invalid', 400);
   const token = String(form.get('cf-turnstile-response') || '');
-  if (!name || name.length > 120) return json({ok: false, error: 'name_invalid'}, 400, origin);
-  if (!EMAIL.test(email) || email.length > 90) return json({ok: false, error: 'email_invalid'}, 400, origin);
-  if (!message || message.length > 4000) return json({ok: false, error: 'message_invalid'}, 400, origin);
-  if (token.length < 8 || token.length > 2048) return json({ok: false, error: 'turnstile_token_required'}, 400, origin);
-  const bodyBytes = new TextEncoder().encode(JSON.stringify({name, email, message})).length;
-  if (bodyBytes > maxBody) return json({ok: false, error: 'body_too_large'}, 413, origin);
+  if (token.length < 8 || token.length > 2048) return reply(false, 'turnstile_token_required', 400);
+  const fieldsJson = JSON.stringify(fields);
+  const bodyBytes = new TextEncoder().encode(fieldsJson).length;
+  if (bodyBytes > maxBody) return reply(false, 'body_too_large', 413);
   const now = Math.floor(Date.now() / 1000), since = day(now), tokenHash = await hash(token);
   // Cheap early refusals; the authoritative checks are in the atomic write below.
   const today = await env.DB.prepare(
     'SELECT COUNT(*) AS n FROM contact_submissions WHERE hostname = ? AND created_at >= ?')
     .bind(host, since).first();
-  if (Number(today?.n || 0) >= maxDay) return json({ok: false, error: 'daily_quota_exhausted'}, 429, origin);
+  if (Number(today?.n || 0) >= maxDay) return reply(false, 'daily_quota_exhausted', 429);
   if (await env.DB.prepare('SELECT 1 AS used FROM turnstile_token_uses WHERE token_hash = ?').bind(tokenHash).first())
-    return json({ok: false, error: 'turnstile_token_reuse'}, 403, origin);
+    return reply(false, 'turnstile_token_reuse', 403);
   const body = new URLSearchParams({secret: env.TURNSTILE_SECRET, response: token});
   const ip = request.headers.get('cf-connecting-ip');
   if (ip && ip.length <= 64) body.set('remoteip', ip);
@@ -77,23 +113,23 @@ async function submit(request, env) {
     verdict = res.status === 200 ? await res.json() : null;
   } catch { verdict = null; }
   if (verdict?.success !== true || String(verdict.hostname || '').toLowerCase() !== host)
-    return json({ok: false, error: 'turnstile_siteverify_rejected'}, 403, origin);
+    return reply(false, 'turnstile_siteverify_rejected', 403);
   // One transaction: the submission is written only while under today's cap, and the
   // token is recorded only with it. A replayed token hits the primary key and rolls back both.
   let written;
   try {
     [written] = await env.DB.batch([
-      env.DB.prepare('INSERT INTO contact_submissions (id, hostname, gate_approval_id, name, email, message, ' +
-        'body_bytes, turnstile_hostname, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? ' +
+      env.DB.prepare('INSERT INTO contact_submissions (id, hostname, gate_approval_id, fields_json, reply_email, ' +
+        'body_bytes, turnstile_hostname, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? ' +
         'WHERE (SELECT COUNT(*) FROM contact_submissions WHERE hostname = ? AND created_at >= ?) < ?')
-        .bind(crypto.randomUUID(), host, env.GATE_APPROVAL_ID, name, email, message, bodyBytes, host, now,
+        .bind(crypto.randomUUID(), host, env.GATE_APPROVAL_ID, fieldsJson, email, bodyBytes, host, now,
           host, since, maxDay),
       env.DB.prepare('INSERT INTO turnstile_token_uses (token_hash, hostname, used_at) SELECT ?, ?, ? ' +
         'WHERE changes() = 1').bind(tokenHash, host, now)
     ]);
-  } catch { return json({ok: false, error: 'turnstile_token_reuse'}, 403, origin); }
-  if (written?.meta?.changes !== 1) return json({ok: false, error: 'daily_quota_exhausted'}, 429, origin);
-  return json({ok: true}, 200, origin);
+  } catch { return reply(false, 'turnstile_token_reuse', 403); }
+  if (written?.meta?.changes !== 1) return reply(false, 'daily_quota_exhausted', 429);
+  return reply(true, null, 200);
 }
 
 export default {
