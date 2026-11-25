@@ -22,6 +22,23 @@ const CAP_LABELS = Object.freeze({
   advanced_services: 'Advanced hosting extras'
 });
 
+// Per-site sections: CSS-only tabs (native radios + :has()); without :has() every section stays visible.
+const SECTIONS = [['overview', 'Overview'], ['updates', 'Updates'], ['services', 'Services'], ['settings', 'Settings']];
+const toolkitTabsCss = `
+.tk-site{background:var(--card,#fff);border:1px solid var(--line);border-radius:16px;padding:clamp(16px,3vw,26px);margin:0 0 22px;min-width:0}
+.tk-site>h2{margin:0 0 6px}
+.tk-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:14px 0 18px;padding:5px;border:1px solid var(--line);border-radius:14px;min-width:0}
+.tk-tab{position:relative;padding:9px 10px;border-radius:10px;text-align:center;font-weight:750;cursor:pointer;min-width:0}
+.tk-tab:hover{background:#f0f4fa}
+.tk-radio{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
+.tk-tab:has(.tk-radio:checked){background:var(--blue);color:#fff}
+.tk-tab:has(.tk-radio:focus-visible){outline:3px solid var(--blue);outline-offset:3px}
+.tk-site:has(.tk-radio:checked) .tk-panel{display:none}
+${SECTIONS.map(([id]) => `.tk-site:has(.tk-radio[value="${id}"]:checked) .tk-p-${id}`).join(',')}{display:block}
+.tk-panel>h3{margin:0 0 8px;font-size:1.05rem}
+@media(max-width:520px){.tk-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+`;
+
 const STATE_LABELS = Object.freeze({
   included_verified: 'Included',
   available_opt_in: 'Available',
@@ -204,15 +221,15 @@ export function renderToolkitPage(cards, current, {view, escape}, {currentInvent
       '<p>Connect GitHub and choose your Cloudflare account to see your sites here.</p>' +
       '<p><a href="/">Back to setup</a></p>');
   const body = cards.length
-    ? cards.map(card => renderCard(card, escape)).join('')
+    ? cards.map((card, i) => renderCard(card, escape, i)).join('')
     : '<p>No websites in your launches yet. Create or upload a site first.</p>';
   return view('Your website toolkit',
-    '<style>' + serviceExplorerCss + '</style><p>Recent launches stay here for 30 days. The details below come from the launch we recorded for you.</p>' +
+    '<style>' + serviceExplorerCss + toolkitTabsCss + '</style><p>Recent launches stay here for 30 days. The details below come from the launch we recorded for you.</p>' +
     body + currentInventoryHtml +
     '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p>');
 }
 
-function renderCard(card, escape) {
+function renderCard(card, escape, index = 0) {
   const time = iso => '<time datetime="' + escape(iso) + '">' + escape(iso.slice(0, 10)) +
     ' ' + escape(iso.slice(11, 16)) + ' UTC</time>';
   const website = card.recordedWebsite
@@ -237,11 +254,21 @@ function renderCard(card, escape) {
     return '<li><strong>' + escape(label) + '</strong> · ' + escape(state) + ': ' +
       escape(item.detail) + '</li>';
   }).join('');
-  return '<section><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' +
-    '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + digest + error + edit +
-    options +
-    '<details><summary>Explore your website services</summary>' + serviceExplorerMarkup({mode:'toolkit', capabilities:card.capabilities}) + '</details>' +
-    '<details><summary>What this site includes</summary><ul>' + caps + '</ul></details></section>';
+  const updatesCap = card.capabilities?.website_updates;
+  const tabs = '<fieldset class="tk-tabs"><legend class="lo-sr">Sections for ' + escape(card.name) + '</legend>' +
+    SECTIONS.map(([id, label], i) => '<label class="tk-tab"><input class="tk-radio" type="radio" name="tk-site-' + index +
+      '" value="' + id + '" aria-label="' + label + '"' + (i ? '' : ' checked') + '><span aria-hidden="true">' + label + '</span></label>').join('') + '</fieldset>';
+  const panel = (id, label, html) => '<div class="tk-panel tk-p-' + id + '"><h3>' + label + '</h3>' + html + '</div>';
+  return '<section class="tk-site"><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' + tabs +
+    panel('overview', 'Overview', '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + error) +
+    panel('updates', 'Updates', edit + (updatesCap ? '<p>' + escape(updatesCap.detail) + '</p>' : '') +
+      '<p><a href="/history">Your launches</a> shows every recorded launch and its result.</p>') +
+    panel('services', 'Services', options +
+      '<details><summary>Explore your website services</summary>' + serviceExplorerMarkup({mode:'toolkit', capabilities:card.capabilities}) + '</details>') +
+    panel('settings', 'Settings', digest +
+      '<details><summary>What this site includes</summary><ul>' + caps + '</ul></details>' +
+      '<p>Your files stay in your GitHub account and your hosting in your Cloudflare account. Manage app access in each provider\'s settings.</p>') +
+    '</section>';
 }
 
 export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ticketRaw, jobId, escape}) {
