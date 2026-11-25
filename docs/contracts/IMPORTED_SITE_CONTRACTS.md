@@ -1,10 +1,10 @@
 # Imported-site editing contracts (#165 M0)
 
-**Status: DRAFT revision 2, pending owner approval (#171 item 7).** Prepared by Claude Code (Claude Opus 5.5, `claude-opus-5-5`). No code implements these contracts yet. Nothing here changes release status; `distribution/release-matrix.json` stays authoritative.
+**Status: APPROVED, revision 2.** Owner approval recorded on #171 item 7, 2026-11-25. Prepared by Claude Code (Claude Opus 5.5, `claude-opus-5-5`). No code implements these contracts yet. Nothing here changes release status; `distribution/release-matrix.json` stays authoritative.
 
 Revision 2 addresses the coordinator review and the WS5 security review on #176, plus findings from the corpus pilot (#169) and the provisional fixture schema (#172 comment 7153907192, used by fixture PR #177). See [Changes in revision 2](#changes-in-revision-2).
 
-These are the shared interfaces that let WS1 (inventory), WS2 (edit engine), WS3 (preview and PR) and WS6 (UI) work in parallel without editing each other's code. Every payload carries `v: 1`; nothing implements it yet, so revision 2 keeps `v: 1`. After approval, a breaking change needs a new version and a note in #165.
+These are the shared interfaces that let WS1 (inventory), WS2 (edit engine), WS3 (preview and PR) and WS6 (UI) work in parallel without editing each other's code. Every payload carries `v: 1`. A breaking change now needs a new version, a note in #165 and owner approval.
 
 ## 0. Baseline this builds on
 
@@ -86,14 +86,14 @@ All checks must pass, otherwise reject the whole proposal with a §4 code. There
 1. `v`, `repositoryId` and `baseCommitSha` match the current inventory.
 2. Every `path` is in the inventory, its `kind` is in that file's `editable` list, and `expectedBlobSha` matches.
 3. `find` occurs exactly once in the file's UTF-8 text (`ambiguous_match` if more, `no_match` if none). Counting is per file.
-4. Limits: ≤ 10 edits, ≤ 5 files, `find`/`replace` ≤ 2,000 chars each, resulting file ≤ 2 MiB. (Recommended M1 defaults; the owner confirms them on #171.)
+4. Limits: ≤ 10 edits, ≤ 5 files, `find`/`replace` ≤ 2,000 chars each, resulting file ≤ 2 MiB (owner-approved for M1).
 5. **Context check (parsed, not textual).** Parse the file and locate the single `find` span. The span must sit entirely inside the context allowed for its kind, or the edit is rejected with `context_not_allowed`:
 
 | Kind | Allowed context | Never allowed |
 | --- | --- | --- |
 | `text`, `business_info` | One HTML text node | Inside `<script>`, `<style>`, `<template>`, `<textarea>`, comments, attribute values, tag syntax, or across element boundaries |
 | `link` | The **whole** value of an `href` attribute on an `<a>` element (`find` equals the full current value) | `src`, `action`, `formaction`, `srcdoc`, `style`, event handlers, `<base>`, `<link>`, `<meta http-equiv>` |
-| `css_color` | The **whole** value of one parsed CSS declaration, in a `.css` file or a `<style>` element. M1 recommended default: custom properties only (`--name: <color>`), pending #171 | Selectors, at-rules, `url()`, comments, inline `style` attributes |
+| `css_color` | The **whole** value of one parsed CSS declaration, in a `.css` file or a `<style>` element. M1: custom properties only (`--name: <color>`), owner-approved | Selectors, at-rules, `url()`, comments, inline `style` attributes |
 
 6. **Replacement check.** `text`/`business_info` replacements are plain text and are HTML-escaped on apply; raw `<`, `>` or `&` in `replace` is escaped, not interpreted. `link` replacements must be an absolute `https:` URL, a `mailto:` or `tel:` URL, or a relative path that resolves inside `public/`. `css_color` replacements must parse as exactly one CSS color, and the old value must also have parsed as a color.
 7. **Overlap and ordering.** Resolve every span against the **original** file content. If two edits in one file overlap or touch the same span, reject with `overlapping_edits`. Apply edits to each file in descending span-offset order so offsets stay valid. The order of the `edits` array never changes the result.
@@ -128,7 +128,7 @@ Rules:
 - **Single use.** In the same transaction, before any GitHub write, the server marks `approvalId` consumed under a unique constraint. A second POST with the same `approvalId` fails with `approval_consumed`. A replay therefore cannot produce a second commit.
 - **Idempotency key** is `(repositoryId, baseCommitSha, artifactDigest)`, recorded with the `approvalId` that first claimed it. A different approval for the same key by the **same owner** returns the existing PR and makes no new commit. Any other owner gets `approval_mismatch`.
 - **Re-read the base right before writing.** Check `main` = `baseCommitSha` at approval **and** again immediately before creating the branch ref. Always create the branch from `baseCommitSha`, never from the current head. Branch name: `launch-and-own/edit-<first 20 hex of sha256(baseCommitSha:artifactDigest)>`. One multi-file commit, one PR. On retry, reuse only after `hasApprovedUpdateHead` verifies the head and repository. Never merge.
-- Expiry: 15 minutes, matching the existing site-update review lifetime (recommended; the WS5 review agrees; owner confirms on #171).
+- Expiry: 15 minutes, matching the existing site-update review lifetime (owner-approved).
 - "Live" requires the merged commit SHA to equal the production deployment's commit, plus a fetch of the live files matching `afterSha256`.
 
 ## 4. Status and failure vocabulary (all workstreams)
@@ -183,11 +183,13 @@ Reason and failure codes (the UI maps each to plain language; codes are stable):
 
 Fixtures are original or license-clean, contain no personal data, and keep provenance and observed importer results separate from proposed classifier expectations (as in #177). The corpus agent (#169) adds real-export samples here.
 
-## Open questions for the owner (#171)
+## Owner decisions (#171, 2026-11-25)
 
-1. Confirm the M1 limits: ≤ 10 edits / ≤ 5 files.
-2. Should `css_color` edits in M1 be limited to CSS custom properties? (Recommended: yes.)
-3. Confirm the 15-minute approval expiry. (Recommended: yes.)
+1. M1 limits: ≤ 10 edits / ≤ 5 files per change.
+2. `css_color` edits in M1: CSS custom properties only.
+3. Approval expiry: 15 minutes.
+
+Approving the contract does not authorize hosted routes, M1.5, inference, live accounts or deployment. Each needs its own owner go-ahead.
 
 ## Changes in revision 2
 
