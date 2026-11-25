@@ -250,7 +250,7 @@ test('ZIP onboarding previews real files privately, approves the bundle, and ver
   assert.match(review, /Uploaded website · 5 files/);
   assert.match(review, /Compatibility check/);
   assert.match(review, /Ready for a private preview/);
-  assert.match(review, /Planned · not released/);
+  assert.match(review, /Beta · after launch/);
   assert.match(review, /assets\/Willow Photo\.png/);
   assert.match(review, /esp-willow-studio-site\.pages\.dev/);
   const preview = await openPrivatePreview(h, tenant, id);

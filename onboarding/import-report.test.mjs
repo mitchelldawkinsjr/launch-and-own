@@ -13,9 +13,9 @@ test('static site can publish, and editing stays labelled planned',()=>{
   assert.match(html,/not a test in a real browser/);
   assert.match(html,/Ready for a private preview/);
   assert.match(html,/review and approve it/);
-  assert.match(html,/Planned · not released/);
-  assert.match(html,/editing for uploaded sites is not available yet/);
-  assert.match(html,/text, links, business details and colors in 2 files/);
+  assert.match(html,/Beta · after launch/);
+  assert.match(html,/After launch you can update text, links, business details and colors in 2 files from your toolkit/);
+  assert.match(html,/you merge the change yourself/);
   assert.doesNotMatch(html,/<(?:script|form|img)\b|\bon[a-z]+=/i);
 });
 
@@ -24,7 +24,7 @@ test('source project and missing files are never shown as publishable',()=>{
   assert.match(source,/Project source, not a built site/);
   assert.match(source,/Cannot be published yet/);
   assert.match(source,/packages a browser cannot load/);
-  assert.match(source,/No files in this upload would be suitable/);
+  assert.doesNotMatch(source,/Beta · after launch/,'no editing promise for an upload that cannot publish');
   assert.doesNotMatch(source,/Ready for a private preview</);
   const missing=importReportMarkup({...staticSite,serveReady:false,reasons:['has_index_html','missing_local_dependency']});
   assert.match(missing,/Some linked files are missing/);
@@ -57,7 +57,8 @@ test('report renders every shared fixture inventory consistently with the approv
     const found=html.match(/<summary>What we found<\/summary><ul>([\s\S]*?)<\/ul>/);
     assert.equal(found?(found[1].match(/<li>/g)||[]).length:0,inv.reasons.length,name+': every reason code has plain language');
     const editable=inv.files.filter(f=>f.editable.length).length;
-    assert.ok(editable?html.includes(' in '+editable+' file'):html.includes('No files in this upload would be suitable'),name+': planned-editing note');
-    assert.match(html,/Planned · not released/);
+    if(publishable)assert.ok(editable?html.includes(' in '+editable+' file'):html.includes('No files in this upload are suitable'),name+': editing note');
+    assert.equal(html.includes('Beta · after launch'),publishable,name+': editing note only for publishable uploads');
+    assert.doesNotMatch(html,/not available yet/);
   }
 });

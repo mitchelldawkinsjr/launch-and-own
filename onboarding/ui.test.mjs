@@ -54,7 +54,8 @@ test('ZIP-first copy follows only the strict verified flag and states compatibil
   assert.match(on,/Upload an existing ZIP/);
   assert.match(on,/Not supported yet<\/strong><ul><li>Unbuilt project source/);
   assert.match(on,/Up to 6 MB zipped, 128 files/);
-  assert.match(on,/Launch &amp; Own editing for uploaded sites is not available yet/);
+  assert.match(on,/After launch, make simple text, link, contact and color updates from your toolkit \(beta\)/);
+  assert.doesNotMatch(on,/editing for uploaded sites is not available yet/);
   assert.doesNotMatch(on,/limited editing/i);
   assert.doesNotMatch(on,/<p>[^<]*<div/,'block content must not sit inside <p>');
 });

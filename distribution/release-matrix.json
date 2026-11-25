@@ -43,13 +43,15 @@
     "site_updates": {
       "label": "Owner: approved post-launch edits",
       "implementation": "deployed",
-      "access": "not_available",
-      "verification": "ci_only",
+      "access": "hosted_beta",
+      "verification": "owner_live",
       "evidence": [
-        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/31"
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/31",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/21#issuecomment-7174513230"
       ],
       "blockers": [
-        "Code merged and Worker deployable; owner-live edit walkthrough still required before hosted_beta (#21)"
+        "Independent consenting customer acceptance of a post-launch edit is still pending (#21)",
+        "Toolkit edits cover text, links, business email or phone, and CSS custom-property colors only; compiled bundles stay read-only"
       ]
     },
     "portable_skill": {
