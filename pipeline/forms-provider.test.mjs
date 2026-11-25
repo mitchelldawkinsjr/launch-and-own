@@ -287,3 +287,34 @@ test('provider refuses staging with a missing grant, resource collision or unsup
   await assert.rejects(noSchemaProof.provider.applyCustomerSchema(site, {hostname: HOST, databaseId: DBID}),
     /customer_d1_schema_unverified/);
 });
+
+test('form Worker keeps the site form\'s own fields and sends a browser form back to its page', async t => {
+  const worker = await loadWorker();
+  const DB = fakeD1();
+  const env = workerEnv(DB, {MAX_SUBMISSIONS_PER_DAY: '10'});
+  t.mock.method(globalThis, 'fetch', async () => Response.json({success: true, hostname: HOST}));
+  const post = (fields, headers = {}) => worker.fetch(new Request('https://' + PROJECT + '-form.acct.workers.dev/submit', {
+    method: 'POST', body: new URLSearchParams({'cf-turnstile-response': freshToken(), ...fields}),
+    headers: {origin: 'https://' + HOST, 'content-type': 'application/x-www-form-urlencoded',
+      accept: 'text/html,application/xhtml+xml', referer: 'https://' + HOST + '/contact?x=1', ...headers}}), env);
+  // The Green Willow booking form: no message field, a date and a select.
+  const sent = await post({name: 'Ada', email: 'ada@example.net', date: '2026-12-05', type: 'portrait'});
+  assert.equal(sent.status, 303);
+  assert.equal(sent.headers.get('location'), 'https://' + HOST + '/contact?form=sent');
+  const row = DB.sqlite.prepare('SELECT fields_json, reply_email FROM contact_submissions').get();
+  assert.deepEqual(JSON.parse(row.fields_json), {name: 'Ada', email: 'ada@example.net', date: '2026-12-05', type: 'portrait'});
+  assert.equal(row.reply_email, 'ada@example.net');
+  // A phone-only form works without an email field.
+  assert.equal((await post({phone: '555-0142'})).headers.get('location'), 'https://' + HOST + '/contact?form=sent');
+  assert.equal(DB.sqlite.prepare('SELECT count(*) n FROM contact_submissions WHERE reply_email IS NULL').get().n, 1);
+  // Errors go back to the page too; a foreign referer never becomes the redirect target.
+  const bad = await post({email: 'nope'}, {referer: 'https://evil.example/x'});
+  assert.equal(bad.headers.get('location'), 'https://' + HOST + '/?form=error&reason=email_invalid');
+  assert.equal((await post({'bad name': 'x'})).headers.get('location').includes('reason=field_invalid'), true);
+  assert.equal((await post({})).headers.get('location').includes('reason=form_empty'), true);
+  const many = Object.fromEntries(Array.from({length: 21}, (_, i) => ['f' + i, 'x']));
+  assert.equal((await post(many)).headers.get('location').includes('reason=too_many_fields'), true);
+  // fetch() callers still get JSON.
+  const api = await post({email: 'ada@example.net', message: 'Hi'}, {accept: 'application/json'});
+  assert.deepEqual(await api.json(), {ok: true});
+});

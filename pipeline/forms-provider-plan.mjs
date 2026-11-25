@@ -13,9 +13,8 @@ CREATE TABLE IF NOT EXISTS contact_submissions (
   id TEXT PRIMARY KEY,
   hostname TEXT NOT NULL,
   gate_approval_id TEXT NOT NULL,
-  name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 120),
-  email TEXT NOT NULL CHECK(length(email) BETWEEN 3 AND 90),
-  message TEXT NOT NULL CHECK(length(message) BETWEEN 1 AND 4000),
+  fields_json TEXT NOT NULL CHECK(length(fields_json) BETWEEN 2 AND 65536),
+  reply_email TEXT CHECK(reply_email IS NULL OR length(reply_email) BETWEEN 3 AND 254),
   body_bytes INTEGER NOT NULL CHECK(body_bytes BETWEEN 1 AND 65536),
   turnstile_hostname TEXT NOT NULL,
   created_at INTEGER NOT NULL
