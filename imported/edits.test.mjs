@@ -87,6 +87,16 @@ test('accepts unique text, link, business-info, and color edits and preserves ot
   assert.deepEqual(html.bytes, files[0].bytes);
 });
 
+test('encodes both quote styles in text and business-info edits', async () => {
+  const html = text('index.html', page('<h1>Willow Studio</h1><p>Open weekdays</p>'));
+  const edited = await accept([html], [
+    { kind: 'text', path: 'index.html', old: 'Willow Studio', new: '"River & Pine"' },
+    { kind: 'business_info', path: 'index.html', old: 'Open weekdays', new: "Call during 'office hours'" }
+  ]);
+  assert.equal(new TextDecoder().decode(edited.files[0].bytes),
+    page('<h1>&quot;River &amp; Pine&quot;</h1><p>Call during &#39;office hours&#39;</p>'));
+});
+
 test('rejects ambiguous, injected, script, and disallowed edits', async () => {
   const html = text('index.html', page('<h1>Welcome</h1><p>Welcome</p><a href="https://willow.example/contact">Contact</a>'));
   const css = text('styles.css', 'a { color: #112233; }\n');
