@@ -1,6 +1,6 @@
 # ADR-004: How deployed assistants get updates
 
-- **Status:** Proposed
+- **Status:** Proposed. This is the only one of these four still open: [#171](https://github.com/mitchelldawkinsjr/launch-and-own/issues/171) item 4 awaits the owner.
 - **Blocks:** M0 decision "Update channel" (WS4) in #165
 - **Date:** 2026-11-24 · Claude Opus 5.5
 

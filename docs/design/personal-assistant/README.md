@@ -17,12 +17,12 @@ Author: Claude Code · Claude Opus 5.5 (`claude-opus-5-5`), 2026-11-24. Reviewer
 
 ## Recommendations in one table
 
-| Decision | Recommendation | Main reason |
+| Decision | Recommendation (owner status) | Main reason |
 | --- | --- | --- |
-| Cloudflare scopes | **Customer-run deploy.** Launch & Own `CF_SCOPES` stay unchanged. | No central credential that can write code into customer accounts. Wrangler's OAuth has no Access scope, so Access is a manual step either way. |
-| GitHub credentials | **Per-customer private GitHub App.** The manifest code is exchanged on the customer's machine. | Works with Launch & Own offline. One-hour tokens restricted per request. The private key never reaches Launch & Own. |
-| Assistant location | **Separate private repo** generated from a versioned upstream template | Can't leak into Pages output, and the assistant can't edit its own code |
-| Update channel | **A scheduled workflow in the customer's assistant repo opens a pinned update PR from an immutable, attested release. The owner merges it and deploys.** The dashboard notice is the fallback. | No central push path. Provenance doesn't rely on editable release notes. |
+| Cloudflare scopes | ✅ *Accepted 2026-11-25.* **Customer-run deploy.** Launch & Own `CF_SCOPES` stay unchanged. | No central credential that can write code into customer accounts. Wrangler's OAuth has no Access scope, so Access is a manual step either way. |
+| GitHub credentials | ✅ *Accepted 2026-11-25.* **Per-customer private GitHub App.** The manifest code is exchanged on the customer's machine. | Works with Launch & Own offline. One-hour tokens restricted per request. The private key never reaches Launch & Own. |
+| Assistant location | ✅ *Accepted 2026-11-25.* **Separate private repo** generated from a versioned upstream template | Can't leak into Pages output, and the assistant can't edit its own code |
+| Update channel | *Open (#171 item 4).* **A scheduled workflow in the customer's assistant repo opens a pinned update PR from an immutable, attested release. The owner merges it and deploys.** The dashboard notice is the fallback. | No central push path. Provenance doesn't rely on editable release notes. |
 
 ## Conflicts with AGENTS.md that need an owner decision
 

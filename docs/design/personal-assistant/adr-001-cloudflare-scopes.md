@@ -1,6 +1,6 @@
 # ADR-001: How the assistant gets deployed into the customer's Cloudflare account
 
-- **Status:** Proposed. Needs Domain/OAuth sign-off (Domain owns provider permissions under AGENTS.md).
+- **Status:** **Accepted by the owner, 2026-11-25** ([#171](https://github.com/mitchelldawkinsjr/launch-and-own/issues/171) item 1): "The customer deploys the assistant into their own Cloudflare account in M2. Launch & Own keeps its current OAuth scopes. Any M3 guided setup that needs broader scopes goes through Domain review." Domain/OAuth review of the details is still requested.
 - **Blocks:** M0 decision "Cloudflare scopes" in #165
 - **Date:** 2026-11-24 · Claude Opus 5.5
 

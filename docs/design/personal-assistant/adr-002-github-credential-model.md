@@ -1,6 +1,6 @@
 # ADR-002: GitHub credential model for the customer-owned assistant
 
-- **Status:** Proposed. Needs Domain/OAuth and #157 review.
+- **Status:** **Accepted by the owner, 2026-11-25** ([#171](https://github.com/mitchelldawkinsjr/launch-and-own/issues/171) item 2): a private GitHub App per customer, with the manifest code exchanged locally under the customer's control (A3). A2 stays an M3 candidate. Domain/OAuth and #157 review of the details are still requested.
 - **Blocks:** M0 decision "GitHub credential model" in #165
 - **Date:** 2026-11-24 · Claude Opus 5.5
 

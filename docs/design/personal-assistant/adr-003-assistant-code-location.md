@@ -1,6 +1,6 @@
 # ADR-003: Where the assistant's code lives
 
-- **Status:** Proposed
+- **Status:** **Accepted by the owner, 2026-11-25** ([#171](https://github.com/mitchelldawkinsjr/launch-and-own/issues/171) item 3): a separate private assistant repo, with the customer's GitHub App installed only on the website repo.
 - **Blocks:** M0 decision "Assistant location" in #165
 - **Date:** 2026-11-24 · Claude Opus 5.5
 
