@@ -70,7 +70,8 @@ export const zipCompatibilityHtml =
   '<div class="limited"><strong>Compiled sites</strong><ul><li>Compiled or minified sites (for example a Vite <code>dist</code> folder) can publish exactly as uploaded once they pass the same checks</li><li>You can edit them with your own AI coding tool. Launch &amp; Own editing for uploaded sites is not available yet</li></ul></div>'+
   '<div class="no"><strong>Not supported yet</strong><ul><li>Unbuilt project source (<code>package.json</code>, React or Vite source before building)</li><li>Sites that need a server, database or build step</li></ul></div></div>';
 
-const tab=(id,label,hint,checked)=>'<label class="lo-tab"><input class="lo-radio" type="radio" name="lo-explore" id="lo-tab-'+id+'" value="'+id+'"'+(checked?' checked':'')+'><span class="lo-tab-label">'+label+'</span><span class="lo-tab-hint">'+hint+'</span></label>';
+// Name lives on the radio; the visible spans are hidden from assistive tech so screen readers announce each tab once.
+const tab=(id,label,hint,checked)=>'<label class="lo-tab"><input class="lo-radio" type="radio" name="lo-explore" id="lo-tab-'+id+'" value="'+id+'" aria-label="'+label+': '+hint+'"'+(checked?' checked':'')+'><span class="lo-tab-label" aria-hidden="true">'+label+'</span><span class="lo-tab-hint" aria-hidden="true">'+hint+'</span></label>';
 
 // Honest maintenance paths (#165, #43/#55): only the independent tool path is available today.
 const maintainPaths = '<div class="lo-paths" aria-label="Ways to make changes">'+
@@ -100,10 +101,10 @@ export function exploreMarkup({zipEnabled=false}={}){
 
 const faq = zipEnabled => [
   ...(zipEnabled?[['What kind of website can I bring?','Finished, built websites work best: an <code>index.html</code> with its HTML, CSS, JavaScript, images and fonts, zipped. Unbuilt project source, such as a React or Vite project before building, is not supported yet.',zipCompatibilityHtml]]:[]),
-  ['What will I connect, and what can Launch &amp; Own do?','You sign in to GitHub and install the Launch &amp; Own GitHub app so it can create a private repository for your website files. You connect Cloudflare and pick the account that hosts the site. Cloudflare also needs its own Workers &amp; Pages GitHub app with access to that repository. Each provider shows you the permissions before you agree, and nothing is created until you approve the exact preview.'],
+  ['What will I connect, and what can Launch &amp; Own do?','You sign in to GitHub and install the Launch &amp; Own GitHub app so it can create a private repository for your website files. You connect Cloudflare and pick the account that hosts the site. Cloudflare also needs its own Workers &amp; Pages GitHub app with access to that repository. Each provider shows you the permissions before you agree. No repository or hosting project is created until you approve the exact preview.'],
   ['What does it cost?','GitHub and Cloudflare offer free plans that suit many simple sites, subject to their plan and usage limits. Launch &amp; Own does not sell you a hosting subscription. A custom domain or extra services may cost money from the provider you choose.'],
   ['Can I use my own domain?','Your site launches on a free <code>pages.dev</code> address. After launch you can save a custom domain request from your toolkit. Saving it does not change DNS. Each step needs your separate review and approval.'],
-  ['Can AI update my website?','Today, you can use your own AI coding tool with write access to your repository, such as Codex or Claude Code, to propose changes as pull requests you review and merge. A private assistant running in your own Cloudflare account is planned and has not been released. AI never approves or merges on your behalf.'],
+  ['Can AI update my website?','Today, you can use your own AI coding tool with write access to your repository, such as Codex or Claude Code, to propose changes as pull requests you review and merge. A private assistant running in your own Cloudflare account is planned and has not been released; it would never approve or merge for you. With your own tool, ask for pull requests and keep merging in your own hands.'],
   ['What happens if I stop using Launch &amp; Own?','Your files stay in your GitHub repository and your site stays in your Cloudflare account. You can disconnect at any time and remove app access in each provider\'s settings.']
 ];
 
@@ -116,7 +117,7 @@ export function landingMarkup({zipEnabled=false,setupHtml=''}={}) {
       '<div class="lp-ctas"><a class="btn" href="#get-started">Bring my website</a><a class="btn btn-secondary" href="#get-started">No site yet? Create one</a></div>'+
       '<ul class="lp-points"><li>Finished static websites with an index.html</li><li>Your own GitHub and Cloudflare accounts, free plans within provider limits</li><li>Nothing publishes without your approval</li></ul>'
     :'<p class="lp-kicker">Describe it. Launch it. Own it.</p><h1 id="lp-title">Your website.<br>Your rules.</h1>'+
-      '<p class="lp-lede">Launch a professional website in accounts you own. See a private preview of exactly what will be published and approve it before anything goes live. Keep your files and hosting if you ever leave.</p>'+
+      '<p class="lp-lede">Launch a clean, simple website in accounts you own. See a private preview of exactly what will be published and approve it before anything goes live. Keep your files and hosting if you ever leave.</p>'+
       '<div class="lp-ctas"><a class="btn" href="#get-started">Launch my website</a><a class="btn btn-secondary" href="#explore">See how it works</a></div>'+
       '<ul class="lp-points"><li>Your own GitHub and Cloudflare accounts</li><li>Free plans for many simple sites, within provider limits</li><li>Nothing publishes without your approval</li></ul>';
   return '<div class="lp">'+

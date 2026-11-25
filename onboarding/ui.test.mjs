@@ -34,6 +34,9 @@ test('landing leads with the outcome, keeps one panel open and links CTAs to the
   assert.match(html,/<a href="\/connect\/github">Connect GitHub<\/a><\/section>/);
   assert.doesNotMatch(html,/<(?:script|img|iframe)\b|\bon[a-z]+=/i);
   assert.doesNotMatch(html,/Preview every page/);
+  for(const zip of [true,false]){const page=landingMarkup({zipEnabled:zip});
+    assert.doesNotMatch(page,/AI never approves|nothing is created until|professional website/,'copy review: no overclaims');
+    assert.match(page,/No repository or hosting project is created until you approve/);}
 });
 
 test('ZIP-first copy follows only the strict verified flag and states compatibility limits',()=>{

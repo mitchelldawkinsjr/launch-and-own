@@ -1,6 +1,6 @@
 # PR #53 design notes and screenshots
 
-Screenshots come from the mocked Worker test harness (fake `tester` account, placeholder SHAs). No real accounts or customer data. Remove this folder before merge if the screenshots aren't wanted in the repo.
+Screenshots came from the mocked Worker test harness (fake `tester` account, placeholder SHAs). They were removed from the branch before release to keep binaries out of the repo; the PR #53 and #168 progress comments link to them at their pinned commits, so those links still work.
 
 ## Component hierarchy
 - `onboarding/ui.mjs`: shared tokens, header, stepper, page shell and the ZIP compatibility grid styles. Used by every `view()` page. UI options go in `view()`'s fifth argument, never the headers argument.
