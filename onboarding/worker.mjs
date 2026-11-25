@@ -29,6 +29,8 @@ import {bridgeLaunchStatus,importBridgeDraft} from './bridge-draft-review.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 import {providerConnectionCards,providerHelpCss} from './provider-connection-help.mjs';
+import {pageShell} from './ui.mjs';
+import {landingCss,landingMarkup} from './landing.mjs';
 import {connectPagesAccess,getPagesAccess,removePagesAccess,PagesAccessChanged} from './pages-access.mjs';
 import {isPagesAccessError,pagesAccessLink,pagesAccessPath,renderPagesAccess} from './pages-access-view.mjs';
 import {
@@ -53,8 +55,8 @@ const redirect=(path,setCookie)=>{
   if(setCookie)headers.append('set-cookie',setCookie);
   return new Response(null,{status:303,headers});
 };
-const view=(title,body,status=200,headers=textHeaders)=>new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Launch & Own</title><style>
-body{font:16px/1.6 system-ui,sans-serif;background:#f6f8fc;color:#15243a;margin:0}main{max-width:680px;margin:5vh auto;padding:32px;background:white;border:1px solid #dfe6ef;border-radius:18px}h1{font-size:30px;margin:0 0 18px}a,button{color:#174ca5}button{padding:10px 16px;background:#174ca5;color:white;border:0;border-radius:8px;cursor:pointer}input,select,textarea{padding:10px;width:100%;box-sizing:border-box;margin-bottom:16px;border:1px solid #a1acba;border-radius:6px}textarea{resize:vertical}label{display:block;font-weight:600}small{color:#455771}.muted{color:#65738a}.pill{display:inline-block;padding:2px 8px;background:#e8f1e9;border-radius:12px}p{overflow-wrap:anywhere}section{border-top:1px solid #e5eaf0;padding-top:14px;margin-top:18px}footer{margin-top:28px;font-size:13px;color:#53657a}${providerHelpCss}</style></head><body><main><h1>${escape(title)}</h1>${body}<footer>Customer-controlled hosting · No paid email service · Beta onboarding · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer></main></body></html>`,{status,headers});
+// opts are UI-only (pageShell); never pass them as the headers argument.
+const view=(title,body,status=200,headers=textHeaders,opts={})=>new Response(pageShell({title,body,css:providerHelpCss,...opts}),{status,headers});
 const fail=(message,status=400)=>view('Setup could not continue',`<p>${escape(message)}</p><p><a href="/">Return to setup</a></p>`,status);
 const button=(action,label,csrf,extra='')=>`<form action="${action}" method="POST"><input type="hidden" name="csrf" value="${escape(csrf)}">${extra}<button type="submit">${escape(label)}</button></form>`;
 function cookies(request){
@@ -194,7 +196,8 @@ async function accountOptions(env,current){
 async function home(env,current,notice){
   const disconnectNotice=notice==='unconfirmed'?'<p role="alert">You are signed out here, but GitHub or Cloudflare may still show Launch &amp; Own as connected. Open your account settings on those sites and remove access if you want a full disconnect.</p>':notice==='complete'?'<p role="status">You are signed out, and GitHub and Cloudflare confirmed that Launch &amp; Own OAuth access was removed.</p>':'';
   const zipEnabled=zipPreviewConfigured(env);
-  if(!current)return view('Launch your website',`${disconnectNotice}<p><strong>Describe it. Launch it. Own it.</strong></p><p>${zipEnabled?'Create a simple site here, or upload one you already built. Your site will live in your own GitHub and Cloudflare accounts.':'Create a simple website that lives in your own GitHub and Cloudflare accounts.'}</p><p>Nothing is published until you review a preview and approve it.</p>${providerConnectionCards()}<small>Sign in on GitHub and Cloudflare. Keep credentials out of chat.</small>`);
+  if(!current)return view('Launch your website',landingMarkup({zipEnabled,setupHtml:`${disconnectNotice}<p>Nothing is published until you review a preview and approve it.</p>${providerConnectionCards()}<small>Sign in on GitHub and Cloudflare. Keep credentials out of chat.</small>`}),200,textHeaders,
+    {css:providerHelpCss+landingCss,wide:true,omitTitle:true,nav:'marketing'});
   let appInstalled=false;
   try{
     const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
@@ -246,7 +249,8 @@ async function home(env,current,notice){
   const cloudflareLine=connected
     ?(current.cloudflare_account_id?'Cloudflare connected · hosting account selected':'Cloudflare connected · choose your hosting account next')
     :'Cloudflare not connected yet';
-  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}${pagesHint}${providerConnectionCards({githubStatus:'connected',githubLogin:current.github_login,githubAppInstalled:appInstalled,cloudflareStatus:connected?'connected':appInstalled?'next':'later',cloudflareAccountSelected:Boolean(current.cloudflare_account_id)})}<p>${cloudflareLine}</p>${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`);
+  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}${pagesHint}${providerConnectionCards({githubStatus:'connected',githubLogin:current.github_login,githubAppInstalled:appInstalled,cloudflareStatus:connected?'connected':appInstalled?'next':'later',cloudflareAccountSelected:Boolean(current.cloudflare_account_id)})}<p>${cloudflareLine}</p>${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`,200,textHeaders,
+    {step:ready?'create':'connect',current:'/'});
 }
 
 async function toolkit(env,current,request){
@@ -642,7 +646,8 @@ async function review(env,current,id){
   }
   const source=zip?`<p>Uploaded website · ${zip.fileCount} ${zip.fileCount===1?'file':'files'} · ${Math.ceil(zip.totalBytes/1024)} KB</p>`:'';
   const shown=statusLabel[status]||status;
-  return view('Review your website',`${source}${details}<p class="pill">${escape(shown)}</p>${previewLink}${fileList}${output}${controls}<p><a href="/">Back to setup</a></p>`);
+  return view('Review your website',`${source}${details}<p class="pill">${escape(shown)}</p>${previewLink}${fileList}${output}${controls}<p><a href="/">Back to setup</a></p>`,200,textHeaders,
+    {step:status==='preview'?'preview':'launch',stepComplete:status==='live'});
 }
 
 function queueAttempt(context,env,id,sessionHash){

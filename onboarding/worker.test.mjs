@@ -707,8 +707,9 @@ test('connection explainer icons remain interactive and truthful through both pr
     assert.match(start.headers.get('content-security-policy'),/default-src 'none'/);
     assert.match(start.headers.get('cache-control'),/no-store/);
     assert.equal((startHtml.match(/class="provider-icon provider-icon-/g)||[]).length,2);
-    assert.equal((startHtml.match(/<details>/g)||[]).length,2);
-    assert.match(startHtml,/href="\/connect\/github">Connect GitHub<\/a>/);
+    const setupHtml=startHtml.slice(startHtml.indexOf('id="get-started"'));
+    assert.equal((setupHtml.match(/<details>/g)||[]).length,2);
+    assert.match(setupHtml,/href="\/connect\/github">Connect GitHub<\/a>/);
     assert.doesNotMatch(startHtml,/href="\/connect\/cloudflare"/);
     assert.match(startHtml,/Both offer free options for simple sites within plan limits/);
     assert.doesNotMatch(startHtml,/<script|src="https:\/\/cdn\./);
