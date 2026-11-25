@@ -157,7 +157,8 @@ test('a live imported site can preview and approve one pull request without merg
     const editor = await h.request('/imported-edit?id=' + tenant.id, {cookie: tenant.cookie});
     assert.equal(editor.status, 200);
     const editorHtml = await editor.text();
-    assert.match(editorHtml, /does not merge or publish/);
+    assert.match(editorHtml, /Nothing is merged or published for you/);
+    assert.doesNotMatch(editorHtml, /name="path"[^>]*required/);
     assert.match(editorHtml, /index\.html<\/code> \(visible text, link address, business email or phone\)/);
     assert.doesNotMatch(editorHtml, /styles\.css/);
     assert.match(editorHtml, /Preview this edit/);
@@ -184,6 +185,17 @@ test('a live imported site can preview and approve one pull request without merg
       csrf: tenant.csrf, id: tenant.id, kind: 'text', path: 'index.html', old: 'Willow Studio', replacement: 'River & Pine'
     });
     assert.equal(preview.status, 303, await preview.text());
+    // No page given: the server finds the one file that holds the text.
+    const located = await post(h, '/imported-edit-preview', tenant.cookie, {
+      csrf: tenant.csrf, id: tenant.id, kind: 'text', path: '', old: 'Willow Studio', replacement: 'River & Pine'
+    });
+    assert.equal(located.status, 303, await located.text());
+    const missing = await post(h, '/imported-edit-preview', tenant.cookie, {
+      csrf: tenant.csrf, id: tenant.id, kind: 'text', path: '', old: 'Text that is nowhere', replacement: 'x'
+    });
+    assert.equal(missing.status, 400);
+    assert.match(await missing.text(), /could not find that text on any page/);
+    assert.equal(state.posts.length, 0);
     const ticket = new URL('https://onboard.example.com' + preview.headers.get('location')).searchParams.get('ticket');
     const review = await h.request('/imported-edit-review?ticket=' + ticket, {cookie: tenant.cookie});
     assert.equal(review.status, 200);
