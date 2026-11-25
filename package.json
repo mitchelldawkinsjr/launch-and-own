@@ -17,9 +17,12 @@
     "qa:rehearse:recovery": "node scripts/worker-recovery/rehearse.mjs",
     "qa:distribution": "node distribution/release-gates.mjs",
     "qa:public-smoke": "node scripts/public-smoke.mjs",
+    "test:browser": "playwright test",
     "visual:walkthrough": "node scripts/visual-walkthrough.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.1",
+    "@playwright/test": "^1.65.1",
     "playwright": "^1.65.1"
   }
 }
