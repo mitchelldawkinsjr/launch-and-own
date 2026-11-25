@@ -1,0 +1,41 @@
+# Threat model: customer-owned assistant (WS5)
+
+Design only, 2026-11-24 · Claude Opus 5.5. This assumes ADR-001 through ADR-004 as proposed. The test IDs (`T-…`) refer to the [M2 test plan](m2-test-plan.md).
+
+## Assets
+- **The website repo's integrity**, especially `main` and the published Pages output.
+- **The customer's GitHub App private key** and installation tokens.
+- **The customer's Workers AI allocation and Cloudflare quotas**, which act as a cost proxy.
+- **Approval records and history in the assistant's D1.**
+- **The owner's identity and session.**
+
+## Trust boundaries
+1. The owner's browser, through Cloudflare Access, to the assistant Worker. Access is the only route to the assistant.
+2. The assistant Worker to the GitHub API, using a 1-hour installation token restricted to the website repo.
+3. The assistant Worker to Workers AI. **The model is untrusted:** it gets snippets only, never credentials, and returns structured edits.
+4. The preview origin, which serves untrusted content. It's a separate hostname with no secrets or bindings except read-only preview artifacts.
+5. Upstream template releases. This is the supply chain, covered by ADR-004.
+6. Launch & Own central. It plays **no runtime role**, and an install-time role only if the customer chooses guided setup.
+
+## Threats and mitigations
+
+| # | Area | Threat | Mitigation | Residual risk | Tests |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Bootstrap | Someone reaches the Worker before Access is configured and claims `/setup` | The Worker refuses every route except `/healthz` (static, no data) until `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are set **and** a valid JWT arrives. `/setup` (A2 only) needs a JWT whose `sub` is in `OWNER_SUBS`, is single-use (D1 nonce with a unique constraint) and disables itself after success. The default path (A3) uses no setup route at all. | A misconfigured Access policy (for example "any email") lets in other people. The setup guide gives the exact policy, and the self-check warns when there's more than one allowed identity. | T-ACC-1..6 |
+| 2 | Bootstrap | Manifest `state` or code is intercepted or replayed (A2/A3) | `state` = HMAC(KEK, nonce ‖ owner sub ‖ expiry ≤ 10 min). Codes expire in one hour (GitHub). The exchange runs once and is then marked consumed. A3 binds to `127.0.0.1` only. | The local machine is in the trusted computing base for A3 | T-BOOT-1..3 |
+| 3 | Owner auth | Access is bypassed through a second hostname (`workers.dev`, preview or version URLs) | Set `workers_dev: false` and `preview_urls: false` unless Access protects them (Access can protect workers.dev, per Cloudflare docs). The Worker validates `Cf-Access-Jwt-Assertion` on every request itself, so it doesn't rely on the edge alone: `iss` = team domain, `aud` contains the AUD, `exp`/`nbf` checked, and the `kid` matched against certs fetched from the team's `/cdn-cgi/access/certs`. The certs are cached and refreshed when an unknown `kid` appears, because keys rotate every 6 weeks and old keys last 7 days. | — | T-ACC-1..6 |
+| 4 | Owner auth | CSRF using the ambient Access cookie | Every state-changing route is POST only. It must pass an exact `Origin` check and carry a per-session CSRF token bound to the JWT `sub`. Cookies set by the Worker use `SameSite=Strict`. | — | T-ACC-7 |
+| 5 | Token lifetime | A stolen installation token or key | Mint the token per operation, restricted to `repository_ids: [websiteRepoId]` and `contents:write, pull_requests:write`, keep it in memory only and let it expire after 1 hour. App JWT ≤ 9 min. The key is a Worker secret (A3) or KEK-encrypted in D1 (A2). Rotate it every 90 days or on suspicion: add a new key, deploy, verify, then delete the old one (25-key cap). Don't validate token length, because the `ghs_APPID_JWT` format varies. | A key leaked from the customer's own Cloudflare account. Customer account security is out of scope; the guide recommends Cloudflare 2FA. | T-REV-1..4 |
+| 6 | Replay | An approval is replayed or reused against another base or artifact | Approval = {owner sub, repo id (numeric, immutable), base SHA, ordered list of (path, sha256 of new bytes), preview digest, nonce, expiry ≤ 15 min}, signed with the KEK. It's consumed once, under a D1 unique constraint. Before committing, the Worker re-reads the branch head and fails closed if the head ≠ base SHA. | — | T-SHA-1..3, T-RET-2 |
+| 7 | Tenant isolation | Repos get mixed up, or the installation can see extra repos | Each deployment is single-tenant: one owner, one website repo (`WEBSITE_REPO_ID` is pinned in config), one installation ID. Requests naming any other repo are rejected before a token is minted. The token restriction applies even if the installation was widened later. The preview origin has no D1 write binding and no secrets. | A customer running two sites needs two deployments (D1 has a 10-database cap) | T-ISO-1..3 |
+| 8 | Prompt injection | Imported HTML, text or comments tell the model to change other files, add scripts, leak data or skip validation | The model gets only the bounded snippets it needs, has no tools and no credentials, and must output a typed edit schema (WS2). Deterministic validation (WS3) checks: allowlisted paths; **no** `.github/`, `wrangler.*`, `_headers`, `_redirects` or JS unless explicitly supported; the expected old content; size caps; no new `<script>`, inline handlers or `javascript:` URLs; and unrelated files staying byte-identical. Preview is script-free by default (the existing #159 behaviour). The owner approves the exact diff. | An edit that's subtly misleading but valid, such as changed wording. The owner reviews every diff. | T-INJ-1..4 |
+| 9 | Quota abuse | Inference or request floods exhaust the free allocation, or on a Paid account create charges | Only an authenticated owner can trigger inference. A daily Neuron budget in D1 (default 80% of 10,000) is checked **before** each call. Per-owner rate limits apply. There's no cron work. The consent screen detects Workers Paid and states the overage rate. On Free, overage fails rather than billing (Cloudflare docs). | Whether requests Access denies count toward the 100k/day Worker quota is unverified. A flood could still block the owner's own use until midnight UTC. | T-QUO-1..4 |
+| 10 | Revocation | Credentials are revoked mid-flow, or the assistant keeps retrying | A token mint returning 401/403/404 switches the assistant into a `credentials_revoked` state: GitHub writes stop, there are no retry loops, and the dashboard shows it. The owner can revoke three ways: uninstall the app, delete the key, or delete the app. **Launch & Own has nothing to revoke**, and M2 verifies this. | — | T-REV-1..5 |
+| 11 | Uninstall/export | Data left behind, or a lost audit trail | Export: `wrangler d1 export` of approval history plus the PR list. Uninstall checklist (provisioning plan): delete the Worker(s), D1, Access app, GitHub App (which removes its installations) and keys, and optionally the assistant repo. The website repo, its PRs and `assistant/*` branches stay unless the owner deletes them. | GitHub and Cloudflare audit logs keep records under the providers' own retention | T-CLN-1..3 |
+| 12 | Supply chain | A malicious or broken upstream release | Owner-reviewed PRs, tags pinned to a SHA and checked against release notes, Domain sign-off, no auto-deploy, N-1 schema compatibility for rollback (ADR-004) | An owner who merges without reviewing | T-UPD-1..2 |
+| 13 | Deployment claims | The assistant reports "live" before Pages has published | Status moves through `pr_open → merged → building → published(sha)` only when the Pages deployment for that exact commit SHA succeeds (AGENTS.md SHA-pinned verification) | — | T-DEP-2 |
+
+## Out of scope
+- Compromise of the customer's own GitHub or Cloudflare accounts
+- Malicious owners attacking their own site
+- Vulnerabilities in the providers themselves
