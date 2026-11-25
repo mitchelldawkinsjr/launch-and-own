@@ -37,7 +37,7 @@ Notes on the choices:
 | # | Step | Checks before | Verifies after | If it fails |
 | --- | --- | --- | --- | --- |
 | 0 | Preflight | Node ≥ 22.12. Signed in with `wrangler whoami` on the intended account. Fewer than 10 D1 databases and fewer than 100 Workers. Detect the Workers plan. A Zero Trust team exists. The GitHub login matches the website repo owner. | Report shown, no changes made | Stop. Nothing to roll back. |
-| 1 | Create the assistant repo from the template at `upstreamSha` | The repo name is free, or it already exists with a matching `upstreamSha` | The repo exists and is private | Delete it only if this run created it |
+| 1 | Create the assistant repo from the template at `upstreamSha` | The repo name is free, or it already exists with a matching `upstreamSha` | The repo exists and is private. If the owner opted in, Actions PR creation is on for this repo only. | Delete it only if this run created it |
 | 2 | `wrangler d1 create` + `migrations apply --remote` | The name is free, or the DB has the expected migrations table | Migration list matches | Delete the DB only if this run created it |
 | 3 | Deploy the Worker in **bootstrap mode** + `secret put KEK` | — | `/healthz` responds. Every other route returns 503 "Access not configured". | `wrangler delete` if created this run |
 | 4 | **Manual:** create the Access application and policy (deep link plus exact values). Allow only the owner's email. Session duration ≤ 24 hours. Cover the custom hostname or `workers.dev`, and the preview hostname if it should be owner-only. | — | Script asks for the team domain and AUD, sets them as vars, and redeploys. A browser visit with a valid JWT shows `/status` with `access: ok`. | The Worker stays fail-closed. Resume at step 4. |
@@ -57,6 +57,7 @@ Notes on the choices:
 >
 > **GitHub (`<login>`)**
 > - Private repository `<slug>-assistant` (assistant code; no passwords stored in it)
+> - *Optional:* allow GitHub Actions to open update pull requests in that repository **only**. A weekly check proposes verified updates, and you review and merge them. Leave it off and the dashboard tells you about updates instead.
 > - Private GitHub App `<slug>-assistant`, installed **only** on `<website repo>`. It can read files and open pull requests. It can't merge, change settings or edit workflows. It *can* technically write to any branch; the assistant only writes `assistant/…` branches. You merge every change yourself.
 >
 > **Cloudflare (`<account name>`)**

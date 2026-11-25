@@ -12,11 +12,20 @@
 ## Options
 - **A. A scheduled workflow in the customer's private assistant repo (recommended).**
   1. Once a week, a workflow reads the upstream template's public releases.
-  2. If a newer **supported** release exists, it opens a PR using the repo's own `GITHUB_TOKEN` (no external credentials). The PR updates the template files, `VERSION` and the pinned upstream SHA, and includes the release notes and migration notes.
+  2. If a newer **supported** release exists, and its provenance checks pass (see below), it opens a PR using the repo's own `GITHUB_TOKEN` (no external credentials). The PR updates the template files, `VERSION` and the pinned upstream SHA, and includes the release notes and migration notes.
   3. The owner merges it and deploys (ADR-001 B1 or B2).
 
-  The workflow file itself is part of the template and only changes through those PRs. Free Actions minutes for private repos are **unverified**, so the job must stay small, and the dashboard covers it if Actions is disabled.
-- **B. A notice on the dashboard plus a manual update.** The Worker reads the public upstream releases feed without authentication and shows "Update available". The owner runs `scripts/update` locally. It's the fallback when Actions isn't available.
+  Option A depends on GitHub Actions behaviour. The checks below must pass before we rely on it (M2 tests T-UPD-3..5).
+
+### GitHub Actions behaviour Option A depends on
+
+| Behaviour | What GitHub's docs say | Consequence for the design |
+| --- | --- | --- |
+| Can a workflow open PRs? | New personal repos default to "workflows are not allowed to create or approve pull requests", and `GITHUB_TOKEN` gets read-only `contents` ([Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository), read 2026-11-25) | Setup must ask the owner to turn on **"Allow GitHub Actions to create and approve pull requests"** for the *assistant* repo only. It's listed on the consent screen. The workflow requests `contents: write` and `pull-requests: write` in its own `permissions:` block. If the owner declines, the dashboard uses option B. The workflow never approves its own PR. |
+| Does CI run on the update PR? | Events from `GITHUB_TOKEN` don't create new runs. The exception is `pull_request` opened, synchronize and reopened, which create runs in an **approval-required** state. A push with `GITHUB_TOKEN` triggers nothing ([GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token), read 2026-11-25). | CI checks on an update PR wait until the owner approves the run. This is desirable: owner review comes first. The PR body says so. Deploys never trigger from the bot's activity, only from the owner's merge (a user event) or a manual deploy. |
+| Can it change workflow files? | `GITHUB_TOKEN` permission keys include `contents` and `pull-requests` but **no `workflows` key** in the list we read. Whether it can write `.github/workflows/*` is **unverified**. | Design for "it can't". Update PRs never touch `.github/workflows/`. A release that changes the update workflow itself ships that change as a separate, clearly labelled manual step in the release notes, which the owner applies with their own credentials. T-UPD-4 confirms GitHub's behaviour either way. |
+| Actions cost on private repos | GitHub Free includes $12/month of compute for private repos. Without a payment method, usage is **blocked** (not billed) after that ([Actions billing](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions), read 2026-11-25). | A weekly check of under 1 minute on Linux uses a tiny fraction of that. If Actions is blocked or disabled, option B is used. |
+- **B. A notice on the dashboard plus a manual update.** The Worker reads the public upstream releases feed without authentication and shows "Update available". The owner runs `scripts/update` locally, which performs the same provenance checks. It's the fallback when Actions is disabled or blocked, or when the owner hasn't allowed Actions to open PRs.
 - **C. A central Launch & Own bot opens PRs.** Rejected: it would need central write access to customer repos.
 - **D. Floating version or auto-deploy on merge.** Rejected: it breaks pinning and owner review.
 
@@ -24,8 +33,29 @@
 
 ### Version pinning
 - The customer's repo pins `VERSION` (semver) and `UPSTREAM_SHA`. No ranges or branches.
-- Upstream releases are annotated tags. The release notes list the exact SHA and the digest of the template tarball. The update workflow checks that the tag resolves to the listed SHA before it opens the PR.
 - The deployed Worker reports its version and SHA on its owner-only `/status` route. The M2 test plan checks that it matches the merged commit.
+
+### Release provenance: what's trusted, and why
+
+**Release titles and notes can still be edited after publishing**, even on immutable releases. So nothing in them is trusted for identity. Earlier drafts had the workflow compare the tag against a SHA listed in the release notes. That's withdrawn, because whoever can edit the notes can change both values together.
+
+Trust comes from things that can't be changed after publication:
+
+1. **The upstream repo's identity is pinned in the customer's repo** by owner and name, and by numeric repo ID. It's set at setup and changes only through an owner-merged PR.
+2. **Releases are immutable.** Once published, "its associated Git tag is locked to a specific commit, cannot be changed, and cannot be deleted while the release exists", the assets can't be modified, and a deleted tag name can't be reused ([Immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases), read 2026-11-25). The update workflow refuses releases that aren't marked immutable.
+3. **Attestations.** GitHub generates a *release attestation* for an immutable release, recording the tag, commit SHA and assets. Upstream CI also attests the template tarball with `actions/attest@v4`. The workflow verifies it with `gh attestation verify <tarball> -R <pinned upstream>` before it opens the PR, and records the attested commit SHA as `UPSTREAM_SHA`.
+4. **Signer-workflow pinning.** The verification also checks that the attestation came from the upstream repo's release workflow on a tag, which is GitHub's `--signer-workflow` flag. That flag isn't in the docs we read, so it is **unverified** and must be confirmed in M2. Until then the design depends on points 1 to 3.
+5. **Release order.** Upstream follows draft → attach assets → publish, so the immutability lock covers the assets, as GitHub recommends.
+
+If any check fails, no PR is opened and the dashboard shows "update could not be verified" (T-UPD-2, T-UPD-5).
+
+**Still unverified, and needs Domain to check before M2:**
+- Whether immutable releases and artifact attestations are available for a **public repo owned by a free personal account**, which is the likely upstream setup.
+- Whether `gh attestation verify` works with a personal-account owner. The docs example uses an organization.
+
+If either is unavailable, the fallback is a **signed tag** with the release key's fingerprint pinned in the customer's repo at setup. That's weaker, because key custody moves to Domain.
+
+**Residual risk.** Someone who controls the upstream repo *and* its release workflow can publish a malicious release that verifies correctly. The protection against that is owner review of every update PR, Domain sign-off before release, and no auto-deploy. Provenance checks prove where a release came from, not that it is safe.
 
 ### Database migrations and rollback
 - D1 migrations are forward-only and additive within a major version. Each release must still run on the schema of the previous release (N-1).

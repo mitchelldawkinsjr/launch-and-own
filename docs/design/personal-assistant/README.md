@@ -21,7 +21,7 @@ Author: Claude Code · Claude Opus 5.5 (`claude-opus-5-5`), 2026-11-24. Reviewer
 | Cloudflare scopes | **Customer-run deploy.** Launch & Own `CF_SCOPES` stay unchanged. | No central credential that can write code into customer accounts. Wrangler's OAuth has no Access scope, so Access is a manual step either way. |
 | GitHub credentials | **Per-customer private GitHub App.** The manifest code is exchanged on the customer's machine. | Works with Launch & Own offline. One-hour tokens restricted per request. The private key never reaches Launch & Own. |
 | Assistant location | **Separate private repo** generated from a versioned upstream template | Can't leak into Pages output, and the assistant can't edit its own code |
-| Update channel | **A scheduled workflow in the customer's assistant repo opens a pinned update PR. The owner merges it and deploys.** | No central push path. Exact version and SHA pinning. |
+| Update channel | **A scheduled workflow in the customer's assistant repo opens a pinned update PR from an immutable, attested release. The owner merges it and deploys.** The dashboard notice is the fallback. | No central push path. Provenance doesn't rely on editable release notes. |
 
 ## Conflicts with AGENTS.md that need an owner decision
 
@@ -47,6 +47,7 @@ All dates are when the page was read (2026-11-24), with the page's own `dateModi
 | Manifest flow: all three steps must finish within one hour. The conversion returns `id`, `pem` and `webhook_secret`. | [App manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) |
 | Installation token: lasts 1 hour, can be restricted with `repository_ids` and `permissions`. Stateless `ghs_APPID_JWT` format rolled out from 2026-04-27, so length varies. | [Installation token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app) |
 | App JWT `exp` at most 10 minutes. Private keys: up to 25, never expire, delete only after adding another. | [JWT](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app), [Private keys](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps) |
+| Actions in new personal repos can't open PRs by default, and `GITHUB_TOKEN` defaults to read-only `contents`. PRs opened with `GITHUB_TOKEN` start CI only after approval, and its pushes start none. Immutable releases lock the tag and assets and generate a release attestation, but notes stay editable. Free plan: $12/month of Actions compute for private repos, blocked (not billed) after that without a payment method. | [Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository), [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token), [Immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases), [Actions billing](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions) (read 2026-11-25) |
 | User tokens last 8 hours. Refresh tokens last 6 months and are single-use. | [Refreshing user tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens) |
 
 **Not verified. Must be checked before M2 or treated as unknown:**
@@ -54,5 +55,8 @@ All dates are when the page was read (2026-11-24), with the page's own `dateModi
 - Whether the manifest conversion endpoint needs authentication, and whether it returns `client_secret`
 - Branch protection or rulesets on private repos owned by GitHub Free personal accounts
 - Whether requests Access denies count toward Worker request quotas
-- GitHub Actions free minutes for private repos
-- Whether third-party OAuth clients (as opposed to wrangler) can request the same scopes
+- Whether `GITHUB_TOKEN` can write `.github/workflows/*`
+- Whether immutable releases and attestations are available on free personal public repos, and whether `gh attestation verify --signer-workflow` exists
+- Whether third-party OAuth clients (as opposed to wrangler) can request the same scopes, or any scope that covers Access
+
+Status names, failure codes, branch names and approval binding follow the [#176 contracts draft](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176). If #176 changes, this design follows it.

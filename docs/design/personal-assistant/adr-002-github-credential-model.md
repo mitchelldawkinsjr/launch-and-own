@@ -81,6 +81,6 @@ This is a trade-off, not an absolute.
 - **B** is rejected for routine operation. It may stay as an explicitly consented, time-limited option inside a paid 360Web support engagement, with its own approval record.
 
 ## Residual risk (document for customers)
-- **Contents: write allows pushes to `main`.** The Worker only ever writes refs matching `refs/heads/assistant/*`, and an M2 test checks this. Whether branch protection or rulesets apply to private repos on GitHub Free personal accounts is **unverified**. The consent screen must not promise server-side protection of `main`.
+- **Contents: write allows pushes to `main`.** The Worker only ever writes refs matching `refs/heads/launch-and-own/edit-*`, the deterministic branch from the [#176 contracts draft](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176), and an M2 test checks this. Whether branch protection or rulesets apply to private repos on GitHub Free personal accounts is **unverified**. The consent screen must not promise server-side protection of `main`.
 - **The Workflows permission is deliberately not granted.** Commits that touch `.github/workflows/*` fail at GitHub, which backs up the path allowlist.
 - **Unverified facts to confirm in M2:** whether the conversion endpoint needs authentication, whether it returns `client_secret`, and acceptance of the variable-length `ghs_` token format.

@@ -40,7 +40,7 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 
 | ID | Case | Expected result |
 | --- | --- | --- |
-| T-REV-1 | App uninstalled from the repo | The next mint fails, the state becomes `credentials_revoked`, there's no retry loop and the dashboard explains it |
+| T-REV-1 | App uninstalled from the repo | The next mint fails, the status becomes `needs_reauthorization`, there's no retry loop and the dashboard explains it |
 | T-REV-2 | Private key deleted (after a second key exists) | Same as T-REV-1 until the new key is deployed, then it recovers |
 | T-REV-3 | GitHub App deleted | Same as T-REV-1. The guide covers recreating it. |
 | T-REV-4 | Key rotation runbook: add a key, deploy, verify, delete the old key | No downtime beyond one deploy |
@@ -52,7 +52,7 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 | --- | --- | --- |
 | T-ISO-1 | Installation widened to a second repo; request names that repo | Rejected before a token is minted. The minted token can't read the second repo. |
 | T-ISO-2 | Preview origin tries to reach D1 write, secrets or the GitHub API | Not possible: no bindings or secrets present (inspect the Worker settings) |
-| T-ISO-3 | Writes go only to `assistant/*` | Code path test plus an audit of every ref the run created |
+| T-ISO-3 | Writes go only to `launch-and-own/edit-*` (the #176 deterministic branch) | Code path test plus an audit of every ref the run created |
 
 ## Prompt injection (INJ)
 
@@ -77,7 +77,7 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 | ID | Case | Expected result |
 | --- | --- | --- |
 | T-DEP-1 | `wrangler deploy` or migrations fail partway through provisioning | Resume completes it. Rollback removes only what this run created. |
-| T-DEP-2 | Pages build fails after the owner merges | Status `build_failed`, never `published`. "Published" only for a Pages deployment matching the exact merge SHA. |
+| T-DEP-2 | Pages build fails after the owner merges | Status `failed`, never `live`. `live` only for a Pages deployment matching the exact merge SHA (#176 vocabulary). |
 | T-DEP-3 | Rollback to the previous Worker version | Works on the N-1 schema |
 
 ## Retries and idempotency (RET)
@@ -92,8 +92,12 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 
 | ID | Case | Expected result |
 | --- | --- | --- |
-| T-UPD-1 | The update workflow opens a PR for a newer release | Pins the new version and SHA, and the tag matches the SHA in the release notes |
-| T-UPD-2 | Tag doesn't match the listed SHA | No PR is opened |
+| T-UPD-1 | The update workflow opens a PR for a newer immutable, attested release | Pins the new version, with `UPSTREAM_SHA` taken from the attestation (never from the release notes) |
+| T-UPD-2 | The release isn't immutable, the attestation is missing or invalid, or it's signed by another repo | No PR is opened. The dashboard shows "update could not be verified". |
+| T-UPD-3 | "Allow GitHub Actions to create and approve pull requests" is off (the default) | The workflow can't open a PR and falls back to the dashboard notice (option B). With the setting on, the PR is created and **never approved by the workflow**. |
+| T-UPD-4 | A release changes `.github/workflows/*` | The update PR excludes those files and flags a manual step. Record whether `GITHUB_TOKEN` can write workflow files, to resolve the open question in ADR-004. |
+| T-UPD-5 | CI behaviour on a bot-opened update PR | `pull_request` runs wait for approval. No deploy runs until the owner merges. Record observed behaviour. |
+| T-UPD-6 | Check whether `--signer-workflow` exists and whether attestations and immutable releases are available on a free personal public repo | Record the facts and update ADR-004. Use the signed-tag fallback if they're unavailable. |
 
 ## Cleanup (CLN)
 
@@ -107,5 +111,5 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 
 | ID | Case | Expected result |
 | --- | --- | --- |
-| T-OFF-1 | Make `*.360web.cloud` unreachable from the test machine and run a full edit: request, preview, approval, PR, merge, published | The full flow passes |
+| T-OFF-1 | Make `*.360web.cloud` unreachable from the test machine and run a full edit: request, preview, approval, PR, merge, live | The full flow passes |
 | T-OFF-2 | Audit the Worker's outbound requests during T-OFF-1 (tail logs) | Requests only to `api.github.com`, the Access certs URL and Workers AI. **None** to Launch & Own hosts. |
