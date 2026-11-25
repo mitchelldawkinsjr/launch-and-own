@@ -58,7 +58,7 @@ Notes on the choices:
 > **GitHub (`<login>`)**
 > - Private repository `<slug>-assistant` (assistant code; no passwords stored in it)
 > - *Optional:* allow GitHub Actions to open update pull requests in that repository **only**. A weekly check proposes verified updates, and you review and merge them. Leave it off and the dashboard tells you about updates instead.
-> - Private GitHub App `<slug>-assistant`, installed **only** on `<website repo>`. It can read files and open pull requests. It can't merge, change settings or edit workflows. It *can* technically write to any branch; the assistant only writes `assistant/…` branches. You merge every change yourself.
+> - Private GitHub App `<slug>-assistant`, installed **only** on `<website repo>`. It can read files and open pull requests. It can't merge, change settings or edit workflows. It *can* technically write to any branch, and GitHub's free plan can't block that on a private repository. The assistant only ever writes its own `launch-and-own/edit-…` branches. You merge every change yourself. *Optional hardening:* if your website repository is public, you can add a GitHub rule that blocks direct changes to `main`.
 >
 > **Cloudflare (`<account name>`)**
 > - Worker `lo-assistant-<slug>` and preview Worker `lo-assistant-<slug>-preview`
@@ -93,6 +93,7 @@ Read 2026-11-24. Re-verify before M2 and at every release.
 | D1 queries per invocation | 50 (a batch counts as one) | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
 | Workers AI | 10,000 Neurons/day; on Free, fails above that; on Paid, $0.011 per 1k | [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) (2026-11-18) |
 | Access applications | 500 (Zero Trust Free); **seat limit unverified** | [Zero Trust account limits](https://developers.cloudflare.com/cloudflare-one/account-limits/) (2026-11-17) |
+| Workers AI text generation | 300 requests/minute (models that don't need Workers Paid) | [Workers AI limits](https://developers.cloudflare.com/workers-ai/platform/limits/) (2026-09-17) |
 | Pages builds | 500/month, 1 concurrent | [Pages limits](https://developers.cloudflare.com/pages/platform/limits/) (2026-11-19) |
 
 **CPU risk.** 10 ms per request is tight for JWT verification, hashing changed files and assembling a tree. WS3 must measure CPU on realistic sites during M1.5. If it goes over, there are two choices: smaller per-request steps, or stating that Workers Paid is needed (with consent). Never a silent upgrade.

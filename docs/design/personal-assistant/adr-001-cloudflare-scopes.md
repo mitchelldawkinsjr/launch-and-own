@@ -41,7 +41,8 @@ The customer deploys from their own private assistant repo (ADR-003), using eith
 ### C. A Cloudflare deploy button or template flow
 A browser flow run by Cloudflare that copies the template into the customer's GitHub and sets up builds. It's customer-run, so Launch & Own scopes stay unchanged.
 - **For:** no CLI.
-- **Against:** what it currently does is **unverified**: whether it creates D1 from the config, how secrets are set, and how it pins versions. Evaluate it in M3 as a UX layer over B.
+- **What Cloudflare's docs say** ([Deploy buttons](https://developers.cloudflare.com/workers/platform/deploy-buttons/), modified 2026-10-12): it clones the source repo into the user's GitHub or GitLab account and automatically provisions and binds the required resources, D1 included. Secrets are described through `.dev.vars.example` or `.env.example`. The source repo must be public, which fits a public upstream template.
+- **Against:** the docs show only `?url=<repo>`, with no way to choose a tag or commit. That would break ADR-004's exact version pinning unless the deployed copy is checked against an immutable release afterwards. It also doesn't cover Access or the GitHub App. Evaluate it in M3 as a UX layer over B, but only once pinning is solved.
 
 ### D. A separate one-time "installer" OAuth client
 A second Launch & Own OAuth client with the expanded scopes and **no** `offline_access`. Its token is used in-session for one deploy and then discarded.

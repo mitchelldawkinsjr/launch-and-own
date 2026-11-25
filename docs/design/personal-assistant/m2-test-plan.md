@@ -26,7 +26,7 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 | --- | --- | --- |
 | T-BOOT-1 | Manifest code reused after a successful exchange | GitHub rejects it. The script reports it and changes nothing. |
 | T-BOOT-2 | Exchange attempted after more than one hour | Fails cleanly and the step can be restarted |
-| T-BOOT-3 | Check the open questions (conversion needs authentication? `client_secret` returned?) | Record the facts and update ADR-002 |
+| T-BOOT-3 | Exchange the manifest code: confirm no authentication is needed, `client_secret` is discarded and never stored or logged, and variable-length `ghs_` tokens are accepted | Matches ADR-002. A grep of logs and state files finds no code, `pem` or `client_secret`. |
 
 ## Changed base SHA (SHA)
 
@@ -97,7 +97,8 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 | T-UPD-3 | "Allow GitHub Actions to create and approve pull requests" is off (the default) | The workflow can't open a PR and falls back to the dashboard notice (option B). With the setting on, the PR is created and **never approved by the workflow**. |
 | T-UPD-4 | A release changes `.github/workflows/*` | The update PR excludes those files and flags a manual step. Record whether `GITHUB_TOKEN` can write workflow files, to resolve the open question in ADR-004. |
 | T-UPD-5 | CI behaviour on a bot-opened update PR | `pull_request` runs wait for approval. No deploy runs until the owner merges. Record observed behaviour. |
-| T-UPD-6 | Check whether `--signer-workflow` exists and whether attestations and immutable releases are available on a free personal public repo | Record the facts and update ADR-004. Use the signed-tag fallback if they're unavailable. |
+| T-UPD-6 | Enable release immutability on the (disposable) upstream test repo owned by a free personal account. Publish draft → assets → release. Verify with `gh release verify-asset` and `gh attestation verify --repo … --signer-workflow …`. | It works, or ADR-004 switches to the signed-tag fallback. A tarball attested by a different workflow fails. |
+| T-ISO-4 | Optional hardening: public website repo with a ruleset blocking direct pushes to `main` (no bypass for the App), then try a direct App write to `main` | GitHub rejects it |
 
 ## Cleanup (CLN)
 

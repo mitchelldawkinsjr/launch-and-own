@@ -50,13 +50,19 @@ All dates are when the page was read (2026-11-24), with the page's own `dateModi
 | Actions in new personal repos can't open PRs by default, and `GITHUB_TOKEN` defaults to read-only `contents`. PRs opened with `GITHUB_TOKEN` start CI only after approval, and its pushes start none. Immutable releases lock the tag and assets and generate a release attestation, but notes stay editable. Free plan: $12/month of Actions compute for private repos, blocked (not billed) after that without a payment method. | [Actions settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository), [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token), [Immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases), [Actions billing](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions) (read 2026-11-25) |
 | User tokens last 8 hours. Refresh tokens last 6 months and are single-use. | [Refreshing user tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens) |
 
+| Manifest conversion returns `client_id`, `client_secret`, `webhook_secret` and `pem`, with no authentication documented | [REST: create app from manifest](https://docs.github.com/en/rest/apps/apps#create-a-github-app-from-a-manifest) (read 2026-11-25) |
+| GitHub Free personal accounts get **no** protected branches or rulesets on **private** repos. Rulesets are available on public repos. Artifact attestations on Free: public repos. | [GitHub plans](https://docs.github.com/en/get-started/learning-about-github/githubs-plans) and [pricing](https://github.com/pricing), read 2026-11-25 |
+| `gh attestation verify` has `--repo`, `--owner` (documented as an organization scope) and `--signer-workflow`. `gh release verify` and `verify-asset` check release attestations. | [gh attestation verify](https://cli.github.com/manual/gh_attestation_verify), [gh release verify-asset](https://cli.github.com/manual/gh_release_verify-asset) (read 2026-11-25) |
+| `GITHUB_TOKEN` permissions have no `workflows` key. Installation tokens need the App's `workflows` permission to change workflow files. | [Workflow syntax: permissions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions), [App permissions](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps) (read 2026-11-25) |
+| Workers AI text generation: 300 requests/minute on models that don't need Workers Paid | [Workers AI limits](https://developers.cloudflare.com/workers-ai/platform/limits/) (modified 2026-09-17) |
+| Deploy to Cloudflare clones the repo into the user's account and provisions D1. The source repo must be public. No ref pinning is documented. | [Deploy buttons](https://developers.cloudflare.com/workers/platform/deploy-buttons/) (modified 2026-10-12) |
+| Worker billing: "Only requests that hit a Worker will count against your limits". Requests blocked by Access aren't addressed. | [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) (modified 2026-11-18) |
+
 **Not verified. Must be checked before M2 or treated as unknown:**
 - The Zero Trust Free seat (user) limit
-- Whether the manifest conversion endpoint needs authentication, and whether it returns `client_secret`
-- Branch protection or rulesets on private repos owned by GitHub Free personal accounts
 - Whether requests Access denies count toward Worker request quotas
-- Whether `GITHUB_TOKEN` can write `.github/workflows/*`
-- Whether immutable releases and attestations are available on free personal public repos, and whether `gh attestation verify --signer-workflow` exists
+- Whether immutable releases can be enabled on a repo owned by a free personal account
+- Whether Deploy to Cloudflare can pin a tag or commit
 - Whether third-party OAuth clients (as opposed to wrangler) can request the same scopes, or any scope that covers Access
 
 Status names, failure codes, branch names and approval binding follow the [#176 contracts draft](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176). If #176 changes, this design follows it.

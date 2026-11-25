@@ -43,17 +43,21 @@ Trust comes from things that can't be changed after publication:
 
 1. **The upstream repo's identity is pinned in the customer's repo** by owner and name, and by numeric repo ID. It's set at setup and changes only through an owner-merged PR.
 2. **Releases are immutable.** Once published, "its associated Git tag is locked to a specific commit, cannot be changed, and cannot be deleted while the release exists", the assets can't be modified, and a deleted tag name can't be reused ([Immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases), read 2026-11-25). The update workflow refuses releases that aren't marked immutable.
-3. **Attestations.** GitHub generates a *release attestation* for an immutable release, recording the tag, commit SHA and assets. Upstream CI also attests the template tarball with `actions/attest@v4`. The workflow verifies it with `gh attestation verify <tarball> -R <pinned upstream>` before it opens the PR, and records the attested commit SHA as `UPSTREAM_SHA`.
-4. **Signer-workflow pinning.** The verification also checks that the attestation came from the upstream repo's release workflow on a tag, which is GitHub's `--signer-workflow` flag. That flag isn't in the docs we read, so it is **unverified** and must be confirmed in M2. Until then the design depends on points 1 to 3.
+3. **Attestations.** GitHub generates a *release attestation* for an immutable release, recording the tag, commit SHA and assets. Upstream CI also attests the template tarball with `actions/attest@v4`. Before opening the PR, the workflow runs two checks:
+   - `gh release verify-asset <tag> <tarball> -R <pinned upstream>`, against the release attestation
+   - `gh attestation verify <tarball> --repo <pinned upstream> --signer-workflow <pinned upstream>/.github/workflows/release.yml`, against the build attestation
+
+   It records the attested commit SHA as `UPSTREAM_SHA`. The workflow uses `--repo`, not `--owner`, because the manual describes `--owner` as an *organization* scope ([gh attestation verify](https://cli.github.com/manual/gh_attestation_verify), [gh release verify-asset](https://cli.github.com/manual/gh_release_verify-asset), read 2026-11-25).
+4. **Signer-workflow pinning.** `--signer-workflow` (confirmed in the gh manual) ties the attestation to the upstream release workflow file. A build attested by any other workflow in the upstream repo fails.
 5. **Release order.** Upstream follows draft → attach assets → publish, so the immutability lock covers the assets, as GitHub recommends.
 
 If any check fails, no PR is opened and the dashboard shows "update could not be verified" (T-UPD-2, T-UPD-5).
 
-**Still unverified, and needs Domain to check before M2:**
-- Whether immutable releases and artifact attestations are available for a **public repo owned by a free personal account**, which is the likely upstream setup.
-- Whether `gh attestation verify` works with a personal-account owner. The docs example uses an organization.
+**Availability.**
+- *Confirmed:* GitHub's pricing table lists artifact attestations on Free for **public repositories**, so the upstream template must be public. ADR-003 already plans that. The customer's private repo only *verifies* attestations; it doesn't create them.
+- *Unverified:* whether immutable releases can be enabled on a repo owned by a free personal account. GitHub's enablement page (Settings → Releases → "Enable release immutability", which applies to future releases only) states no plan requirement. Domain should confirm this on the real upstream repo **before its first release** (T-UPD-6).
 
-If either is unavailable, the fallback is a **signed tag** with the release key's fingerprint pinned in the customer's repo at setup. That's weaker, because key custody moves to Domain.
+If immutable releases are unavailable, the fallback is a **signed tag** with the release key's fingerprint pinned in the customer's repo at setup. That's weaker, because key custody moves to Domain.
 
 **Residual risk.** Someone who controls the upstream repo *and* its release workflow can publish a malicious release that verifies correctly. The protection against that is owner review of every update PR, Domain sign-off before release, and no auto-deploy. Provenance checks prove where a release came from, not that it is safe.
 
