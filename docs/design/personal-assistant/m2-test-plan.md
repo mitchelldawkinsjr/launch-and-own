@@ -99,6 +99,9 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 | T-UPD-4 | A release changes `.github/workflows/*` | The update PR excludes those files and flags a manual step. Record whether `GITHUB_TOKEN` can write workflow files, to resolve the open question in ADR-004. |
 | T-UPD-5 | CI behaviour on a bot-opened update PR | `pull_request` runs wait for approval. No deploy runs until the owner merges. Record observed behaviour. |
 | T-UPD-6 | Enable release immutability on the (disposable) upstream test repo owned by a free personal account. Publish draft → assets → release. Verify with `gh release verify-asset` and `gh attestation verify --repo … --signer-workflow …`. | It works, or ADR-004 switches to the signed-tag fallback. A tarball attested by a different workflow fails. |
+| T-UPD-7 | Verified `fix` or `feature` release | No PR. The dashboard shows "update available". |
+| T-UPD-8 | Verified `release.json` says `feature`, while the release notes say "security" (or the other way round) | Only the attested asset counts, and the notes are ignored. A missing or unverifiable `release.json` means no PR. |
+| T-UPD-9 | Advisory published for the running version on a `fix` release, or the running version enters its last 90 days of support | A PR is opened, labelled `security` or with the end-of-support date |
 | T-ISO-4 | Optional hardening: public website repo with a ruleset blocking direct pushes to `main` (no bypass for the App), then try a direct App write to `main` | GitHub rejects it |
 
 ## Cleanup (CLN)

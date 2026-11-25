@@ -1,6 +1,6 @@
 # ADR-004: How deployed assistants get updates
 
-- **Status:** Proposed. This is the only one of these four still open: [#171](https://github.com/mitchelldawkinsjr/launch-and-own/issues/171) item 4 awaits the owner.
+- **Status:** **Accepted by the owner, 2026-11-25** ([#171](https://github.com/mitchelldawkinsjr/launch-and-own/issues/171) item 4) as **option A2**: the workflow opens PRs only for security, breaking-change and end-of-support releases. Everything else is a dashboard notice (option B).
 - **Blocks:** M0 decision "Update channel" (WS4) in #165
 - **Date:** 2026-11-24 · Claude Opus 5.5
 
@@ -25,11 +25,36 @@
 | Does CI run on the update PR? | Events from `GITHUB_TOKEN` don't create new runs. The exception is `pull_request` opened, synchronize and reopened, which create runs in an **approval-required** state. A push with `GITHUB_TOKEN` triggers nothing ([GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token), read 2026-11-25). | CI checks on an update PR wait until the owner approves the run. This is desirable: owner review comes first. The PR body says so. Deploys never trigger from the bot's activity, only from the owner's merge (a user event) or a manual deploy. |
 | Can it change workflow files? | `GITHUB_TOKEN` permission keys include `contents` and `pull-requests` but **no `workflows` key** in the list we read. Whether it can write `.github/workflows/*` is **unverified**. | Design for "it can't". Update PRs never touch `.github/workflows/`. A release that changes the update workflow itself ships that change as a separate, clearly labelled manual step in the release notes, which the owner applies with their own credentials. T-UPD-4 confirms GitHub's behaviour either way. |
 | Actions cost on private repos | GitHub Free includes $12/month of compute for private repos. Without a payment method, usage is **blocked** (not billed) after that ([Actions billing](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions), read 2026-11-25). | A weekly check of under 1 minute on Linux uses a tiny fraction of that. If Actions is blocked or disabled, option B is used. |
+- **A2. Option A, limited to releases that can't wait (accepted).** The same workflow and provenance checks as A, but it opens a PR **only** when at least one of these is true:
+  - the release class is `security` or `breaking`;
+  - a published upstream security advisory covers the running version;
+  - the running version reaches end of support within 90 days.
+
+  Bug-fix and feature releases (`fix`, `feature`) get a dashboard notice only, and the owner applies them with option B if they want. This means fewer PRs to review, with the same protection for the updates that matter.
 - **B. A notice on the dashboard plus a manual update.** The Worker reads the public upstream releases feed without authentication and shows "Update available". The owner runs `scripts/update` locally, which performs the same provenance checks. It's the fallback when Actions is disabled or blocked, or when the owner hasn't allowed Actions to open PRs.
 - **C. A central Launch & Own bot opens PRs.** Rejected: it would need central write access to customer repos.
 - **D. Floating version or auto-deploy on merge.** Rejected: it breaks pinning and owner review.
 
-## Decision (proposed): A, with B as the fallback
+## Decision (accepted): A2, with B for everything else
+
+### Release classification (must not rely on editable data)
+Release notes can be edited after publication, so the class doesn't come from them. Each upstream release attaches `release.json` as a release **asset**:
+
+```json
+{"version": "1.4.2", "class": "security | breaking | fix | feature", "minSupportedFrom": "1.3.0", "advisories": ["GHSA-…"]}
+```
+
+Assets of an immutable release can't be changed, and `release.json` is checked the same way as the tarball: `gh release verify-asset`, plus `gh attestation verify --signer-workflow`. If the asset is missing or fails verification, the workflow opens no PR and the dashboard shows "update could not be verified". The workflow trusts only the verified asset, so text in the release notes can't upgrade or downgrade a release's class. Advisories are read from GitHub's advisory database for the pinned upstream repo, not from release text.
+
+### What the owner sees
+| Release | Workflow PR | Dashboard |
+| --- | --- | --- |
+| `security`, or an advisory covering the running version | Yes, labelled `security` | Red banner until updated |
+| `breaking` (platform change the assistant needs, such as a retired model or a changed token format) | Yes, labelled `breaking` | Banner with the deadline, if known |
+| Running version within 90 days of end of support | Yes, to the latest supported version | Banner with the end-of-support date |
+| `fix`, `feature` | No | "Update available" notice. The owner runs `scripts/update` (option B). |
+
+If the owner hasn't allowed Actions to open PRs in the assistant repo, or Actions is blocked, every row falls back to the dashboard and option B.
 
 ### Version pinning
 - The customer's repo pins `VERSION` (semver) and `UPSTREAM_SHA`. No ranges or branches.
