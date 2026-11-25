@@ -18,7 +18,10 @@
     "GH_CLIENT_ID": "Iv23li8rVTNtZrfTctqJ",
     "GH_APP_SLUG": "launch-and-own",
     "CF_CLIENT_ID": "27de4e083c08b48f9a003ade56b9c8ea",
-    "ZIP_PREVIEW_DOMAIN": "-zp.360web.cloud"
+    "ZIP_PREVIEW_DOMAIN": "-zp.360web.cloud",
+    "OPTION_EXECUTION_ENABLED": "true",
+    "OPTION_FORMS_ENABLED": "true",
+    "CF_FORMS_SCOPES": ""
   },
   "compatibility_flags": [
     "nodejs_compat"

@@ -1,3 +1,4 @@
+import {CUSTOMER_FORM_WORKER_SOURCE} from '../pipeline/customer-form-worker-source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -274,13 +275,25 @@ test('forms cannot activate even with stored consent and an operator execution r
   assert.equal(providerWrites(h).length,0);
 });
 
-test('approved forms execution stages only the widget and D1, and reapproval keeps the old receipt',async t=>{
+test('approved forms execution sets up the widget, D1 and form Worker, and reapproval keeps the old receipt',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const fetchLaunch=h.fetchFn;
   const databaseId='11111111-2222-3333-4444-555555555555';
   const writes=[];
+  let uploaded=null;
   h.fetchFn=async (url, init={})=>{
     const path=new URL(url).pathname;
+    const ok=result=>Response.json({success:true,result,result_info:{page:1,total_pages:1,total_count:0}});
+    if(path.endsWith('/rotate_secret')){writes.push({path,data:JSON.parse(init.body)});return ok({sitekey:'test-sitekey',secret:'rotated-test-secret-0001'});}
+    if(path.endsWith('/workers/subdomain'))return ok({subdomain:'acct'});
+    if(/\/workers\/scripts$/.test(path))return ok([]);
+    if(/\/workers\/scripts\/[^/]+$/.test(path)&&init.method==='PUT'){
+      uploaded=JSON.parse(await init.body.get('metadata').text());
+      writes.push({path,module:await init.body.get('form.mjs').text()});
+      return ok({id:path.split('/').pop()});
+    }
+    if(path.endsWith('/subdomain')){writes.push({path,data:JSON.parse(init.body)});return ok({enabled:true,previews_enabled:false});}
+    if(path.endsWith('/schedules')){writes.push({path,data:JSON.parse(init.body)});return ok({schedules:[{cron:'17 3 * * *'}]});}
     if(/\/challenges\/widgets$|\/d1\/database(?:\/[^/]+\/query)?$/.test(path)){
       const data=init.body?JSON.parse(init.body):null;
       if(init.method==='POST')writes.push({path,data});
@@ -312,16 +325,23 @@ test('approved forms execution stages only the widget and D1, and reapproval kee
   const staged=await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id});
   const html=await staged.text();
   assert.equal(staged.status,200,html);
-  assert.match(html,/ready for Worker review/);
+  assert.match(html,/Connect your contact form/);
   assert.doesNotMatch(html,/Email Routing alias|test-secret/);
-  assert.equal(writes.length,3);
+  assert.equal(writes.length,7);
+  const script='esp-willow-studio-site-form';
+  assert.deepEqual(writes.slice(3).map(write=>write.path.split('/').slice(-2).join('/')),
+    ['test-sitekey/rotate_secret','scripts/'+script,script+'/subdomain',script+'/schedules']);
+  assert.equal(uploaded.bindings.find(binding=>binding.name==='TURNSTILE_SECRET').text,'rotated-test-secret-0001');
+  assert.equal(uploaded.bindings.find(binding=>binding.type==='d1').database_id,databaseId);
+  assert.equal(writes[4].module,CUSTOMER_FORM_WORKER_SOURCE);
   assert.deepEqual(writes[2],{path:'/client/v4/accounts/'+account+'/d1/database/'+databaseId+'/query',
     data:{sql:CUSTOMER_FORM_SCHEMA_SQL}});
   const execution=h.sqlite.prepare('SELECT status,result_json FROM onboarding_option_executions WHERE id=?').get(id);
   assert.equal(execution.status,'applied');
   const result=JSON.parse(execution.result_json);
-  assert.equal(result.status,'form_resources_staged');
-  assert.equal(result.workerReview.readyForProviderWrite,false);
+  assert.equal(result.status,'form_worker_deployed');
+  assert.equal(result.workerUrl,'https://'+script+'.acct.workers.dev');
+  assert.equal(execution.result_json.includes('rotated-test-secret'),false,'the secret is never stored');
   assert.equal(result.workingForm,false);
 
   const replacement=await store(h,tenant,jobId,'forms',{...form,ownerEmail:'revised@example.net'});
@@ -332,7 +352,7 @@ test('approved forms execution stages only the widget and D1, and reapproval kee
   ]);
   operatorGrant(h,replacement,otherId);
   assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id:otherId})).status,403);
-  assert.equal(writes.length,3);
+  assert.equal(writes.length,7,"a reapproval writes nothing new");
 });
 
 test('missing CSRF and altered request data never trigger provider calls',async t=>{

@@ -27,7 +27,9 @@ export function detectContactForm(files) {
   for (const file of Array.isArray(files) ? files : []) {
     if (!/\.html?$/i.test(file?.path || '') || !(file.bytes instanceof Uint8Array)) continue;
     const html = decoder.decode(file.bytes);
+    let formIndex = -1;
     for (const [, attrs, inner] of html.matchAll(FORM)) {
+      formIndex += 1;
       const fields = [];
       let email = false, longText = false;
       for (const [, tag, fieldAttrs] of inner.matchAll(FIELD)) {
@@ -43,7 +45,7 @@ export function detectContactForm(files) {
       const label = [id, attr(attrs, 'class'), attr(attrs, 'name'), action].filter(Boolean).join(' ');
       const score = (email ? 3 : 0) + (longText ? 2 : 0) + (CONTACT_WORDS.test(label) ? 2 : 0) + (/contact/i.test(file.path) ? 1 : 0);
       if (score < 3) continue; // A search or newsletter box is not the contact form.
-      found.push({ path: file.path, id, fields, destination: destination(action, attrs),
+      found.push({ path: file.path, formIndex, id, fields, destination: destination(action, attrs),
         submitDisabled: /<button\b[^>]*\bdisabled\b|<input\b[^>]*type=["']?submit["']?[^>]*\bdisabled\b/i.test(inner), score });
     }
   }

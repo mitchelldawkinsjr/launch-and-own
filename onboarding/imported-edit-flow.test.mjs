@@ -279,3 +279,72 @@ test('a live imported site can preview and approve one pull request without merg
     globalThis.fetch = originalFetch;
   }
 });
+
+test('an owner connects the existing contact form through one approved pull request', async () => {
+  const {connectContactForm} = await import('./form-connect.mjs');
+  const h = harness();
+  globalThis.fetch = h.fetchFn;
+  try {
+    const tenant = await liveSite(h);
+    markImported(h, tenant.id);
+    const page = '<!doctype html><html><head></head><body><form id="booking-form"><input name="name">' +
+      '<input name="email" type="email"><button type="submit" disabled>Send</button></form></body></html>';
+    const html = text(page);
+    const htmlSha = await gitBlobSha(html);
+    const workerUrl = 'https://esp-willow-studio-site-form.acct.workers.dev';
+    const files = {
+      nextHtml: text(connectContactForm(page, {formIndex: 0, workerUrl, sitekey: '0x4AAAAAAAtestkey'})),
+      blobs: new Map([[htmlSha, html]]),
+      baseTree: [
+        {path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40)},
+        {path: 'public/index.html', mode: '100644', type: 'blob', sha: htmlSha}
+      ]
+    };
+    files.headTree = async () => [
+      {path: 'public', mode: '040000', type: 'tree', sha: '1'.repeat(40)},
+      {path: 'public/index.html', mode: '100644', type: 'blob', sha: await gitBlobSha(files.nextHtml)}
+    ];
+    const state = installGit(h, files);
+    const notReady = await h.request('/form-connect?id=' + tenant.id, {cookie: tenant.cookie});
+    assert.equal(notReady.status, 400);
+    assert.match(await notReady.text(), /Set up the form service first/);
+
+    // The approved forms setup recorded a deployed Worker for this site.
+    const time = Math.floor(Date.now() / 1000);
+    const job = h.sqlite.prepare('SELECT * FROM onboarding_launch_jobs WHERE id=?').get(tenant.id);
+    h.sqlite.prepare(`INSERT INTO onboarding_option_approvals(id, job_id, github_user_id, cloudflare_account_id, kind,
+      approval_digest, payload_json, status, created_at, updated_at) VALUES ('forms-1', ?, ?, ?, 'forms', ?, '{}', 'stored', ?, ?)`)
+      .run(tenant.id, job.github_user_id, job.cloudflare_account_id, 'b'.repeat(64), time, time);
+    h.sqlite.prepare(`INSERT INTO onboarding_forms_provisioning(forms_option_approval_id, job_id, github_user_id,
+      cloudflare_account_id, gate_approval_id, widget_sitekey, database_id, schema_applied, worker_deployed,
+      worker_subdomain_enabled, worker_schedule_set, worker_url, created_at, updated_at)
+      VALUES ('forms-1', ?, ?, ?, 'gate_0001', '0x4AAAAAAAtestkey', '11111111-2222-3333-4444-555555555555', 1, 1, 1, 1, ?, ?, ?)`)
+      .run(tenant.id, job.github_user_id, job.cloudflare_account_id, workerUrl, time, time);
+
+    const review = await h.request('/form-connect?id=' + tenant.id, {cookie: tenant.cookie});
+    const reviewHtml = await review.text();
+    assert.equal(review.status, 200, reviewHtml);
+    assert.match(reviewHtml, /<code>booking-form<\/code>/);
+    assert.match(reviewHtml, /Spam protection \(Cloudflare Turnstile\) is added/);
+    assert.match(reviewHtml, /Only <code>public\/index\.html<\/code> changes/);
+    assert.equal(state.posts.length, 0, 'reviewing writes nothing');
+    const field = name => reviewHtml.match(new RegExp('name="' + name + '" value="([^"]+)"'))[1];
+    const fields = {ticket: field('ticket'), approvalId: field('approvalId'), proposalDigest: field('proposalDigest'),
+      artifactDigest: field('artifactDigest')};
+    const forged = await post(h, '/form-connect-approve', tenant.cookie, {csrf: tenant.csrf, ...fields, approvalId: 'c'.repeat(32)});
+    assert.equal(forged.status, 400);
+    assert.equal(state.posts.length, 0);
+    const approved = await post(h, '/form-connect-approve', tenant.cookie, {csrf: tenant.csrf, ...fields});
+    assert.equal(approved.status, 303, await approved.text());
+    assert.deepEqual(state.posts, ['ref', 'blob', 'tree', 'commit', 'patch', 'pull']);
+    const written = [...files.blobs.values()].map(bytes => new TextDecoder().decode(bytes)).find(value => value.includes('cf-turnstile'));
+    assert.match(written, /action="https:\/\/esp-willow-studio-site-form\.acct\.workers\.dev\/submit" method="post"/);
+    assert.match(written, /<button type="submit">Send<\/button>/);
+    const status = await (await h.request(approved.headers.get('location'), {cookie: tenant.cookie})).text();
+    assert.match(status, /Merge it yourself in GitHub/);
+    const replay = await post(h, '/form-connect-approve', tenant.cookie, {csrf: tenant.csrf, ...fields});
+    assert.notEqual(replay.status, 303, 'the approval works once');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

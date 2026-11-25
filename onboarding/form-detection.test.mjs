@@ -14,7 +14,7 @@ test('finds the existing contact form and keeps its own fields', () => {
     file('styles.css', 'form{}')
   ];
   const form = detectContactForm(files);
-  assert.deepEqual(form, {path: 'contact.html', id: 'booking-form', fields: ['name', 'email', 'date', 'type'],
+  assert.deepEqual(form, {path: 'contact.html', formIndex: 0, id: 'booking-form', fields: ['name', 'email', 'date', 'type'],
     destination: 'none', submitDisabled: true, otherForms: 0});
   const html = contactFormSummary(form, escape);
   assert.match(html, /We found your contact form on <code>\/contact<\/code> \(<code>booking-form<\/code>\)/);

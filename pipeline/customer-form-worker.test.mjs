@@ -49,7 +49,7 @@ function siteverifyOk(hostnameValue = hostname) {
 function formRequest(fields) {
   const map = new Map(Object.entries(fields));
   return {
-    formData: async () => ({get: key => map.get(key) ?? null}),
+    formData: async () => ({get: key => map.get(key) ?? null, entries: () => map.entries()}),
     headers: {get: () => null}
   };
 }
@@ -89,7 +89,7 @@ test('end-to-end Siteverify + D1 store succeeds once; reused token fails closed'
   assert.equal(first.customerD1Bound, true);
   assert.equal(JSON.stringify(first).includes(secret), false);
 
-  const rows = sqlite.prepare('SELECT email, gate_approval_id FROM contact_submissions').all();
+  const rows = sqlite.prepare('SELECT reply_email AS email, gate_approval_id FROM contact_submissions').all();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].email, 'pat@example.net');
   assert.equal(rows[0].gate_approval_id, gateApprovalId);
@@ -166,11 +166,11 @@ test('retention purge deletes aged personal rows; acceptance helper matches cons
   const sqlite = db();
   sqlite.prepare(
     'INSERT INTO contact_submissions ' +
-    '(id, hostname, gate_approval_id, name, email, message, body_bytes, turnstile_hostname, created_at) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    '(id, hostname, gate_approval_id, fields_json, reply_email, body_bytes, turnstile_hostname, created_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
     '11111111-1111-4111-8111-111111111111', hostname, gateApprovalId,
-    'Old', 'old@example.net', 'aged', 32, hostname, nowSec - 40 * 86400
+    '{"name":"Old","message":"aged"}', 'old@example.net', 32, hostname, nowSec - 40 * 86400
   );
   const purged = purgeExpiredCustomerFormSubmissions(sqlite, {
     retentionDays: 30, nowSec

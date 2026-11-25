@@ -388,8 +388,16 @@ export function createSiteOptionsRoutes({
     } catch {
       formNote = '';
     }
+    const formService = await env.DB.prepare(`SELECT 1 AS ready FROM onboarding_forms_provisioning
+      WHERE job_id = ? AND github_user_id = ? AND cloudflare_account_id = ? AND worker_schedule_set = 1
+        AND worker_url IS NOT NULL LIMIT 1`).bind(job.id, current.github_user_id, current.cloudflare_account_id)
+      .first().catch(() => null);
+    const connectLink = formService?.ready
+      ? '<p role="status">Your form service is set up. <a href="/form-connect?id=' + encodeURIComponent(job.id) +
+        '">Connect your contact form</a> to start receiving messages.</p>'
+      : '';
     const formsSection =
-      '<section><h2>Contact form</h2>' + formNote +
+      '<section><h2>Contact form</h2>' + formNote + connectLink +
       '<p>Connect your site\'s contact form so messages are saved in your own Cloudflare account, with spam protection. We set it up after a cost and privacy review.</p>' +
       stored(byKind.forms, 'form') +
       button('/site-options-prepare', 'Review form request', current.csrf,
