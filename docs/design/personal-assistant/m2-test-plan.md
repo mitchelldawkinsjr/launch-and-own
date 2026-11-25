@@ -16,7 +16,7 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 | T-ACC-2 | JWT with the wrong `aud` (another Access app in the same team) | 403 |
 | T-ACC-3 | JWT with the wrong `iss` (another team) or an unknown `kid` | 403. Certs are refetched once, with no loop. |
 | T-ACC-4 | Expired JWT, or `nbf` in the future | 403 |
-| T-ACC-5 | Valid JWT for a non-owner email (policy temporarily widened) | 403 from the Worker's own owner check |
+| T-ACC-5 | Valid JWT for a non-owner email (policy temporarily widened) | 403 from the Worker's own owner check, which compares `{provider: "cloudflare_access", id}` together |
 | T-ACC-6 | Before Access is configured (bootstrap mode) | Every route except `/healthz` returns 503 |
 | T-ACC-7 | Cross-site POST carrying the Access cookie, wrong `Origin`, or a missing CSRF token | 403, no state change |
 
@@ -34,13 +34,14 @@ Design only, 2026-11-24 · Claude Opus 5.5.
 | --- | --- | --- |
 | T-SHA-1 | Approve, then push a commit to `main` before the PR is created | PR creation fails closed with `stale_base`, and the approval is consumed or invalidated |
 | T-SHA-2 | Approval digest doesn't match the staged bytes (one file altered) | Rejected, nothing committed |
-| T-SHA-3 | Approval replayed after use, or after its expiry (15 min) | Rejected |
+| T-SHA-3 | Approval replayed after use, or after its expiry (15 min) | `approval_consumed` or `expired`. No GitHub write happens. |
+| T-SHA-4 | Push to `main` **between** approval and the ref write (pause the Worker after the approval check) | The re-read before the ref write fails with `stale_base`, and no branch is created |
 
 ## Revoked credentials (REV)
 
 | ID | Case | Expected result |
 | --- | --- | --- |
-| T-REV-1 | App uninstalled from the repo | The next mint fails, the status becomes `needs_reauthorization`, there's no retry loop and the dashboard explains it |
+| T-REV-1 | App uninstalled from the repo | The next mint fails, the reason is `credentials_revoked` and the status `needs_reauthorization`, there's no retry loop and the dashboard explains it |
 | T-REV-2 | Private key deleted (after a second key exists) | Same as T-REV-1 until the new key is deployed, then it recovers |
 | T-REV-3 | GitHub App deleted | Same as T-REV-1. The guide covers recreating it. |
 | T-REV-4 | Key rotation runbook: add a key, deploy, verify, delete the old key | No downtime beyond one deploy |

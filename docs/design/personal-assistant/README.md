@@ -69,13 +69,13 @@ Status names, failure codes, branch names and approval binding follow the [impor
 
 ### Contract follow-ups this design depends on
 
-These were raised in the [WS5 review on #176](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176#issuecomment-7153910602). They're unresolved in the merged text.
+These were raised in the [WS5 review on #176](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176#issuecomment-7153910602). All four are **resolved in contracts revision 2 ([#178](https://github.com/mitchelldawkinsjr/launch-and-own/pull/178), draft, pending the owner's #171 item 7)**. This design already uses the revision 2 names.
 
-| # | Follow-up | Why this design needs it | Threat / test |
+| # | Follow-up | In revision 2 | Threat / test |
 | --- | --- | --- | --- |
-| 1 | An owner identity of `{provider, id}` instead of `ownerGithubUserId` | The M2 assistant authenticates the owner with Cloudflare Access, not GitHub | 3, 6 / T-ACC-5 |
-| 2 | A random `approvalId`, consumed once under a unique constraint | Stops a replayed approval within `expiresAt` producing a second commit | 6 / T-SHA-3, T-RET-2 |
-| 3 | A `credentials_revoked` reason code for the `needs_reauthorization` status | Gives a stable code for revoked or uninstalled GitHub access | 10 / T-REV-1..3 |
-| 4 | Re-read `main` immediately before the ref update, and branch from `baseCommitSha` | Closes the gap between approval and commit | 6 / T-SHA-1 |
+| 1 | An owner identity that works with Access | `owner: {provider, id}`, compared together | 3, 6 / T-ACC-5 |
+| 2 | Single-use approval | `approvalId` consumed before any write, `approval_consumed` | 6 / T-SHA-3, T-RET-2 |
+| 3 | A code for revoked GitHub access | `credentials_revoked` → `needs_reauthorization` | 10 / T-REV-1..3 |
+| 4 | No gap between approval and commit | Re-read `main` immediately before the ref write, and branch from `baseCommitSha` | 6 / T-SHA-1, T-SHA-4 |
 
-Until these land, the threat model treats them as **required controls** on the WS3 implementation, not optional extras.
+If #178 isn't approved, these remain **required controls** on the WS3 implementation.
