@@ -23,23 +23,27 @@ const KINDS={text:'text',link:'links',business_info:'business details',css_color
 
 /** inventory: trusted server-computed object; every string is still escaped. */
 export function importReportMarkup(inventory){
-  const cls=CLASSES[inventory?.classification];
-  if(!cls||!Array.isArray(inventory.files)||!Array.isArray(inventory.reasons))throw new TypeError('Unknown inventory shape');
-  const publishes=inventory.importable===true&&inventory.serveReady===true&&!['source_project','unsupported'].includes(inventory.classification);
+  const own=(o,k)=>typeof k==='string'&&Object.hasOwn(o,k); // prototype names like 'constructor' are not enum values
+  if(!own(CLASSES,inventory?.classification)||typeof inventory.importable!=='boolean'||typeof inventory.serveReady!=='boolean'
+     ||!Array.isArray(inventory.files)||!Array.isArray(inventory.reasons)
+     ||!inventory.files.every(f=>typeof f?.path==='string'&&(f.editable==null||Array.isArray(f.editable)&&f.editable.every(k=>own(KINDS,k)))))
+    throw new TypeError('Unknown inventory shape');
+  const cls=CLASSES[inventory.classification];
+  const publishes=inventory.importable&&inventory.serveReady&&!['source_project','unsupported'].includes(inventory.classification);
   const row=(ok,label,detail)=>'<li class="ir-row '+(ok?'ok':'no')+'"><span class="ir-mark" aria-hidden="true">'+(ok?'✓':'!')+'</span><div><strong>'+label+'</strong><p>'+detail+'</p></div></li>';
   const editable=inventory.files.filter(f=>Array.isArray(f.editable)&&f.editable.length);
-  const kinds=[...new Set(editable.flatMap(f=>f.editable))].map(k=>KINDS[k]).filter(Boolean);
+  const kinds=[...new Set(editable.flatMap(f=>f.editable))].map(k=>KINDS[k]);
   // Unknown codes fail closed so a new contract code can never be silently hidden from the owner.
-  if(inventory.reasons.some(r=>!REASONS[r]))throw new TypeError('Unknown inventory reason code');
+  if(!inventory.reasons.every(r=>own(REASONS,r)))throw new TypeError('Unknown inventory reason code');
   const reasons=inventory.reasons.map(r=>REASONS[r]);
   const files=inventory.files.map(f=>'<li><code>'+escape(f.path)+'</code> <small>'+
-    (f.editable?.length?escape(f.editable.map(k=>KINDS[k]||k).join(', ')):'left as is')+'</small></li>').join('');
+    (f.editable?.length?f.editable.map(k=>KINDS[k]).join(', '):'left as is')+'</small></li>').join('');
   return '<section class="ir" aria-labelledby="ir-title"><h2 id="ir-title">Compatibility check</h2>'+
     '<p class="ir-type"><span class="badge">'+cls[0]+'</span> '+cls[1]+'</p>'+
     '<ul class="ir-rows">'+
-    row(inventory.importable===true,inventory.importable===true?'Upload accepted':'Upload not accepted',inventory.importable===true?'The files passed our upload checks.':'The files did not pass our upload checks.')+
-    row(inventory.serveReady===true,inventory.serveReady===true?'Ready to show in a browser':'May not display correctly',inventory.serveReady===true?'Every page and style it needs is included.':'Some files it needs are missing or need a build step. Fix them before publishing.')+
-    row(publishes,publishes?'Can be published':'Cannot be published yet',publishes?'You will still review a private preview and approve it before anything goes live.':'Nothing will be published. Fix the issues above and upload again.')+
+    row(inventory.importable,inventory.importable?'Upload accepted':'Upload not accepted',inventory.importable?'The files passed our upload checks.':'The files did not pass our upload checks.')+
+    row(inventory.serveReady,inventory.serveReady?'Linked files found':'Some linked files are missing',inventory.serveReady?'Every page, style and script it links to is in the upload. This is a file check, not a test in a real browser.':'Some files it links to are missing or need a build step. Fix them before publishing.')+
+    row(publishes,publishes?'Ready for a private preview':'Cannot be published yet',publishes?'Next you see a private preview. Nothing goes live until you review and approve it.':'Nothing will be published. Fix the issues above and upload again.')+
     '</ul>'+
     (reasons.length?'<details><summary>What we found</summary><ul>'+reasons.map(r=>'<li>'+r+'</li>').join('')+'</ul></details>':'')+
     '<div class="ir-future"><span class="badge badge-plan">Planned · not released</span><p>Launch &amp; Own editing for uploaded sites is not available yet. '+
