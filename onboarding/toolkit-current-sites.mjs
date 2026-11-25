@@ -304,7 +304,7 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
 }
 
 /** Found sites that match a launch card are shown inside that card; only the rest are listed here. */
-export function renderCurrentSitesSection(inventory, {escape}, {matched = new Set()} = {}) {
+export function renderCurrentSitesSection(inventory, {escape}, {matched = new Set(), hasCards = false} = {}) {
   if (!inventory || inventory.status === 'unavailable') {
     const code = inventory?.code ? ' (' + escape(inventory.code) + ')' : '';
     return '<section><h2>Sites we found in your accounts</h2>' +
@@ -315,7 +315,7 @@ export function renderCurrentSitesSection(inventory, {escape}, {matched = new Se
   const sites = all.filter(site => !matched.has(site.repositoryName));
   const pagerOnly = inventory.nextPage
     ? '<p><a href="/toolkit?page=' + encodeURIComponent(String(inventory.nextPage)) + '">Show more sites</a></p>' : '';
-  if (all.length && !sites.length) return pagerOnly;
+  if ((all.length || hasCards) && !sites.length) return pagerOnly;
   const body = !sites.length
     ? '<p>No Launch &amp; Own sites showed up in this Cloudflare page.</p>'
     : sites.map(site => renderCurrentSite(site, escape)).join('');
@@ -323,7 +323,7 @@ export function renderCurrentSitesSection(inventory, {escape}, {matched = new Se
     ? '<p><a href="/toolkit?page=' + encodeURIComponent(String(inventory.nextPage)) +
       '">Show more sites</a></p>'
     : '';
-  return '<section><h2>' + (matched.size ? 'Other sites in your accounts' : 'Sites we found in your accounts') + '</h2>' +
+  return '<section><h2>' + (matched.size || hasCards ? 'Other sites in your accounts' : 'Sites we found in your accounts') + '</h2>' +
     '<p>Choose a site to check its current deployment and settings.</p>' +
     body + pager + '</section>';
 }

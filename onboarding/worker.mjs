@@ -275,7 +275,7 @@ async function toolkit(env,current,request){
     siteDetails,
     currentInventoryHtml:['cloudflare_reauthorization_required','cloudflare_permission_denied'].includes(inventory.code)
       ? '<p>Cloudflare Pages access is unavailable. '+pagesAccessLink+' to verify your sites.</p>'
-      : renderCurrentSitesSection(inventory,{escape},{matched:new Set([...siteDetails.keys()].map(slug=>'esp-'+slug))})
+      : renderCurrentSitesSection(inventory,{escape},{hasCards:cards.length>0,matched:new Set([...siteDetails.keys()].map(slug=>'esp-'+slug))})
   });
 }
 async function toolkitSource(env,current,request){

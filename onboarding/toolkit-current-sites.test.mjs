@@ -263,4 +263,5 @@ test('found sites with a launch card are not listed twice; others stay as their 
   assert.doesNotMatch(html, /willow-studio/);
   assert.equal(renderCurrentSitesSection(inventory, {escape: s => String(s)},
     {matched: new Set(['esp-willow-studio', 'esp-lumina'])}), '');
+  assert.equal(renderCurrentSitesSection({status: 'ok', page: 1, nextPage: null, sites: []}, {escape: s => String(s)}, {hasCards: true}), '');
 });
