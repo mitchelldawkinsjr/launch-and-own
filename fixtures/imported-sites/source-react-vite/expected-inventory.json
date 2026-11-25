@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "classification": "source_project",
+  "importable": false,
+  "serveReady": false,
+  "reasons": [
+    "has_index_html",
+    "source_project",
+    "unsupported_file_type"
+  ],
+  "files": [
+    {
+      "path": "public/index.html",
+      "bytes": 190,
+      "type": "html",
+      "editable": [],
+      "readOnlyReason": "source_project"
+    },
+    {
+      "path": "public/package.json",
+      "bytes": 205,
+      "type": "other",
+      "editable": [],
+      "readOnlyReason": "config_file"
+    },
+    {
+      "path": "public/src/main.tsx",
+      "bytes": 152,
+      "type": "other",
+      "editable": [],
+      "readOnlyReason": "unsupported_file_type"
+    }
+  ]
+}

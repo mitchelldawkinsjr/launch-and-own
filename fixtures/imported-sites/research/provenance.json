@@ -1,0 +1,98 @@
+{
+  "v": 1,
+  "model": "GPT-6.2",
+  "contract": "draft #178 revision 2, requested on #169 comment 7154150827; pending owner approval #171",
+  "importerBlobSha": "f6b6884a82ba30c62faf3b91f06997ad69795042",
+  "fixtures": [
+    {
+      "name": "static-single",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static",
+      "expectedServeReady": true
+    },
+    {
+      "name": "static-multipage",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static_multipage",
+      "expectedServeReady": true
+    },
+    {
+      "name": "compiled-vite-dist",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "compiled_bundle",
+      "expectedServeReady": true
+    },
+    {
+      "name": "source-react-vite",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "rejected",
+      "expectedError": "Upload the built website with static files such as HTML, CSS, JavaScript, images, and fonts.",
+      "expectedClassification": "source_project",
+      "expectedServeReady": false
+    },
+    {
+      "name": "ambiguous-text",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static",
+      "expectedServeReady": true
+    },
+    {
+      "name": "hostile-content",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static",
+      "expectedServeReady": true
+    },
+    {
+      "name": "bare-package-import",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "source_project",
+      "expectedServeReady": false
+    },
+    {
+      "name": "missing-html-dependency",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static",
+      "expectedServeReady": false
+    },
+    {
+      "name": "missing-css-dependency",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static",
+      "expectedServeReady": false
+    },
+    {
+      "name": "external-dependency",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static",
+      "expectedServeReady": true
+    }
+  ]
+}

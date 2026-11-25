@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "classification": "static",
+  "importable": true,
+  "serveReady": true,
+  "reasons": [
+    "has_index_html"
+  ],
+  "files": [
+    {
+      "path": "public/index.html",
+      "bytes": 296,
+      "type": "html",
+      "editable": [
+        "text",
+        "link",
+        "business_info"
+      ],
+      "readOnlyReason": null
+    }
+  ]
+}
