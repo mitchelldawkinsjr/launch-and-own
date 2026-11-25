@@ -11,7 +11,7 @@ test('prelaunch explorer contains all ten technologies, examples and no provider
  assert.equal((html.match(/<details class="sx-card/g)||[]).length,10);
  assert.match(html,/No optional resources are created/);
  assert.match(html,/separate customer-owned database/);
- assert.doesNotMatch(html,/<(?:script|form|iframe|img)\\b|\\bhref=|\\bonclick=|Verified active/i);
+ assert.doesNotMatch(html,/<(?:script|form|iframe|img)\b|\bhref=|\bonclick=|Verified active/i);
  assert.ok(marketingPipelineMarkup().includes(html));
  assert.match(serviceExplorerCss,/focus-visible/);
 });
@@ -19,7 +19,7 @@ test('toolkit displays recorded capability states, never infers individual resou
  const html=serviceExplorerMarkup({mode:'toolkit',capabilities:{static_hosting:{state:'included_verified',detail:'Recorded hosting'},web_analytics:{state:'active_verified',detail:'<script>alert(1)</script>'},contact_forms:{state:'active_verified',detail:'Form active'}}});
  assert.match(html,/Included in recorded launch/);
  assert.match(html,/Verified active/);
- assert.match(html,/&lt;script&gt;alert\\(1\\)&lt;\\/script&gt;/);
+ assert.match(html,/&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
  assert.doesNotMatch(html,/<script>|Form active/);
  assert.equal((html.match(/Verified active/g)||[]).length,1);
  assert.match(html,/Individual status not verified/);
