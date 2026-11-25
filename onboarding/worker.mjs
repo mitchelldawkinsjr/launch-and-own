@@ -37,7 +37,7 @@ import {landingCss,landingMarkup,zipCompatibilityHtml} from './landing.mjs';
 import {connectPagesAccess,getPagesAccess,removePagesAccess,PagesAccessChanged} from './pages-access.mjs';
 import {isPagesAccessError,pagesAccessLink,pagesAccessPath,renderPagesAccess} from './pages-access-view.mjs';
 import {
-  loadCurrentManagedSitesPage,renderCurrentSitesSection,
+  loadCurrentManagedSitesPage,renderCurrentSitesSection,currentSiteDetails,
   inspectSealedManagedSource,renderCurrentSourcePage
 } from './toolkit-current-sites.mjs';
 
@@ -267,10 +267,15 @@ async function toolkit(env,current,request){
   if(['authorization_changed','github_reauthorization_required',
     'provider_reauthorization_required'].includes(inventory.code)||!await hasCurrentOwnerSession(env,current,now()))
     return fail('Reconnect your accounts to view your website toolkit.',401);
+  // One card per site: details found in the accounts join the matching launch card.
+  const found=new Map((inventory.status==='unavailable'?[]:inventory.sites||[])
+    .filter(site=>site.repositoryName?.startsWith('esp-')).map(site=>[site.repositoryName.slice(4),site]));
+  const siteDetails=new Map(cards.filter(card=>found.has(card.slug)).map(card=>[card.slug,currentSiteDetails(found.get(card.slug),escape)]));
   return renderToolkitPage(cards,current,{view,escape},{
+    siteDetails,
     currentInventoryHtml:['cloudflare_reauthorization_required','cloudflare_permission_denied'].includes(inventory.code)
       ? '<p>Cloudflare Pages access is unavailable. '+pagesAccessLink+' to verify your sites.</p>'
-      : renderCurrentSitesSection(inventory,{escape})
+      : renderCurrentSitesSection(inventory,{escape},{matched:new Set([...siteDetails.keys()].map(slug=>'esp-'+slug))})
   });
 }
 async function toolkitSource(env,current,request){

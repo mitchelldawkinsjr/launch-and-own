@@ -140,8 +140,11 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   assert.match(html, /30 days/);
   assert.match(html, /Public address when checked: <code>https:\/\/esp-willow-studio-site\.pages\.dev\//);
   assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
-  assert.match(html, /Sites we found in your accounts/);
-  assert.match(html, /href="https:\/\/github\.com\/tester\/esp-willow-studio"/);
+  // One card per site: the found GitHub/Cloudflare details sit inside the launch card, not a second list.
+  assert.doesNotMatch(html, /Sites we found in your accounts|Other sites in your accounts/);
+  const card = html.slice(html.indexOf('<section class="tk-site">'), html.indexOf('</section>', html.indexOf('<section class="tk-site">')));
+  assert.match(card, /In your accounts now/);
+  assert.match(card, /href="https:\/\/github\.com\/tester\/esp-willow-studio"/);
   assert.match(html, /Update this website/);
   assert.match(html, /Visitor insights/);
   const writesAfter = h.calls.filter(c =>

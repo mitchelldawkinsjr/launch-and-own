@@ -132,8 +132,8 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   const page = await h.request('/toolkit', {cookie: tenant.cookie});
   assert.equal(page.status, 200);
   const html = await page.text();
-  assert.match(html, /Sites we found in your accounts/);
-  assert.match(html, /Live content not re-checked here/);
+  assert.doesNotMatch(html, /Sites we found in your accounts/);
+  assert.match(html, /In your accounts now/);
   assert.match(html, /Open on GitHub/);
   assert.match(html, /Open in Cloudflare/);
   assert.match(html, /\/toolkit\/source\?ticket=/);
@@ -251,4 +251,16 @@ test('loadCurrentManagedSitesPage fails closed when the owner session is missing
   });
   assert.equal(result.status, 'unavailable');
   assert.equal(result.code, 'verified_owner_required');
+});
+
+test('found sites with a launch card are not listed twice; others stay as their own cards', () => {
+  const site = name => ({siteId: 'managed_' + name, repositoryName: 'esp-' + name,
+    repositoryUrl: 'https://github.com/tester/esp-' + name, baseCommitSha: 'a'.repeat(40), sourceTicket: 't-' + name});
+  const inventory = {status: 'ok', page: 1, nextPage: null, sites: [site('willow-studio'), site('lumina')]};
+  const html = renderCurrentSitesSection(inventory, {escape: s => String(s)}, {matched: new Set(['esp-willow-studio'])});
+  assert.match(html, /Other sites in your accounts/);
+  assert.match(html, /<h3>lumina<\/h3>/);
+  assert.doesNotMatch(html, /willow-studio/);
+  assert.equal(renderCurrentSitesSection(inventory, {escape: s => String(s)},
+    {matched: new Set(['esp-willow-studio', 'esp-lumina'])}), '');
 });

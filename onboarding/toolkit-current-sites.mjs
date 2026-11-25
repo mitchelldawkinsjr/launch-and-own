@@ -303,14 +303,19 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
   }
 }
 
-export function renderCurrentSitesSection(inventory, {escape}) {
+/** Found sites that match a launch card are shown inside that card; only the rest are listed here. */
+export function renderCurrentSitesSection(inventory, {escape}, {matched = new Set()} = {}) {
   if (!inventory || inventory.status === 'unavailable') {
     const code = inventory?.code ? ' (' + escape(inventory.code) + ')' : '';
     return '<section><h2>Sites we found in your accounts</h2>' +
       '<p class="muted">Could not refresh that list right now' + code +
       '. Your launches above are unchanged.</p></section>';
   }
-  const sites = inventory.sites || [];
+  const all = inventory.sites || [];
+  const sites = all.filter(site => !matched.has(site.repositoryName));
+  const pagerOnly = inventory.nextPage
+    ? '<p><a href="/toolkit?page=' + encodeURIComponent(String(inventory.nextPage)) + '">Show more sites</a></p>' : '';
+  if (all.length && !sites.length) return pagerOnly;
   const body = !sites.length
     ? '<p>No Launch &amp; Own sites showed up in this Cloudflare page.</p>'
     : sites.map(site => renderCurrentSite(site, escape)).join('');
@@ -318,7 +323,7 @@ export function renderCurrentSitesSection(inventory, {escape}) {
     ? '<p><a href="/toolkit?page=' + encodeURIComponent(String(inventory.nextPage)) +
       '">Show more sites</a></p>'
     : '';
-  return '<section><h2>Sites we found in your accounts</h2>' +
+  return '<section><h2>' + (matched.size ? 'Other sites in your accounts' : 'Sites we found in your accounts') + '</h2>' +
     '<p>Choose a site to check its current deployment and settings.</p>' +
     body + pager + '</section>';
 }
@@ -327,6 +332,12 @@ function renderCurrentSite(site, escape) {
   const name = site.repositoryName?.startsWith('esp-')
     ? site.repositoryName.slice(4)
     : site.repositoryName;
+  return '<article class="tk-site"><h3>' + escape(name || site.siteId) + '</h3>' +
+    '<p class="pill">Live content not re-checked here</p>' + currentSiteDetails(site, escape) + '</article>';
+}
+
+/** GitHub, Cloudflare and version details for one found site, for its toolkit card. */
+export function currentSiteDetails(site, escape) {
   const repo = site.repositoryUrl
     ? '<p>Private files: <a href="' + escape(site.repositoryUrl) +
       '" rel="noopener">Open on GitHub</a></p>'
@@ -346,9 +357,7 @@ function renderCurrentSite(site, escape) {
     ? '<p><a href="/toolkit/source?ticket=' + encodeURIComponent(site.sourceTicket) +
       '">Open site toolkit</a></p>'
     : '';
-  return '<article><h3>' + escape(name || site.siteId) + '</h3>' +
-    '<p class="pill">Live content not re-checked here</p>' +
-    repo + pages + sha + observed + source + '</article>';
+  return repo + pages + sha + observed + source;
 }
 
 const DEPLOYMENT_COPY = Object.freeze({
