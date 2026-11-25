@@ -29,6 +29,8 @@ import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
 import {bridgeLaunchStatus,importBridgeDraft} from './bridge-draft-review.mjs';
 import {createImportedEditRoutes} from './imported-edit-flow.mjs';
+import {readFormService} from './form-service.mjs';
+import {FormMessagesUnavailable,messagesProblem,readFormMessages,renderFormMessages} from './form-messages.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 import {providerConnectionCards,providerHelpCss} from './provider-connection-help.mjs';
@@ -285,6 +287,25 @@ async function toolkit(env,current,request){
       ? '<p>Cloudflare Pages access is unavailable. '+pagesAccessLink+' to verify your sites.</p>'
       : renderCurrentSitesSection(inventory,{escape},{hasCards:cards.length>0,matched:new Set([...siteDetails.keys()].map(slug=>'esp-'+slug))})
   });
+}
+// Read-only inbox: the owner's own customer D1, read with the owner's grant, never stored here.
+async function formMessages(env,current,id){
+  if(!current?.cloudflare_account_id||!isLaunchId(id))return fail('Open a live website you own from your toolkit.',404);
+  const job=await getOwnedJob(env,current,id,now());
+  if(!job||job.status!=='live'||job.github_user_id!==current.github_user_id||job.cloudflare_account_id!==current.cloudflare_account_id)
+    return fail('Open a live website you own from your toolkit.',404);
+  const grants=await assertHistoryAccess(env,current);
+  const service=await readFormService(env,current,job.id);
+  const back='<p><a href="/site-options?id='+encodeURIComponent(job.id)+'">Optional features</a> · <a href="/toolkit">Toolkit</a></p>';
+  if(!service)return view('Messages for '+job.customer_name,'<p>'+escape(messagesProblem('form_service_not_ready'))+'</p>'+back);
+  try{
+    const messages=await readFormMessages({accountId:current.cloudflare_account_id,databaseId:service.databaseId,
+      cloudflareToken:grants.cloudflareAccessToken});
+    return view('Messages for '+job.customer_name,renderFormMessages(messages,{escape,databaseName:'esp-'+job.site_slug+'-site-forms'})+back);
+  }catch(error){
+    if(!(error instanceof FormMessagesUnavailable))throw error;
+    return view('Messages for '+job.customer_name,'<p role="alert">'+escape(messagesProblem(error.code))+'</p>'+back,503);
+  }
 }
 async function toolkitSource(env,current,request){
   if(!current?.cloudflare_account_id)
@@ -832,6 +853,7 @@ export default {
         if(url.pathname==='/history')return await launchHistory(env,current);
         if(url.pathname==='/toolkit')return await toolkit(env,current,request);
         if(url.pathname==='/toolkit/source')return await toolkitSource(env,current,request);
+        if(url.pathname==='/form-messages')return await formMessages(env,current,url.searchParams.get('id'));
         if(url.pathname===pagesAccessPath)return await pagesAccessPage(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});

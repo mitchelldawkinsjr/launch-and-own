@@ -327,6 +327,7 @@ test('an owner connects the existing contact form through one approved pull requ
     assert.match(reviewHtml, /<code>booking-form<\/code>/);
     assert.match(reviewHtml, /Spam protection \(Cloudflare Turnstile\) is added/);
     assert.match(reviewHtml, /Only <code>public\/index\.html<\/code> changes/);
+    assert.doesNotMatch(reviewHtml, /Check this page's own script/, 'no inline script, no warning');
     assert.equal(state.posts.length, 0, 'reviewing writes nothing');
     const field = name => reviewHtml.match(new RegExp('name="' + name + '" value="([^"]+)"'))[1];
     const fields = {ticket: field('ticket'), approvalId: field('approvalId'), proposalDigest: field('proposalDigest'),

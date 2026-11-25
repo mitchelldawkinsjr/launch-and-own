@@ -21,7 +21,7 @@ function details(input){
   const plan=planCustomer(input);
   if(!input.site||typeof input.site!=="object"||Array.isArray(input.site))
     throw Error("Proposed website content is required");
-  const html=renderSite({...input.site,name:input.name});
+  const html=renderSite({...input.site,name:input.name},{contactForm:input.contactForm});
   return {plan,html};
 }
 export async function previewWebsiteUpdate(input){

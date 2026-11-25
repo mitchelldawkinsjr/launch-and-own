@@ -3,6 +3,7 @@
 // operator grant exists.
 import {readCurrentRevision} from '../imported/revision.mjs';
 import {contactFormSummary, detectContactForm} from './form-detection.mjs';
+import {readFormService} from './form-service.mjs';
 import { buildDomainApprovalReview } from '../pipeline/domain-approval-review.mjs';
 import {
   buildEmailRoutingApprovalReview, ToolkitApprovalExecutionError
@@ -388,13 +389,11 @@ export function createSiteOptionsRoutes({
     } catch {
       formNote = '';
     }
-    const formService = await env.DB.prepare(`SELECT 1 AS ready FROM onboarding_forms_provisioning
-      WHERE job_id = ? AND github_user_id = ? AND cloudflare_account_id = ? AND worker_schedule_set = 1
-        AND worker_url IS NOT NULL LIMIT 1`).bind(job.id, current.github_user_id, current.cloudflare_account_id)
-      .first().catch(() => null);
-    const connectLink = formService?.ready
+    const formService = await readFormService(env, current, job.id);
+    const connectLink = formService
       ? '<p role="status">Your form service is set up. <a href="/form-connect?id=' + encodeURIComponent(job.id) +
-        '">Connect your contact form</a> to start receiving messages.</p>'
+        '">Connect your contact form</a> to start receiving messages. <a href="/form-messages?id=' + encodeURIComponent(job.id) +
+        '">Read your messages</a></p>'
       : '';
     const formsSection =
       '<section><h2>Contact form</h2>' + formNote + connectLink +
