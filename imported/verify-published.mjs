@@ -5,6 +5,13 @@ const SHA = /^[a-f0-9]{40}$/i;
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const PROJECT = /^esp-[a-z0-9-]{1,40}-site$/;
 
+// Pages 308-redirects /index.html to / and /about.html to /about, so request the address it actually serves.
+export function servedPath(path) {
+  if (path === 'index.html') return '';
+  if (path.endsWith('/index.html')) return path.slice(0, -'index.html'.length);
+  return path.endsWith('.html') ? path.slice(0, -'.html'.length) : path;
+}
+
 export function assessPublishedRevision({ expectedCommitSha, project }) {
   if (typeof expectedCommitSha !== 'string' || !SHA.test(expectedCommitSha)) throw new ImportedEditError('revision-unreadable');
   const canonical = project?.canonical_deployment;
@@ -42,7 +49,7 @@ export async function verifyPublishedRevision({ accountId, projectName, expected
       if (!path || path.includes('..') || typeof file.sha256 !== 'string') {
         return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
       }
-      const page = await fetchFn(root + path.split('/').map(encodeURIComponent).join('/'), { method: 'GET', redirect: 'manual' });
+      const page = await fetchFn(root + servedPath(path).split('/').map(encodeURIComponent).join('/'), { method: 'GET', redirect: 'manual' });
       if (page.status !== 200) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };
       const bytes = new Uint8Array(await page.arrayBuffer());
       if (await sha256Bytes(bytes) !== file.sha256) return { live: false, status: 'deploy_unverified', deployedCommit: assessed.deployedCommit };

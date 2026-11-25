@@ -280,6 +280,8 @@ test('reports live only after the published revision matches', async () => {
     if (url.includes('api.cloudflare.com')) {
       return Response.json({ success: true, result: { name: 'esp-willow-site', ...deployment(HEAD) } });
     }
+    // Like Pages: .html and index.html addresses redirect to their clean form.
+    if (/\.html$/.test(new URL(url).pathname)) return new Response(null, { status: 308, headers: { location: '/' } });
     return new Response(bytes);
   };
   const verified = await verifyPublishedRevision({
@@ -302,6 +304,14 @@ test('reports live only after the published revision matches', async () => {
     changedFiles: [{ path: 'public/index.html', sha256: hash }]
   });
   assert.equal(hashed.live, true);
+  assert.equal(calls.at(-1).url, 'https://esp-willow-site.pages.dev/');
+  const nested = await verifyPublishedRevision({
+    accountId: 'a'.repeat(32), projectName: 'esp-willow-site', expectedCommitSha: HEAD,
+    cloudflareToken: 'cf-secret-token', fetchFn, publicUrl: 'https://esp-willow-site.pages.dev/',
+    changedFiles: [{ path: 'public/contact.html', sha256: hash }, { path: 'public/about/index.html', sha256: hash }]
+  });
+  assert.equal(nested.live, true);
+  assert.deepEqual(calls.slice(-2).map(call => call.url), ['https://esp-willow-site.pages.dev/contact', 'https://esp-willow-site.pages.dev/about/']);
   const drifted = await verifyPublishedRevision({
     accountId: 'a'.repeat(32), projectName: 'esp-willow-site', expectedCommitSha: HEAD,
     cloudflareToken: 'cf-secret-token', fetchFn, publicUrl: 'https://esp-willow-site.pages.dev/',
