@@ -217,6 +217,14 @@ test('a live imported site can preview and approve one pull request without merg
     assert.ok(previewForm);
     assert.match(isolatedReview.headers.get('content-security-policy'), /form-action 'self' https:\/\/[a-f0-9-]+-zp\.example\.test/);
     assert.doesNotMatch(isolatedHtml, /externalAssets/);
+    // Browsers derive the cross-site form Origin from this; same-origin would send Origin: null.
+    assert.equal(isolatedReview.headers.get('referrer-policy'), 'origin');
+    const nullOrigin = await previewWorker.fetch(new Request(previewForm[1], {
+      method: 'POST',
+      headers: { origin: 'null', 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ ticket: previewForm[2] })
+    }), h.env);
+    assert.equal(nullOrigin.status, 404);
     assert.equal(state.posts.length, 0);
     const opened = await previewWorker.fetch(new Request(previewForm[1], {
       method: 'POST',

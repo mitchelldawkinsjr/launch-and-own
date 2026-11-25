@@ -324,7 +324,8 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
           '<p>Opens a private preview of these files on a separate address. Scripts stay blocked. Your live site is unchanged.</p>';
         headers={
           'content-type':'text/html; charset=utf-8','cache-control':'no-store',
-          'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'same-origin',
+          // 'origin', not 'same-origin': browsers send Origin: null on cross-site POSTs under same-origin, and /_open rejects that.
+          'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'origin',
           'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+opened.origin+"; base-uri 'none'; frame-ancestors 'none'"
         };
       }
