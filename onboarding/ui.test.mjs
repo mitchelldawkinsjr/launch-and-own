@@ -18,6 +18,7 @@ test('stepper marks active and completed steps without invented job percentages'
 test('page shell stays CSP-safe: no images, remote scripts, fonts, or trackers',()=>{
   const html=pageShell({title:'Welcome <x>',body:'<p>Describe it. Launch it. Own it.</p>',step:'connect'});
   assert.match(html,/Launch &amp; Own/);
+  assert.match(html,/by 360 Web Solutions/);
   assert.match(html,/Welcome &lt;x&gt;/);
   assert.match(html,/href="#main"/);
   assert.doesNotMatch(html,/<(?:script|img|link)\b|cdn\.|fonts\.googleapis|googletagmanager/i);
