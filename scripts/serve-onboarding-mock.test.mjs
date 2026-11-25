@@ -4,10 +4,11 @@ import http from 'node:http';
 import {startMockServer} from './serve-onboarding-mock.mjs';
 
 // node:http, because the mock server replaces globalThis.fetch with the provider mock.
-const get = (port, path, cookie = '') => new Promise((resolve, reject) =>
-  http.get({host: '127.0.0.1', port, path, headers: cookie ? {cookie} : {}}, res => {
-    let body = ''; res.on('data', c => body += c); res.on('end', () => resolve({res, body}));
-  }).on('error', reject));
+const send = (port, path, {method = 'GET', headers = {}, body} = {}) => new Promise((resolve, reject) =>
+  http.request({host: '127.0.0.1', port, path, method, headers}, res => {
+    let text = ''; res.on('data', c => text += c); res.on('end', () => resolve({res, body: text}));
+  }).on('error', reject).end(body));
+const get = (port, path) => send(port, path);
 
 test('mock server serves the real landing (ZIP off and on) with Worker security headers, local only', async () => {
   for (const zip of [false, true]) {
@@ -28,5 +29,34 @@ test('mock consent goes to the local callback, never to a real provider', async 
     const {res} = await get(server.address().port, '/connect/github');
     assert.ok([302, 303].includes(res.statusCode));
     assert.match(res.headers.location, /^\/oauth\/github\/callback\?code=good&state=/);
+  } finally { server.close(); }
+});
+
+test('rejects foreign Host headers (DNS rebinding) and does not vouch for foreign origins', async () => {
+  const server = await startMockServer({port: 0});
+  const port = server.address().port;
+  try {
+    assert.equal((await send(port, '/', {headers: {host: 'evil.test:' + port}})).res.statusCode, 421);
+    assert.equal((await send(port, '/', {headers: {host: 'localhost:' + port}})).res.statusCode, 200);
+    // Sign in through mock consent and send a valid logout (real CSRF token) from both origins:
+    // only the origin differs, so a foreign-origin failure proves the Worker's origin check still applies.
+    const signIn = async () => {
+      let cookie = '', path = '/connect/github', body = '';
+      for (let i = 0; i < 5 && path; i++) {
+        const r = await send(port, path, {headers: cookie ? {cookie} : {}});
+        for (const c of r.res.headers['set-cookie'] || []) if (!/=;/.test(c)) cookie = [cookie, c.split(';')[0]].filter(Boolean).join('; ');
+        path = r.res.headers.location?.startsWith('/') ? r.res.headers.location : null;
+        body = r.body;
+      }
+      return {cookie, csrf: body.match(/action="\/logout"[\s\S]*?name="csrf" value="([^"]+)"/)?.[1]};
+    };
+    const logout = async origin => {
+      const {cookie, csrf} = await signIn();
+      assert.ok(cookie && csrf, 'signed in with a logout form');
+      return (await send(port, '/logout', {method: 'POST', body: 'csrf=' + csrf,
+        headers: {cookie, origin, 'content-type': 'application/x-www-form-urlencoded'}})).res.statusCode;
+    };
+    assert.equal(await logout('https://evil.test'), 400);
+    assert.ok([302, 303].includes(await logout('http://127.0.0.1:' + port)), 'local origin logout succeeds');
   } finally { server.close(); }
 });

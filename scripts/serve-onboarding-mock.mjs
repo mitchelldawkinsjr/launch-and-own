@@ -1,6 +1,7 @@
 // Local onboarding Worker with mocked GitHub/Cloudflare, for screen-reader and visual QA. Never touches real providers.
 // Usage: node scripts/serve-onboarding-mock.mjs [--zip] [--port 8787] [--repo <checkout of the release commit>]
 // Requires Node 22.5+ (node:sqlite). Provider consent screens are skipped; every account is a fake test fixture.
+// QA ONLY. Never expose it, bind it beyond 127.0.0.1, give it real secrets or real provider fetch, or deploy it.
 import http from 'node:http';
 import {pathToFileURL, fileURLToPath} from 'node:url';
 
@@ -13,11 +14,15 @@ export async function startMockServer({repo = fileURLToPath(new URL('..', import
     ZIP_PREVIEW_DOMAIN: 'preview.example.test', ZIP_PREVIEW_KEY: 'cd'.repeat(32)});
   const server = http.createServer(async (req, res) => {
     try {
+      // Only requests addressed to this local server (blocks DNS rebinding); only same-page origins are trusted.
+      const local = ['127.0.0.1', 'localhost'].map(h => h + ':' + server.address().port);
+      if (!local.includes(req.headers.host)) { res.writeHead(421, {'content-type': 'text/plain'}); return res.end('Local QA server only'); }
       const chunks = [];
       for await (const c of req) chunks.push(c);
       const headers = {...req.headers};
       delete headers.host;
-      if (headers.origin) headers.origin = origin; else delete headers.origin;
+      if (headers.origin === undefined) delete headers.origin;
+      else if (local.some(h => headers.origin === 'http://' + h)) headers.origin = origin; // other origins pass through and fail the Worker's check
       const r = await h.request(req.url, {method: req.method, cookie: req.headers.cookie, headers,
         body: req.method === 'POST' && chunks.length ? Buffer.concat(chunks) : undefined});
       const out = {};
