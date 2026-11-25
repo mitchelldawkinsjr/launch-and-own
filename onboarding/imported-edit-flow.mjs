@@ -28,6 +28,7 @@ const KINDS=new Set(['text','link','business_info','css_color']);
 const SAFE={
   'ambiguous_match':'That text appears more than once. Preview a unique phrase instead.',
   'no_match':'That text was not found once in the file. Preview the current text exactly.',
+  'not_found_anywhere':'We could not find that text on any page you can edit. Copy it exactly as it appears on your site.',
   'context_not_allowed':'That replacement is not an allowed text, link, business-info, or custom-property color edit.',
   'overlapping_edits':'Those edits overlap. Preview one unique phrase at a time.',
   'kind_not_allowed':'That change is not available for this file. JavaScript, dependencies, and hosting configuration stay unchanged.',
@@ -231,11 +232,12 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
         '<option value="link">Unique link address</option>'+
         '<option value="business_info">Unique business email or phone</option>'+
         '<option value="css_color">Existing CSS custom property color</option></select>',
-      '<label for="path">File path</label><input id="path" name="path" maxlength="240" required>',
-      '<label for="old">Current text, exactly once</label><input id="old" name="old" maxlength="500" required>',
-      '<label for="replacement">Replacement</label><input id="replacement" name="replacement" maxlength="500" required>'
+      '<label for="old">Current text on your site</label><input id="old" name="old" maxlength="500" required>',
+      '<label for="replacement">Replacement</label><input id="replacement" name="replacement" maxlength="500" required>',
+      '<details><summary>Same text on more than one page?</summary>'+
+        '<label for="path">Page file (optional)</label><input id="path" name="path" maxlength="240" placeholder="contact.html"></details>'
     ].join('');
-    return view('Edit imported website','<p>This reads the current files in your private repository and prepares a pull request. It does not merge or publish.</p>'+
+    return view('Edit imported website','<p>Type the text as it appears on your site and what it should say instead. We find the page it is on, show you a preview, and prepare a pull request. Nothing is merged or published for you.</p>'+
       heading+notes+
       (paths?'<p>Files you can edit:</p><ul>'+paths+'</ul>':'')+
       button('/imported-edit-preview','Preview this edit',current.csrf,fields)+
@@ -247,10 +249,12 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     const item=await ownedZip(env,current,oneField(form,'id',80));
     if(!item)return fail('This live imported website is not available for editing.',404);
     const kind=oneField(form,'kind',40);
-    const path=oneField(form,'path',240);
+    const rawPath=form.get('path');
+    const path=typeof rawPath==='string'&&rawPath.trim()===''&&form.getAll('path').length<=1?null:oneField(form,'path',240);
+    if(path===null&&form.getAll('path').length>1)return fail('Enter one page file.',400);
     const oldValue=oneField(form,'old',500);
     const replacement=oneField(form,'replacement',500);
-    if(!KINDS.has(kind)||!path||!oldValue||!replacement)return fail('Enter one file, the current text, and the replacement.',400);
+    if(!KINDS.has(kind)||!oldValue||!replacement||(rawPath!=null&&rawPath.trim()!==''&&!path))return fail('Enter the current text and the replacement.',400);
     try{
       const fetchFn=fencedFetch(env,current);
       const revision=await readCurrentRevision({
@@ -262,20 +266,39 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       if(inspection.classification!=='static'&&inspection.classification!=='static_multipage'){
       throw new ImportedEditError(inspection.classification==='compiled_bundle'?'compiled_bundle':inspection.classification==='unsupported'?'unsupported':'source_project');
     }
-      const relative=path.startsWith('public/')?path.slice('public/'.length):path;
-      const source=files.find(file=>file.path===relative);
-      if(!source)throw new ImportedEditError('kind_not_allowed');
       const requestId=crypto.randomUUID();
       const summary='Owner preview';
-      const contractEdits=[{
-        kind,path:'public/'+relative,expectedBlobSha:await gitBlobSha(source.bytes),find:oldValue,replace:replacement
-      }];
-      const proposal=parseModelOutput(JSON.stringify({
-        v:1,requestId,repositoryId:revision.repositoryId,baseCommitSha:revision.commitSha,summary,edits:contractEdits
-      }));
-      const validated=await validateEdits({
-        baseCommitSha:revision.commitSha,files,inspection,proposal,repositoryId:revision.repositoryId
-      });
+      const attempt=async relative=>{
+        const source=files.find(file=>file.path===relative);
+        if(!source)throw new ImportedEditError('kind_not_allowed');
+        const contractEdits=[{
+          kind,path:'public/'+relative,expectedBlobSha:await gitBlobSha(source.bytes),find:oldValue,replace:replacement
+        }];
+        const proposal=parseModelOutput(JSON.stringify({
+          v:1,requestId,repositoryId:revision.repositoryId,baseCommitSha:revision.commitSha,summary,edits:contractEdits
+        }));
+        const validated=await validateEdits({
+          baseCommitSha:revision.commitSha,files,inspection,proposal,repositoryId:revision.repositoryId
+        });
+        return {contractEdits,validated};
+      };
+      let located;
+      if(path){
+        located=await attempt(path.startsWith('public/')?path.slice('public/'.length):path);
+      }else{
+        // No page given: try every file that allows this kind of edit, and use the one place the text appears.
+        const candidates=inspection.files.filter(file=>file.editable.includes(kind))
+          .map(file=>file.path.startsWith('public/')?file.path.slice('public/'.length):file.path);
+        const matches=[];let lastError;
+        for(const relative of candidates){
+          try{matches.push({relative,...await attempt(relative)});}catch(error){lastError=error;}
+        }
+        if(matches.length>1)return fail('That text is on more than one page: '+matches.map(m=>m.relative).join(', ')+
+          '. Open "Same text on more than one page?" and enter the page file to change.',400);
+        if(!matches.length)throw lastError instanceof ImportedEditError&&lastError.code!=='no_match'?lastError:new ImportedEditError('not_found_anywhere');
+        located=matches[0];
+      }
+      const {contractEdits,validated}=located;
       if(validated.changed.length!==1)throw new ImportedEditError('context_not_allowed');
       const previewArtifact=await stageEditPreview(env,validated.files);
       const preview=await isolatePreview({
@@ -324,7 +347,8 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
           '<p>Opens a private preview of these files on a separate address. Scripts stay blocked. Your live site is unchanged.</p>';
         headers={
           'content-type':'text/html; charset=utf-8','cache-control':'no-store',
-          'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'same-origin',
+          // 'origin', not 'same-origin': browsers send Origin: null on cross-site POSTs under same-origin, and /_open rejects that.
+          'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'origin',
           'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+opened.origin+"; base-uri 'none'; frame-ancestors 'none'"
         };
       }
@@ -455,7 +479,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       return view('Imported edit status',
         '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
         (screen||'<p>'+escape(detail)+'</p>')+follow+
-        (pull.pullRequest?'<p><a href="'+escape(pull.pullRequest)+'">Open the pull request</a></p>':'')+
+        (pull.pullRequest?'<p><a href="'+escape(pull.pullRequest)+'" target="_blank" rel="noopener noreferrer">Open the pull request</a> (opens in a new tab)</p>':'')+
         '<p><a href="/history">Back to your launches</a></p>');
     }catch(error){
       return safeFailure(error);

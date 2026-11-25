@@ -434,6 +434,7 @@ const reviewAnalytics = (h, tenant, fields) => post(h, '/site-options-prepare', 
 
 test('current Analytics consent and a separate privacy acknowledgment yield a read-only review', async (t) => {
   const h = harness();
+  h.resourceState.denyAnalytics = true; // Launched without visitor insights (opted out or older grant).
   t.after(() => h.sqlite.close());
   const {tenant, id} = await liveSite(h, t);
   const initial = await h.request('/site-options?id=' + id, {cookie: tenant.cookie});
@@ -559,6 +560,7 @@ test('another tenant cannot prepare an Analytics enablement review with a copied
 for (const change of ['replace the stored request', 'log out']) {
   test('Analytics review is withheld when owners ' + change + ' during the final authorization await', async (t) => {
     const h = harness();
+    h.resourceState.denyAnalytics = true; // Launched without visitor insights (opted out or older grant).
     t.after(() => h.sqlite.close());
     const {tenant, id} = await liveSite(h, t);
     const fields = await storeAnalytics(h, tenant, id);

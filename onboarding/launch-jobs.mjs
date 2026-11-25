@@ -34,6 +34,9 @@ function jobInput(job) {
       plan.githubOwner !== planned.githubOwner || plan.domain !== planned.domain || plan.forms !== false) {
     throw Error('Stored plan does not describe the approved target');
   }
+  if (plan.analytics !== undefined && typeof plan.analytics !== 'boolean') throw Error('Stored plan does not describe the approved target');
+  // Visitor insights are part of the approved plan_json; older plans without the flag stay off.
+  input.analytics = plan.analytics === true;
   return { input, plan };
 }
 

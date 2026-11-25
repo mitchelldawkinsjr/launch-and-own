@@ -67,7 +67,7 @@ export function renderSite(input){
  return '<!doctype html><html lang="en"><head><meta charset="utf-8">'+
   '<meta name="viewport" content="width=device-width,initial-scale=1">'+
   '<meta name="description" content="'+escapeHtml(site.about.slice(0,155))+'">'+
-  '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">'+
+  '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; script-src https://static.cloudflareinsights.com; connect-src &#39;self&#39; https://cloudflareinsights.com; base-uri &#39;none&#39;; form-action &#39;none&#39;">'+
   '<title>'+name+' | Welcome</title><style>'+palette+css+'</style></head><body>'+
   '<header><div class="container nav"><a class="brand" href="#top">'+name+'</a>'+
   '<nav aria-label="Main navigation"><a href="#services">Services</a><a href="#about">About</a><a href="#contact">Contact</a></nav></div></header>'+

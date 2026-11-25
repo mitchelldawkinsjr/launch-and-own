@@ -91,9 +91,19 @@ const NAVS={
 };
 
 /** css: extra trusted inline CSS; nav: 'app' | 'marketing'; current: href to mark as the current page. */
+// GitHub and Cloudflare pages (and the customer's pages.dev site) open in a new tab so Launch & Own stays open.
+const PROVIDER_LINK=/<a\b([^>]*\bhref="https:\/\/(?:[a-z0-9-]+\.)*(?:github\.com|cloudflare\.com|pages\.dev)(?:[/?#][^"]*)?"[^>]*)>([\s\S]*?)<\/a>/gi;
+export function providerLinksInNewTab(html){
+  return html.replace(PROVIDER_LINK,(tag,attrs,text)=>{
+    if(/\btarget=/i.test(attrs))return tag;
+    const rel=/\brel="/i.test(attrs)?'':' rel="noopener noreferrer"';
+    return '<a'+attrs+' target="_blank"'+rel+'>'+text+(/new tab/i.test(text)?'':'<span class="lo-sr"> (opens in a new tab)</span>')+'</a>';
+  });
+}
 export function pageShell({title,body,css='',step,stepComplete=false,wide=false,nav='app',current,omitTitle=false}={}){
   const links=(NAVS[nav]||NAVS.app).map(([href,label,cls])=>
     `<a href="${href}"${cls?` class="${cls}"`:''}${href===current?' aria-current="page"':''}>${label}</a>`).join('');
+  body=providerLinksInNewTab(body);
   const content=omitTitle?body:`<div class="card"><h1 class="page-title">${escape(title)}</h1>${body}</div>`;
   const studio=escape(STUDIO_ATTRIBUTION);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Launch & Own</title><style>${UI_CSS}${css}</style></head><body><a class="skip" href="#main">Skip to content</a><header class="site-header"><div class="site-header-inner"><a class="brand" href="/">${brandMark}<span>Launch &amp; Own</span><span class="brand-studio">by ${studio}</span><span class="badge">Beta</span></a><nav class="header-nav" aria-label="Primary">${links}</nav></div></header><main id="main" class="shell${wide?' shell-wide':''}">${step?stepperHtml(step,{complete:stepComplete}):''}${content}</main><footer class="site-footer"><div class="site-footer-inner"><span>Customer-controlled hosting · No paid email service · Beta onboarding · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · by ${studio}</span><span>Describe it. Launch it. Own it.</span></div></footer></body></html>`;

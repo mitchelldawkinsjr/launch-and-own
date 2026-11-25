@@ -96,7 +96,7 @@ export function historyToolkitCapabilities({
     deployment_health: health,
     website_updates: updates,
     web_analytics: cap('manual_setup', 'review_provider_settings',
-      'Not set up here yet. In Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
+      'On for sites launched with visitor insights, which is the default. To see them in Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
     pr_previews: cap('blocked_permission_or_plan', 'preview_access_and_approval_required',
       'Pages PR previews need verified private access and separate approval. Use the exact Launch & Own review to inspect updates.'),
     custom_domains: cap('manual_setup', 'verified_domain_setup_required',
@@ -186,6 +186,7 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} =
   const zip = Boolean(uploadedZip) || Number(job.uploaded_zip) === 1;
   return {
     name: job.customer_name,
+    slug: job.site_slug,
     statusLabel: copy.label,
     statusDetail: copy.detail,
     recordedWebsite: verified ? websiteUrlForSlug(job.site_slug) : null,
@@ -215,13 +216,13 @@ export async function loadToolkitCards(env, session, time) {
   return cards;
 }
 
-export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = ''} = {}) {
+export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = '', siteDetails = new Map()} = {}) {
   if (!current?.cloudflare_account_id)
     return view('Your website toolkit',
       '<p>Connect GitHub and choose your Cloudflare account to see your sites here.</p>' +
       '<p><a href="/">Back to setup</a></p>');
   const body = cards.length
-    ? cards.map((card, i) => renderCard(card, escape, i)).join('')
+    ? cards.map((card, i) => renderCard(card, escape, i, siteDetails.get(card.slug))).join('')
     : '<p>No websites in your launches yet. Create or upload a site first.</p>';
   return view('Your website toolkit',
     '<style>' + serviceExplorerCss + toolkitTabsCss + '</style><p>Recent launches stay here for 30 days. The details below come from the launch we recorded for you.</p>' +
@@ -229,7 +230,7 @@ export function renderToolkitPage(cards, current, {view, escape}, {currentInvent
     '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p>');
 }
 
-function renderCard(card, escape, index = 0) {
+function renderCard(card, escape, index = 0, found = '') {
   const time = iso => '<time datetime="' + escape(iso) + '">' + escape(iso.slice(0, 10)) +
     ' ' + escape(iso.slice(11, 16)) + ' UTC</time>';
   const website = card.recordedWebsite
@@ -260,7 +261,8 @@ function renderCard(card, escape, index = 0) {
       '" value="' + id + '" aria-label="' + label + '"' + (i ? '' : ' checked') + '><span aria-hidden="true">' + label + '</span></label>').join('') + '</fieldset>';
   const panel = (id, label, html) => '<div class="tk-panel tk-p-' + id + '"><h3>' + label + '</h3>' + html + '</div>';
   return '<section class="tk-site"><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' + tabs +
-    panel('overview', 'Overview', '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + error) +
+    panel('overview', 'Overview', '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + error +
+      (found ? '<h4>In your accounts now</h4>' + found : '')) +
     panel('updates', 'Updates', edit + (updatesCap ? '<p>' + escape(updatesCap.detail) + '</p>' : '') +
       '<p><a href="/history">Your launches</a> shows every recorded launch and its result.</p>') +
     panel('services', 'Services', options +
