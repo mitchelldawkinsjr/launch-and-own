@@ -29,7 +29,9 @@ export function importReportMarkup(inventory){
   const row=(ok,label,detail)=>'<li class="ir-row '+(ok?'ok':'no')+'"><span class="ir-mark" aria-hidden="true">'+(ok?'✓':'!')+'</span><div><strong>'+label+'</strong><p>'+detail+'</p></div></li>';
   const editable=inventory.files.filter(f=>Array.isArray(f.editable)&&f.editable.length);
   const kinds=[...new Set(editable.flatMap(f=>f.editable))].map(k=>KINDS[k]).filter(Boolean);
-  const reasons=inventory.reasons.map(r=>REASONS[r]).filter(Boolean);
+  // Unknown codes fail closed so a new contract code can never be silently hidden from the owner.
+  if(inventory.reasons.some(r=>!REASONS[r]))throw new TypeError('Unknown inventory reason code');
+  const reasons=inventory.reasons.map(r=>REASONS[r]);
   const files=inventory.files.map(f=>'<li><code>'+escape(f.path)+'</code> <small>'+
     (f.editable?.length?escape(f.editable.map(k=>KINDS[k]||k).join(', ')):'left as is')+'</small></li>').join('');
   return '<section class="ir" aria-labelledby="ir-title"><h2 id="ir-title">Compatibility check</h2>'+

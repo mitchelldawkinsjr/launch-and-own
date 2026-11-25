@@ -36,4 +36,24 @@ test('paths are escaped and unknown shapes fail closed',()=>{
   assert.doesNotMatch(html,/<img/);
   assert.throws(()=>importReportMarkup({classification:'mystery',files:[],reasons:[]}),TypeError);
   assert.throws(()=>importReportMarkup(null),TypeError);
+  assert.throws(()=>importReportMarkup({...staticSite,reasons:['has_index_html','brand_new_code']}),TypeError);
+});
+
+test('report renders every shared fixture inventory consistently with the approved contract',async()=>{
+  const {readdirSync,readFileSync,existsSync}=await import('node:fs');
+  const root=new URL('../fixtures/imported-sites/',import.meta.url);
+  const names=readdirSync(root).filter(n=>existsSync(new URL(n+'/expected-inventory.json',root)));
+  assert.ok(names.length>=6,'shared fixtures present');
+  for(const name of names){
+    const inv=JSON.parse(readFileSync(new URL(name+'/expected-inventory.json',root),'utf8'));
+    const html=importReportMarkup(inv);
+    const publishable=inv.importable&&inv.serveReady&&!['source_project','unsupported'].includes(inv.classification);
+    assert.equal(html.includes('Can be published<'),publishable,name+': publishable state');
+    assert.equal(html.includes('Cannot be published yet<'),!publishable,name);
+    const found=html.match(/<summary>What we found<\/summary><ul>([\s\S]*?)<\/ul>/);
+    assert.equal(found?(found[1].match(/<li>/g)||[]).length:0,inv.reasons.length,name+': every reason code has plain language');
+    const editable=inv.files.filter(f=>f.editable.length).length;
+    assert.ok(editable?html.includes(' in '+editable+' file'):html.includes('No files in this upload would be suitable'),name+': planned-editing note');
+    assert.match(html,/Planned · not released/);
+  }
 });
