@@ -1,6 +1,8 @@
 // Post-launch options screen: store digest-bound domain / email / forms /
 // analytics / PR-preview / SEO / redirect approvals. Store-only unless an
 // operator grant exists.
+import {readCurrentRevision} from '../imported/revision.mjs';
+import {contactFormSummary, detectContactForm} from './form-detection.mjs';
 import { buildDomainApprovalReview } from '../pipeline/domain-approval-review.mjs';
 import {
   buildEmailRoutingApprovalReview, ToolkitApprovalExecutionError
@@ -309,7 +311,7 @@ export function createSiteOptionsRoutes({
     const time = now();
     const job = await ownedLiveJob(env, current, id, time);
     if (!job) return fail('Open an owned, verified live website from your toolkit.', 404);
-    await assertHistoryAccess(env, current);
+    const grants = await assertHistoryAccess(env, current);
     const rows = await listOptionApprovals(env, job.id);
     const byKind = Object.fromEntries(rows.map(row => [row.kind, row]));
     // A stored review is NOT an operator approval. Display activation only for
@@ -377,8 +379,17 @@ export function createSiteOptionsRoutes({
         : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
       activate('email', 'Apply operator-approved email routing') +
       '</section>';
+    // Read-only look at the current files so the request names the form it will connect.
+    let formNote = '';
+    try {
+      const revision = await readCurrentRevision({owner: job.github_login, repo: 'esp-' + job.site_slug,
+        token: grants?.githubAccessToken, fetchFn: (url, options) => fetch(url, {...options, signal: AbortSignal.timeout(8000)})});
+      formNote = contactFormSummary(detectContactForm(revision.files), escape);
+    } catch {
+      formNote = '';
+    }
     const formsSection =
-      '<section><h2>Contact form</h2>' +
+      '<section><h2>Contact form</h2>' + formNote +
       '<p>Connect your site\'s contact form so messages are saved in your own Cloudflare account, with spam protection. We set it up after a cost and privacy review.</p>' +
       stored(byKind.forms, 'form') +
       button('/site-options-prepare', 'Review form request', current.csrf,
