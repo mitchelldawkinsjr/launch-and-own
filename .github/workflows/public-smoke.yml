@@ -2,6 +2,11 @@ name: Public onboarding smoke
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/public-smoke.yml"
+      - "scripts/public-smoke.mjs"
+      - "scripts/public-smoke.test.mjs"
 
 permissions:
   contents: read
