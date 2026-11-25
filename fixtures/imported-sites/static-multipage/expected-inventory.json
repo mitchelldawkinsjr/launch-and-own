@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "classification": "static_multipage",
+  "reasons": [
+    "has_index_html"
+  ],
+  "files": [
+    {
+      "path": "public/about/index.html",
+      "bytes": 186,
+      "type": "html",
+      "editable": [
+        "text",
+        "link",
+        "business_info"
+      ],
+      "readOnlyReason": null
+    },
+    {
+      "path": "public/index.html",
+      "bytes": 179,
+      "type": "html",
+      "editable": [
+        "text",
+        "link",
+        "business_info"
+      ],
+      "readOnlyReason": null
+    }
+  ]
+}

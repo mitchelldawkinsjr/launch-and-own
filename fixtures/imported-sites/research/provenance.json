@@ -1,0 +1,56 @@
+{
+  "v": 1,
+  "model": "GPT-6.2",
+  "contract": "draft #176 merged b9b2edf; provisional schema per #172 comment 7153907192",
+  "importerBlobSha": "f6b6884a82ba30c62faf3b91f06997ad69795042",
+  "fixtures": [
+    {
+      "name": "static-single",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static"
+    },
+    {
+      "name": "static-multipage",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static_multipage"
+    },
+    {
+      "name": "compiled-vite-dist",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "compiled_bundle"
+    },
+    {
+      "name": "source-react-vite",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "rejected",
+      "expectedError": "Upload the built website with static files such as HTML, CSS, JavaScript, images, and fonts.",
+      "expectedClassification": "source_project"
+    },
+    {
+      "name": "ambiguous-text",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static"
+    },
+    {
+      "name": "hostile-content",
+      "origin": "original_synthetic_GPT-6.2",
+      "nativePlatformExport": false,
+      "expectedArchive": "accepted",
+      "expectedError": null,
+      "expectedClassification": "static"
+    }
+  ]
+}

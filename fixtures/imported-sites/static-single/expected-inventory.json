@@ -1,0 +1,29 @@
+{
+  "v": 1,
+  "classification": "static",
+  "reasons": [
+    "has_index_html"
+  ],
+  "files": [
+    {
+      "path": "public/index.html",
+      "bytes": 259,
+      "type": "html",
+      "editable": [
+        "text",
+        "link",
+        "business_info"
+      ],
+      "readOnlyReason": null
+    },
+    {
+      "path": "public/style.css",
+      "bytes": 56,
+      "type": "css",
+      "editable": [
+        "css_color"
+      ],
+      "readOnlyReason": null
+    }
+  ]
+}

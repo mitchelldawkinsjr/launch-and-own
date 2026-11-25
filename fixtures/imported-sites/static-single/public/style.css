@@ -1,0 +1,2 @@
+:root { --brand: #336699; }
+h1 { color: var(--brand); }

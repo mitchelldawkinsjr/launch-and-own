@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "classification": "compiled_bundle",
+  "reasons": [
+    "has_index_html",
+    "minified_js_bundle"
+  ],
+  "files": [
+    {
+      "path": "public/assets/index-a1b2c3d4.js",
+      "bytes": 126,
+      "type": "js",
+      "editable": [],
+      "readOnlyReason": "minified_js_bundle"
+    },
+    {
+      "path": "public/index.html",
+      "bytes": 203,
+      "type": "html",
+      "editable": [],
+      "readOnlyReason": "minified_js_bundle"
+    }
+  ]
+}
