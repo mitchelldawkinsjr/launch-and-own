@@ -4,6 +4,12 @@ Open [marketing-pipeline-preview.html](marketing-pipeline-preview.html) locally 
 
 The reusable Worker-compatible component is `onboarding/marketing-pipeline.mjs`. It exports scoped inline CSS and semantic HTML, needs no script, external fonts, images, account data, or new permissions. The inline GitHub icon is reused from the existing provider guide; other icons are illustrative.
 
+## AI-assisted website updates marketing section
+
+The reusable `onboarding/ai-update-journey.mjs` shows a sample chat, a proposed GitHub PR, a clickable before/after comparison and the owner-controlled publishing flow. Place immediately after the core launch flow and before the optional service catalog. It illustrates an independent workflow using an authorized write-capable AI coding assistant (e.g. Codex or Claude Code); it does not imply public availability of the managed Launch & Own AI connector or editor. Standard ChatGPT GitHub access is read-only. Pages automatic production builds must be enabled and the build must succeed; PR preview builds are separate, optional and may expose public URLs. The Launch & Own default remains off pending access review.
+
+References: [ChatGPT GitHub access](https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt), [Claude Code cloud GitHub access](https://code.claude.com/docs/en/claude-code-on-the-web), [Cloudflare Pages Git integration](https://developers.cloudflare.com/pages/configuration/git-integration/). No provider actions, script, external assets, or release-status changes.
+
 ## Interactive service explorer
 
 `onboarding/service-explorer.mjs` is the shared catalog used by the marketing component and the owner-scoped toolkit history cards. The 10 service tiles use native keyboard-accessible `<details>` disclosures (no JavaScript or CSP changes). They are grouped into website foundation, contact forms/private tools, and growth. The standalone preview also contains an expandable toolkit demonstration, explicitly marked as having no live account.

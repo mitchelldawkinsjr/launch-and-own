@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "classification": "static",
+  "importable": true,
+  "serveReady": true,
+  "reasons": [
+    "external_dependency",
+    "has_index_html"
+  ],
+  "files": [
+    {
+      "path": "public/index.html",
+      "bytes": 211,
+      "type": "html",
+      "editable": [
+        "text",
+        "link",
+        "business_info"
+      ],
+      "readOnlyReason": null
+    }
+  ]
+}

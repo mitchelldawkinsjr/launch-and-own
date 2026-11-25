@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "classification": "static",
+  "importable": true,
+  "serveReady": false,
+  "reasons": [
+    "has_index_html",
+    "missing_local_dependency"
+  ],
+  "files": [
+    {
+      "path": "public/index.html",
+      "bytes": 193,
+      "type": "html",
+      "editable": [
+        "text",
+        "link",
+        "business_info"
+      ],
+      "readOnlyReason": null
+    },
+    {
+      "path": "public/style.css",
+      "bytes": 102,
+      "type": "css",
+      "editable": [
+        "css_color"
+      ],
+      "readOnlyReason": null
+    }
+  ]
+}
