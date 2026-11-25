@@ -12,6 +12,7 @@ Author: Claude Code · Claude Opus 5.5 (`claude-opus-5-5`), 2026-11-24. Reviewer
 | [ADR-004 Update channel](adr-004-update-channel.md) | Owner-approved update PRs, version pinning, security fixes, deprecation |
 | [Threat model](threat-model.md) | Bootstrap, Access, token lifetimes, replay and isolation, prompt injection, quota, revocation, uninstall |
 | [Provisioning plan](provisioning-plan.md) | Resource manifest, consent and cost screen, resume and rollback, free-tier limits with sources |
+| [M1 security checks](m1-security-checks.md) | 21 adversarial unit-level checks for the WS1–3 implementation, using fixtures and mocks only |
 | [M2 test plan](m2-test-plan.md) | Denied access, changed base SHA, revoked credentials, quota, failed deploy, retries, cleanup, Launch & Own offline |
 
 ## Recommendations in one table
@@ -65,11 +66,11 @@ All dates are when the page was read (2026-11-24), with the page's own `dateModi
 - Whether Deploy to Cloudflare can pin a tag or commit
 - Whether third-party OAuth clients (as opposed to wrangler) can request the same scopes, or any scope that covers Access
 
-Status names, failure codes, branch names and approval binding follow the [imported-site contracts](../../contracts/IMPORTED_SITE_CONTRACTS.md) (#176), merged to `main` on 2026-11-25 and still marked draft pending the owner's #171 item 7. If the contract changes, this design follows it.
+Status names, failure codes, branch names and approval binding follow the [imported-site contracts](../../contracts/IMPORTED_SITE_CONTRACTS.md) (#176), **approved by the owner** on 2026-11-25 (#171 item 7, revision 2). If the contract changes, this design follows it.
 
 ### Contract follow-ups this design depends on
 
-These were raised in the [WS5 review on #176](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176#issuecomment-7153910602). All four are **resolved in contracts revision 2 ([#178](https://github.com/mitchelldawkinsjr/launch-and-own/pull/178), draft, pending the owner's #171 item 7)**. This design already uses the revision 2 names.
+These were raised in the [WS5 review on #176](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176#issuecomment-7153910602). All four are **resolved in the approved revision 2 ([#178](https://github.com/mitchelldawkinsjr/launch-and-own/pull/178))**. This design already uses the revision 2 names.
 
 | # | Follow-up | In revision 2 | Threat / test |
 | --- | --- | --- | --- |
@@ -78,4 +79,4 @@ These were raised in the [WS5 review on #176](https://github.com/mitchelldawkins
 | 3 | A code for revoked GitHub access | `credentials_revoked` → `needs_reauthorization` | 10 / T-REV-1..3 |
 | 4 | No gap between approval and commit | Re-read `main` immediately before the ref write, and branch from `baseCommitSha` | 6 / T-SHA-1, T-SHA-4 |
 
-If #178 isn't approved, these remain **required controls** on the WS3 implementation.
+One clarification [requested on #178](https://github.com/mitchelldawkinsjr/launch-and-own/pull/178#issuecomment-7154206025) isn't in the approved text: **`approvalId` isn't an authorization secret.** It may be visible to preview content, so approval must always require the owner session and CSRF token. This design treats that as a required control (M1 check S-13).
