@@ -22,10 +22,13 @@ import {executeOwnedStoredOption,OptionExecutionDisabled} from './execute-option
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
-import {readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
+import {loadZipFiles,readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
+import {inspectSite} from '../imported/intelligence.mjs';
+import {importReportMarkup} from './import-report.mjs';
 import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
 import {bridgeLaunchStatus,importBridgeDraft} from './bridge-draft-review.mjs';
+import {createImportedEditRoutes} from './imported-edit-flow.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 import {providerConnectionCards,providerHelpCss} from './provider-connection-help.mjs';
@@ -463,9 +466,11 @@ async function launchHistory(env,current){
     const deletion=item.can_delete?button('/delete-launch-history','Remove from this list',current.csrf,launchIdField(item.id)):'';
     const update=item.can_edit?
       '<p><a href="/site-update?id='+encodeURIComponent(item.id)+'">Update this website</a></p>':'';
+    const imported=Number(item.uploaded_zip)===1&&item.display_status==='live'?
+      '<p><a href="/imported-edit?id='+encodeURIComponent(item.id)+'">Edit imported website</a></p>':'';
     const diagnostic=item.error_code?`<p>Last result code: <code>${escape(item.error_code)}</code> (share this if you need help)</p>`:'';
     const pagesHelp=isPagesAccessError(item.error_code)?'<p>'+pagesAccessLink+' to continue this launch.</p>':'';
-    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${pagesHelp}${live}${update}${action}${deletion}</section>`;
+    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${pagesHelp}${live}${update}${imported}${action}${deletion}</section>`;
   }).join('');
   return view('Your launches','<p>This list keeps launches for 30 days after you first approve them. Your live website and its private files stay in your accounts even if a row drops off this list. If a launch paused, reconnect and continue it from here.</p>'+
     (cards||'<p>No launches yet for this GitHub and Cloudflare pair.</p>')+
@@ -604,8 +609,16 @@ async function review(env,current,id){
   let fileList='';
   if(status==='preview'){
     if(zip){
-      const manifest=await readZipManifest(env.ZIP_ARTIFACTS,zip,item.job_id?'approved':'draft');
-      fileList=`<details><summary>Files included in this launch</summary><ul>${manifest.map(file=>`<li><code>${escape(file.path)}</code></li>`).join('')}</ul></details>`;
+      const stage=item.job_id?'approved':'draft';
+      const manifest=await readZipManifest(env.ZIP_ARTIFACTS,zip,stage);
+      let report='';
+      try{
+        report=importReportMarkup(await inspectSite(await loadZipFiles(env.ZIP_ARTIFACTS,zip,stage)));
+      }catch(error){
+        if(!(error instanceof TypeError))throw error;
+        report='<p>The compatibility check could not be shown for this upload.</p>';
+      }
+      fileList=report+`<details><summary>Files included in this launch</summary><ul>${manifest.map(file=>`<li><code>${escape(file.path)}</code></li>`).join('')}</ul></details>`;
     }
     if(verifyExisting&&!item.expected_commit_sha){
       output='<p>This launch needs its private GitHub files first. '+pagesAccessLink+' with Pages Edit to create them and launch.</p>';
@@ -720,6 +733,7 @@ async function logout(request,env,current){
   return result;
 }
 const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
+const importedEdits=createImportedEditRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 async function applyApprovedOption(request,env,current){
   await limitAttempts(request,env);
@@ -790,6 +804,10 @@ export default {
         if(url.pathname==='/site-update-review')return await siteUpdates.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-html')return await siteUpdates.html(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-status')return await siteUpdates.status(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/imported-edit')return await importedEdits.editor(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/imported-edit-review')return await importedEdits.review(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/imported-edit-file')return await importedEdits.file(env,current,url);
+        if(url.pathname==='/imported-edit-status')return await importedEdits.status(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-options')return await siteOptions.page(env,current,url.searchParams.get('id'));
       }
       if(request.method==='POST'){
@@ -808,6 +826,8 @@ export default {
         if(url.pathname==='/delete-launch-history')return await removeLaunchHistory(request,env,current);
         if(url.pathname==='/site-update-preview')return await siteUpdates.prepare(request,env,current);
         if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
+        if(url.pathname==='/imported-edit-preview')return await importedEdits.prepare(request,env,current);
+        if(url.pathname==='/imported-edit-approve')return await importedEdits.approve(request,env,current);
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
         if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);

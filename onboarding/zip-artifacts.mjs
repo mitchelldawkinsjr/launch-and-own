@@ -101,6 +101,10 @@ export async function retainZip(bucket, artifact) {
   await putArtifact(bucket, artifact, 'approved', manifest, bytes);
 }
 
+export async function loadZipFiles(bucket, artifact, stage) {
+  return (await readZip(bucket, artifact, stage)).files;
+}
+
 export async function loadApprovedZip(bucket, artifact) {
-  return (await readZip(bucket, artifact, 'approved')).files;
+  return loadZipFiles(bucket, artifact, 'approved');
 }

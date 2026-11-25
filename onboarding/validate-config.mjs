@@ -14,7 +14,7 @@ const REFERENCE_D1="00000000-0000-0000-0000-000000000000";
 const TABLES=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts",
   "onboarding_launch_jobs","onboarding_launch_job_sessions","onboarding_option_approvals",
   "onboarding_option_executions","onboarding_forms_cost_privacy_approvals","onboarding_forms_provisioning",
-  "onboarding_pages_access"];
+  "onboarding_pages_access","onboarding_imported_edit_approvals"];
 const INDEXES=["idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
   "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry","idx_onboarding_jobs_due","idx_onboarding_jobs_owner",
   "idx_onboarding_jobs_expiry","idx_onboarding_job_sessions_session","idx_onboarding_launches_job",

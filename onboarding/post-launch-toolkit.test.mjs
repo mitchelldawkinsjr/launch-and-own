@@ -71,12 +71,17 @@ test('the toolkit displays exact launch evidence only for complete successful re
   assert.equal(projectToolkitCard(record, {canEdit: true}).optionsPath, null);
 });
 
-test('history capabilities mark ZIP sites without the editor', () => {
+test('history capabilities offer imported editing only after a live ZIP launch', () => {
   const caps = historyToolkitCapabilities({
     verified: true, canEdit: false, uploadedZip: true
   });
-  assert.equal(caps.website_updates.state, 'not_available');
-  assert.equal(caps.website_updates.reason, 'uploaded_source_has_no_supported_editor');
+  assert.equal(caps.website_updates.state, 'available_opt_in');
+  assert.equal(caps.website_updates.reason, 'imported_edit_ready');
+  const waiting = historyToolkitCapabilities({
+    verified: false, canEdit: false, uploadedZip: true
+  });
+  assert.equal(waiting.website_updates.state, 'not_available');
+  assert.equal(waiting.website_updates.reason, 'uploaded_source_has_no_supported_editor');
 });
 
 test('update status HTML leads with Open the change to publish for open PRs', () => {
@@ -151,7 +156,8 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   h.sqlite.prepare("UPDATE onboarding_launch_jobs SET plan_json = json_set(plan_json, '$.zip', json('{}'))").run();
   const zip = await (await toolkit()).text();
   assert.doesNotMatch(zip, /Update this website/);
-  assert.match(zip, /uploaded as a ZIP are updated in GitHub/i);
+  assert.match(zip, /Edit imported website/);
+  assert.match(zip, /unique text, link, business detail, or existing color/i);
   assert.match(zip, /Safe website updates/);
 
   h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_account_id = ?').run('a'.repeat(32));
