@@ -8,6 +8,7 @@ Screenshots come from the mocked Worker test harness (fake `tester` account, pla
   - Copy switches on the strict server ZIP flag (`zipPreviewConfigured(env) === true`): ZIP-first hero ("Build anywhere. Own everything.") with the simple builder as fallback, plus `zipCompatibilityHtml` (also shown on the upload form).
   - `exploreMarkup()` builds Launch / Maintain / Grow from #164's `marketingPipelineMarkup()`, `aiUpdateJourneyMarkup()` and `serviceExplorerMarkup()`, **consumed unchanged** (#164 owns those files). A test guards the markers it slices on.
   - Maintain adds two paths: own AI coding tool (available with your own tools) and the customer-owned website assistant (*planned · not released*, #165).
+- `onboarding/import-report.mjs`: `importReportMarkup(inventory)` renders the approved inventory format (contract §1) as a plain-language compatibility check: upload accepted / ready in a browser / can be published, findings, the planned-editing note and the file list. **Not wired to a route** until the WS1 inventory exists and M1.5 is authorized. Screenshots `report-*.png` use example inventories.
 - Tabs are native radio inputs styled with `:has()`. No script, no CSP change. Without `:has()` support all panels stay visible.
 
 ## Accessibility audit (automated, Chromium, real Worker headers)
