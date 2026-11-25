@@ -521,7 +521,9 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     const target={path:source.path,formIndex:form.formIndex,workerUrl:service.workerUrl,sitekey:service.sitekey};
     const proposalDigest=await sha256Text(jcs({v:1,kind:'form_connect',baseCommitSha:revision.commitSha,...target}));
     return {revision,files,nextFiles,changed,preview,target,proposalDigest,form,
-      hasPolicy:/http-equiv\s*=\s*["']?content-security-policy/i.test(utf8(source.bytes))};
+      hasPolicy:/http-equiv\s*=\s*["']?content-security-policy/i.test(utf8(source.bytes)),
+      // An inline script (like a "preview only" demo handler) can still stop the form from sending.
+      inlineScript:/<script\b(?![^>]*\bsrc\s*=)[^>]*>\s*\S[\s\S]*?<\/script>/i.test(utf8(source.bytes))};
   }
   async function connectForm(env,current,id){
     const item=await ownedZip(env,current,id);
@@ -545,6 +547,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
           ', fields '+tree.form.fields.map(field=>'<code>'+escape(field)+'</code>').join(', ')+'</p>'+
         '<ul>'+lines.map(line=>'<li>'+escape(line)+'</li>').join('')+'</ul>'+
         '<p>Messages are saved in a private database in your own Cloudflare account. Only <code>public/'+escape(tree.target.path)+'</code> changes.</p>'+
+        (tree.inlineScript?'<p role="alert"><strong>Check this page\'s own script.</strong> It has a script written into the page, which may stop the form from sending (for example a "preview only" message). This change does not remove scripts. Review it in the pull request, and remove that script there or with your own tools before you merge.</p>':'')+
         button('/form-connect-approve','Approve and open a pull request',current.csrf,
           hidden('ticket',ticket)+hidden('approvalId',value.approvalId)+hidden('proposalDigest',value.proposalDigest)+hidden('artifactDigest',value.artifactDigest))+
         '<p>This approval works once and expires in 15 minutes.</p><p><a href="/toolkit">Back to your toolkit</a></p>');

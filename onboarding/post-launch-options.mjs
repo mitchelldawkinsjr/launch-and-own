@@ -392,7 +392,8 @@ export function createSiteOptionsRoutes({
     const formService = await readFormService(env, current, job.id);
     const connectLink = formService
       ? '<p role="status">Your form service is set up. <a href="/form-connect?id=' + encodeURIComponent(job.id) +
-        '">Connect your contact form</a> to start receiving messages.</p>'
+        '">Connect your contact form</a> to start receiving messages. <a href="/form-messages?id=' + encodeURIComponent(job.id) +
+        '">Read your messages</a></p>'
       : '';
     const formsSection =
       '<section><h2>Contact form</h2>' + formNote + connectLink +

@@ -6,7 +6,10 @@
 - **Connecting the site's form:** `/form-connect` (uploaded sites) detects the existing contact form and shows the exact change. That change sets the form's action to the Worker, adds Turnstile, re-enables the submit button, adds CSS-only sent and error notes, and widens that page's CSP `<meta>` if it has one. On approval it opens one pull request through the imported-edit approval path. The owner merges it.
 - **Scopes:** Turnstile accepts Account Settings Write, which is already requested. The D1 and Workers scope IDs go in `CF_FORMS_SCOPES` and are sent only while `OPTION_FORMS_ENABLED` is `true`. Domain must copy the exact IDs from the Cloudflare OAuth client registration. Malformed IDs are dropped.
 - **Still required per site:** the #89 cost and privacy row and an operator grant (unchanged), and migration `0013` on the onboarding D1 before deploy.
-- **Not yet built:** generated sites (which have no form to connect), a toolkit view for reading messages, and a live acceptance on a real account.
+- **Created sites:** once the form service is set up, `renderSite` adds a built-in Name, Email and Message form with Turnstile. It appears in the next "Update this website" preview and stays in every later update. `/form-connect` sends created sites to that editor.
+- **Messages:** `/form-messages` reads the newest 50 messages from the owner's customer D1 with the owner's Cloudflare grant, using one fixed `SELECT`. Nothing is stored or logged. It needs the D1 scope in `CF_FORMS_SCOPES`.
+- **Inline scripts:** `/form-connect` warns when the form's page has an inline script that may block sending. It does not remove scripts.
+- **Not yet done:** a live acceptance on a real account.
 
 The forms execution path stages a Turnstile widget and a dedicated customer D1 after separate operator approval and a current cost and privacy grant. The result `form_resources_staged` includes a Worker review with the exact source digest, bindings and retention schedule. The product shows the setup as pending Worker review.
 

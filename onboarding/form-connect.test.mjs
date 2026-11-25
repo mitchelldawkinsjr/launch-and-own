@@ -46,3 +46,10 @@ test('refuses an unready service, a missing form or an untrusted address', () =>
   assert.doesNotMatch(html, /Content-Security-Policy/, 'pages without a policy get none added');
   assert.equal(formConnectSummary({path: '/contact', workerUrl, hasPolicy: false}).length, 4);
 });
+
+test('the inline-script check catches a page script but not an external one', () => {
+  const inline = /<script\b(?![^>]*\bsrc\s*=)[^>]*>\s*\S[\s\S]*?<\/script>/i;
+  assert.equal(inline.test('<script>document.getElementById("booking-form").onsubmit=e=>e.preventDefault()</script>'), true);
+  assert.equal(inline.test('<script src="/app.js"></script>'), false);
+  assert.equal(inline.test('<script type="module" src="/a.js"></script><script></script>'), false);
+});
