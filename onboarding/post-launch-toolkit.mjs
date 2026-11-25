@@ -1,6 +1,7 @@
 /** Owner-scoped launch history and update status views (#87). */
 import {hasCurrentOwnerSession, isLaunchId, listOwnedJobs} from './launch-jobs.mjs';
 import {optionsPathForJob} from './post-launch-options.mjs';
+import {serviceExplorerCss, serviceExplorerMarkup} from './service-explorer.mjs';
 import {TOOLKIT_CAPABILITY_STATES} from '../pipeline/toolkit-capabilities.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
@@ -202,7 +203,7 @@ export function renderToolkitPage(cards, current, {view, escape}, {currentInvent
     ? cards.map(card => renderCard(card, escape)).join('')
     : '<p>No websites in your launches yet. Create or upload a site first.</p>';
   return view('Your website toolkit',
-    '<p>Recent launches stay here for 30 days. The details below come from the launch we recorded for you.</p>' +
+    '<style>' + serviceExplorerCss + '</style><p>Recent launches stay here for 30 days. The details below come from the launch we recorded for you.</p>' +
     body + currentInventoryHtml +
     '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p>');
 }
@@ -233,6 +234,7 @@ function renderCard(card, escape) {
   return '<section><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' +
     '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + digest + error + edit +
     options +
+    '<details><summary>Explore your website services</summary>' + serviceExplorerMarkup({mode:'toolkit', capabilities:card.capabilities}) + '</details>' +
     '<details><summary>What this site includes</summary><ul>' + caps + '</ul></details></section>';
 }
 
