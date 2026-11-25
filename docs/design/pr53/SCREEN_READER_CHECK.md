@@ -5,7 +5,9 @@ Automated checks pass (contrast, headings, landmarks, labels, focus, accessibili
 ## Setup
 - macOS: Safari or Chrome, turn on VoiceOver with **Cmd+F5**. VO = Control+Option.
 - Windows alternative: NVDA + Chrome or Firefox.
-- Local build: run the onboarding Worker locally (mocked providers) and open `/`.
+- Local build (Node 22.5+): `node scripts/serve-onboarding-mock.mjs --zip`, then open http://localhost:8787/. It runs the real onboarding Worker with fake GitHub and Cloudflare accounts. Consent screens are skipped, and it never contacts real providers. Drop `--zip` to see the ZIP-off landing.
+- To check an exact release commit, check it out separately and add `--repo <that checkout>`.
+- To reach setup, toolkit and history, use **Connect GitHub**, then **Connect Cloudflare**, then choose the test Cloudflare account on the setup page.
 
 ## Steps and what you should hear
 
