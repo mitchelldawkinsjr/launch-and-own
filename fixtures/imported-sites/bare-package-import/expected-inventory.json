@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "classification": "source_project",
+  "importable": true,
+  "serveReady": false,
+  "reasons": [
+    "bare_import",
+    "has_index_html",
+    "source_project"
+  ],
+  "files": [
+    {
+      "path": "public/index.html",
+      "bytes": 189,
+      "type": "html",
+      "editable": [],
+      "readOnlyReason": "source_project"
+    },
+    {
+      "path": "public/main.js",
+      "bytes": 47,
+      "type": "js",
+      "editable": [],
+      "readOnlyReason": "bare_import"
+    },
+    {
+      "path": "public/package.json",
+      "bytes": 97,
+      "type": "other",
+      "editable": [],
+      "readOnlyReason": "config_file"
+    }
+  ]
+}
