@@ -65,4 +65,17 @@ All dates are when the page was read (2026-11-24), with the page's own `dateModi
 - Whether Deploy to Cloudflare can pin a tag or commit
 - Whether third-party OAuth clients (as opposed to wrangler) can request the same scopes, or any scope that covers Access
 
-Status names, failure codes, branch names and approval binding follow the [#176 contracts draft](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176). If #176 changes, this design follows it.
+Status names, failure codes, branch names and approval binding follow the [imported-site contracts](../../contracts/IMPORTED_SITE_CONTRACTS.md) (#176), merged to `main` on 2026-11-25 and still marked draft pending the owner's #171 item 7. If the contract changes, this design follows it.
+
+### Contract follow-ups this design depends on
+
+These were raised in the [WS5 review on #176](https://github.com/mitchelldawkinsjr/launch-and-own/pull/176#issuecomment-7153910602). They're unresolved in the merged text.
+
+| # | Follow-up | Why this design needs it | Threat / test |
+| --- | --- | --- | --- |
+| 1 | An owner identity of `{provider, id}` instead of `ownerGithubUserId` | The M2 assistant authenticates the owner with Cloudflare Access, not GitHub | 3, 6 / T-ACC-5 |
+| 2 | A random `approvalId`, consumed once under a unique constraint | Stops a replayed approval within `expiresAt` producing a second commit | 6 / T-SHA-3, T-RET-2 |
+| 3 | A `credentials_revoked` reason code for the `needs_reauthorization` status | Gives a stable code for revoked or uninstalled GitHub access | 10 / T-REV-1..3 |
+| 4 | Re-read `main` immediately before the ref update, and branch from `baseCommitSha` | Closes the gap between approval and commit | 6 / T-SHA-1 |
+
+Until these land, the threat model treats them as **required controls** on the WS3 implementation, not optional extras.
