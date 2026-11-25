@@ -76,9 +76,12 @@ export function historyToolkitCapabilities({
     : cap('not_available', 'awaiting_public_https_verification',
       'Publish health shows after a successful live check.');
   let updates;
-  if (uploadedZip)
+  if (uploadedZip && verified)
+    updates = cap('available_opt_in', 'imported_edit_ready',
+      'Change one unique text, link, business detail, or existing color. Preview it, approve a pull request, and merge it yourself.');
+  else if (uploadedZip)
     updates = cap('not_available', 'uploaded_source_has_no_supported_editor',
-      'Sites you uploaded as a ZIP are updated in GitHub, not with this simple editor.');
+      'Imported editing appears after this ZIP launch is confirmed live.');
   else if (canEdit && verified)
     updates = cap('available_opt_in', 'editor_eligible',
       'Change the copy, preview the exact page, approve, merge in GitHub, then we check the live site.');
@@ -192,7 +195,8 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} =
     approvalFingerprint: typeof job.approval_digest === 'string' && DIGEST.test(job.approval_digest)
       ? job.approval_digest.toLowerCase() : null,
     errorCode: typeof job.error_code === 'string' ? job.error_code : null,
-    editPath: editable ? '/site-update?id=' + encodeURIComponent(job.id) : null,
+    editPath: editable ? '/site-update?id=' + encodeURIComponent(job.id)
+      : zip && verified ? '/imported-edit?id=' + encodeURIComponent(job.id) : null,
     optionsPath: optionsPathForJob(job.id, status),
     capabilities: historyToolkitCapabilities({
       verified, canEdit: editable, uploadedZip: zip
@@ -239,7 +243,9 @@ function renderCard(card, escape, index = 0) {
   const error = card.errorCode
     ? '<p>Last result code <code>' + escape(card.errorCode) + '</code></p>' : '';
   const edit = card.editPath
-    ? '<p><a href="' + escape(card.editPath) + '">Update this website</a></p>' : '';
+    ? '<p><a href="' + escape(card.editPath) + '">' +
+      (card.editPath.startsWith('/imported-edit') ? 'Edit imported website' : 'Update this website') +
+      '</a></p>' : '';
   const options = card.optionsPath
     ? '<p><a href="' + escape(card.optionsPath) + '">Optional domain, email, and form requests</a></p>' : '';
   const caps = Object.entries(card.capabilities || {}).map(([id, item]) => {
