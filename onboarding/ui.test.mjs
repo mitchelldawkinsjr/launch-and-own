@@ -124,3 +124,18 @@ test('error pages preserve Worker security response headers',async()=>{
   assert.doesNotMatch(await res.text(),/Step 1 of 5/);
  }finally{h.sqlite.close();}
 });
+test('GitHub, Cloudflare and pages.dev links open in a new tab; app links stay in place', async () => {
+  const {providerLinksInNewTab} = await import('./ui.mjs');
+  const out = providerLinksInNewTab('<a href="https://github.com/tester/repo">Open on GitHub</a>'+
+    '<a href="https://dash.cloudflare.com/a/workers-and-pages" rel="noreferrer">Open in Cloudflare</a>'+
+    '<a href="https://esp-x-site.pages.dev/">site</a><a href="/history">Your launches</a>'+
+    '<a href="https://github.com.evil.example/x">fake</a><a href="https://github.com/p" target="_self">kept</a>'+
+    '<a href="https://github.com/q" target="_blank" rel="noopener">Open (new tab)</a>');
+  assert.match(out, /<a href="https:\/\/github\.com\/tester\/repo" target="_blank" rel="noopener noreferrer">Open on GitHub<span class="lo-sr"> \(opens in a new tab\)<\/span><\/a>/);
+  assert.match(out, /<a href="https:\/\/dash\.cloudflare\.com\/a\/workers-and-pages" rel="noreferrer" target="_blank">Open in Cloudflare<span class="lo-sr">/);
+  assert.match(out, /pages\.dev\/" target="_blank"/);
+  assert.match(out, /<a href="\/history">Your launches<\/a>/);
+  assert.match(out, /<a href="https:\/\/github\.com\.evil\.example\/x">fake<\/a>/);
+  assert.match(out, /target="_self">kept<\/a>/);
+  assert.equal((out.match(/opens in a new tab/g) || []).length, 3);
+});
