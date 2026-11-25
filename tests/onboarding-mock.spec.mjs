@@ -33,10 +33,12 @@ test('ZIP-off landing names each control once and hides inactive panels', async 
     await expect(page.getByRole('radio', {name: 'Maintain: Make changes. Just ask.'})).toBeChecked();
     await expect(page.locator('.lo-p-launch')).toBeHidden();
     await expect(page.getByText('Available with your own tools')).toBeVisible();
-    await expect(page.getByText('Planned · not released')).toBeVisible();
+    await expect(page.locator('.lo-p-maintain').getByText('Planned · not released', {exact: true})).toBeVisible();
+    await expect(page.getByText('Planned · not released · created only by you')).toBeHidden();
     await page.keyboard.press('ArrowRight');
     await expect(page.getByRole('radio', {name: 'Grow: Grow beyond a website'})).toBeChecked();
     await expect(page.locator('.lo-p-maintain')).toBeHidden();
+    await expect(page.getByText('Planned · not released · created only by you')).toBeVisible();
   });
 });
 
