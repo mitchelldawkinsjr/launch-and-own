@@ -29,7 +29,8 @@ test('landing leads with the outcome, keeps one panel open and links CTAs to the
   assert.equal(html.match(/href="#get-started"/g).length,2);
   assert.equal(html.match(/name="lo-explore"/g).length,3);
   assert.equal(html.match(/ checked/g).length,1);
-  assert.match(html,/id="lo-tab-launch" value="launch" checked/);
+  assert.match(html,/id="lo-tab-launch"[^>]*aria-label="Launch: Get your business online" checked>/);
+  assert.equal(html.match(/class="lo-tab-(?:label|hint)" aria-hidden="true"/g).length,6,'tab text announced once, via the radio name');
   assert.match(html,/Planned · not released/);
   assert.match(html,/<a href="\/connect\/github">Connect GitHub<\/a><\/section>/);
   assert.doesNotMatch(html,/<(?:script|img|iframe)\b|\bon[a-z]+=/i);
