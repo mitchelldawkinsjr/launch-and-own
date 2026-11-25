@@ -75,8 +75,8 @@ const SERVICES = [
     "icon": "chart",
     "description": "Helps you understand website visits and which pages people use.",
     "example": "See whether customers are visiting your services page.",
-    "pre": "Optional · Visitor insights",
-    "post": "Review analytics or follow the provider setup instructions.",
+    "pre": "On by default · You can turn it off before launch",
+    "post": "Counts visits and page speed in your own Cloudflare account. No cookies.",
     "cap": "web_analytics"
   },
   {

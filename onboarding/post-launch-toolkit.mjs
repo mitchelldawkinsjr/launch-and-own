@@ -96,7 +96,7 @@ export function historyToolkitCapabilities({
     deployment_health: health,
     website_updates: updates,
     web_analytics: cap('manual_setup', 'review_provider_settings',
-      'Not set up here yet. In Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
+      'On for sites launched with visitor insights, which is the default. To see them in Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
     pr_previews: cap('blocked_permission_or_plan', 'preview_access_and_approval_required',
       'Pages PR previews need verified private access and separate approval. Use the exact Launch & Own review to inspect updates.'),
     custom_domains: cap('manual_setup', 'verified_domain_setup_required',
