@@ -58,6 +58,7 @@ function responder(request, origin) {
     const target = new URL(back);
     target.searchParams.set('form', ok ? 'sent' : 'error');
     if (!ok) target.searchParams.set('reason', error);
+    target.hash = ok ? 'form-sent' : 'form-error';
     return new Response(null, {status: 303, headers: {location: target.href, 'cache-control': 'no-store'}});
   };
 }
