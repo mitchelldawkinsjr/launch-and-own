@@ -89,6 +89,27 @@ export async function buildFormWorkerReview({pagesProjectName, hostname, databas
 const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
+ * Upload metadata for the customer form Worker, with the Turnstile secret left out.
+ * The provider adds the secret only to the bytes it sends; approvals compare this redacted form.
+ */
+export function formWorkerMetadata({hostname, databaseId, gate}) {
+  return {
+    main_module: CUSTOMER_FORM_WORKER_MODULE,
+    compatibility_date: FORM_WORKER_COMPATIBILITY_DATE,
+    bindings: [
+      {type: 'd1', name: 'DB', database_id: databaseId},
+      {type: 'plain_text', name: 'SITE_HOSTNAME', text: hostname},
+      {type: 'plain_text', name: 'MAX_BODY_BYTES', text: String(gate.maxBodyBytes)},
+      {type: 'plain_text', name: 'MAX_SUBMISSIONS_PER_DAY', text: String(gate.maxSubmissionsPerDay)},
+      {type: 'plain_text', name: 'RETENTION_DAYS', text: String(gate.retentionDays)},
+      {type: 'plain_text', name: 'GATE_APPROVAL_ID', text: gate.approvalId},
+      {type: 'secret_text', name: 'TURNSTILE_SECRET'}
+    ]
+  };
+}
+export const FORM_WORKER_SCHEDULES = Object.freeze([{cron: FORM_WORKER_CRON}]);
+
+/**
  * Exact allowlist for forms mutations under one approved grant. `receipt` is the
  * persisted provisioning record for this approval, read fresh by the caller, so
  * each write is allowed only at its own step and only against the recorded
@@ -97,12 +118,28 @@ const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  */
 export function isApprovedFormsMutation({method, path, requestBody: b, accountId, pagesProjectName,
   hostname, gate, receipt}) {
-  if (method !== 'POST') return false;
+  if (method !== 'POST' && method !== 'PUT') return false;
   let names;
   try { names = formsResourceNames(pagesProjectName); } catch { return false; }
   if (hostname !== pagesProjectName + '.pages.dev' || !/^[a-f0-9]{32}$/.test(accountId || '') ||
       !receipt || !GATE.test(gate?.approvalId || '') || receipt.gateApprovalId !== gate.approvalId) return false;
   const root = '/accounts/' + accountId;
+  const script = root + '/workers/scripts/' + names.script;
+  const staged = isCustomerFormsDatabaseId(receipt.databaseId) && !!receipt.widgetSitekey && receipt.schemaApplied === true;
+  // Worker setup: rotate the widget secret straight into the upload, then the address, then the cleanup schedule.
+  if (method === 'PUT') {
+    if (path === script)
+      return staged && !receipt.workerDeployed && b?.module === CUSTOMER_FORM_WORKER_SOURCE &&
+        sameJson(b.metadata, formWorkerMetadata({hostname, databaseId: receipt.databaseId, gate}));
+    if (path === script + '/schedules')
+      return staged && receipt.workerSubdomainEnabled === true && !receipt.workerScheduleSet && sameJson(b, FORM_WORKER_SCHEDULES);
+    return false;
+  }
+  if (path === root + '/challenges/widgets/' + encodeURIComponent(receipt.widgetSitekey || '') + '/rotate_secret')
+    return staged && !receipt.workerDeployed && sameJson(b, {invalidate_immediately: false});
+  if (path === script + '/subdomain')
+    return staged && receipt.workerDeployed === true && !receipt.workerSubdomainEnabled &&
+      sameJson(b, {enabled: true, previews_enabled: false});
   if (path === root + '/challenges/widgets')
     return !receipt.widgetSitekey && sameJson(b, {name: names.widget, domains: [hostname], mode: 'managed'});
   if (path === root + '/d1/database')

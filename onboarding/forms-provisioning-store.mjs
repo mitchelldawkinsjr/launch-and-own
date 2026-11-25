@@ -1,13 +1,18 @@
 // #89: D1 receipts for forms provisioning (migration 0010). Fields are write-once:
 // a step can be recorded, never rewritten to a different provider ID.
 const COLUMNS = {
-  widgetSitekey: 'widget_sitekey', databaseId: 'database_id', schemaApplied: 'schema_applied'
+  widgetSitekey: 'widget_sitekey', databaseId: 'database_id', schemaApplied: 'schema_applied',
+  workerDeployed: 'worker_deployed', workerSubdomainEnabled: 'worker_subdomain_enabled',
+  workerScheduleSet: 'worker_schedule_set', workerUrl: 'worker_url'
 };
+const FLAGS = new Set(['schemaApplied', 'workerDeployed', 'workerSubdomainEnabled', 'workerScheduleSet']);
 
 function toReceipt(r) {
   return r ? Object.freeze({
     gateApprovalId: r.gate_approval_id, widgetSitekey: r.widget_sitekey || null,
-    databaseId: r.database_id || null, schemaApplied: r.schema_applied === 1
+    databaseId: r.database_id || null, schemaApplied: r.schema_applied === 1,
+    workerDeployed: r.worker_deployed === 1, workerSubdomainEnabled: r.worker_subdomain_enabled === 1,
+    workerScheduleSet: r.worker_schedule_set === 1, workerUrl: r.worker_url || null
   }) : null;
 }
 
@@ -22,7 +27,7 @@ export function createD1FormsProvisioningStore(env, current, {optionApprovalId, 
     async record({gateApprovalId, ...fields}) {
       const entries = Object.entries(fields);
       if (typeof gateApprovalId !== 'string' || !gateApprovalId || entries.some(([key, value]) =>
-        !Object.hasOwn(COLUMNS, key) || (key === 'schemaApplied' ? value !== true :
+        !Object.hasOwn(COLUMNS, key) || (FLAGS.has(key) ? value !== true :
           typeof value !== 'string' || !value))) return null;
       const time = Math.floor(Date.now() / 1000);
       await env.DB.prepare(
@@ -35,7 +40,7 @@ export function createD1FormsProvisioningStore(env, current, {optionApprovalId, 
       const sets = [], values = [];
       for (const [key, value] of entries) {
         const column = COLUMNS[key];
-        if (key === 'schemaApplied') sets.push('schema_applied = 1');
+        if (FLAGS.has(key)) sets.push(column + ' = 1');
         else {
           sets.push(column + ' = COALESCE(' + column + ', ?)');
           values.push(value);

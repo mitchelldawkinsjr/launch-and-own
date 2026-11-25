@@ -775,7 +775,9 @@ async function applyApprovedOption(request,env,current){
     throw error;
   }
   if(result.kind==='forms')return view('Contact form setup',
-    '<p>Your Turnstile widget and dedicated database are ready for Worker review. Publishing the form and testing a submission need separate approval.</p>'+
+    '<p>Your form service is set up in your own Cloudflare account: spam protection, a private database for messages, and a small Worker that receives them.</p>'+
+    '<p>Next, connect your site\'s contact form. You review the exact change and merge it yourself.</p>'+
+    (isLaunchId(result.jobId)?'<p><a href="/form-connect?id='+encodeURIComponent(result.jobId)+'">Connect your contact form</a></p>':'')+
     '<p>Worker <code>'+escape(result.workerReview.scriptName)+'</code></p>'+
     '<p>Code SHA-256 <code>'+escape(result.workerReview.moduleSha256)+'</code></p>'+
     '<p><a href="/toolkit">Back to toolkit</a></p>');

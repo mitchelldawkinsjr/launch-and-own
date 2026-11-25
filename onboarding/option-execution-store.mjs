@@ -260,7 +260,7 @@ export function createD1OptionExecutionStore(env, current) {
   });
 
   async function assertOperatorApprovedExecution({provider, method, path, requestBody}) {
-    if (provider !== 'cloudflare' || method !== 'POST' ||
+    if (provider !== 'cloudflare' || (method !== 'POST' && !(method === 'PUT' && pending?.raw.kind === 'forms')) ||
         !pending || !claims.has(pending.raw.id) ||
         !await assertCurrentAuthorization()) return false;
     const x = pending.raw, p = pending.reviewed.normalizedPayload;

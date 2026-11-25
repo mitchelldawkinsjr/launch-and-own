@@ -3,7 +3,8 @@
 // operator-authorized, single-winner execution lease. NO DNS, MX, NS, mailbox or
 // billing endpoints. Forms staging uses the same per-request operator approval
 // for the exact Turnstile widget and dedicated customer D1.
-import {formsResourceNames, isCustomerFormsDatabaseId, CUSTOMER_FORM_SCHEMA_SQL} from './forms-provider-plan.mjs';
+import {formsResourceNames, isCustomerFormsDatabaseId, CUSTOMER_FORM_SCHEMA_SQL, formWorkerMetadata, FORM_WORKER_SCHEDULES} from './forms-provider-plan.mjs';
+import {CUSTOMER_FORM_WORKER_MODULE, CUSTOMER_FORM_WORKER_SOURCE} from './customer-form-worker-source.mjs';
 const ACCOUNT = /^[a-f0-9]{32}$/i;
 const NAME = /^esp-[a-z0-9]+(?:-[a-z0-9]+)*-site$/;
 const ZONE = /^[a-f0-9]{32}$/i;
@@ -83,12 +84,13 @@ export function createCloudflareExtensionProvider({
         principal.cloudflareAccountId !== owner.cloudflareAccountId)
       deny('authorization_changed');
   };
-  async function request(provider, method, path, body, {allow404 = false} = {}) {
+  // `wire` sends different bytes from what the approval saw (the Worker upload, whose secret is never shown to it).
+  async function request(provider, method, path, body, {allow404 = false, wire} = {}) {
     authorized();
     if (method === 'GET') {
       if (++getCount > MAX_GETS) deny('provider_request_budget_exceeded');
     } else {
-      if (method !== 'POST') deny('unsupported_mutation');
+      if (method !== 'POST' && method !== 'PUT') deny('unsupported_mutation');
       if (typeof assertOperatorApprovedExecution !== 'function')
         deny('separate_execution_approval_required');
       let allowed = false;
@@ -113,9 +115,9 @@ export function createCloudflareExtensionProvider({
           ...(provider === 'github' ? {
             'user-agent': 'launch-and-own', 'x-github-api-version': '2022-11-28'
           } : {}),
-          ...(method !== 'GET' ? {'content-type': 'application/json'} : {})
+          ...(method !== 'GET' && !wire ? {'content-type': 'application/json'} : {})
         },
-        ...(method !== 'GET' ? {body: JSON.stringify(body)} : {})
+        ...(method !== 'GET' ? {body: wire ?? JSON.stringify(body)} : {})
       });
     } catch { deny('provider_temporarily_unavailable'); }
     authorized();
@@ -136,6 +138,7 @@ export function createCloudflareExtensionProvider({
   }
   const cfGet = (path, opts) => request('cloudflare', 'GET', path, undefined, opts);
   const cfPost = (path, body) => request('cloudflare', 'POST', path, body);
+  const cfPut = (path, body, opts) => request('cloudflare', 'PUT', path, body, opts);
   const accountRoot = () => '/accounts/' + owner.cloudflareAccountId;
   function formsTarget(site, hostname) {
     safeSite(site, owner);
@@ -272,6 +275,55 @@ export function createCloudflareExtensionProvider({
       if (!Array.isArray(out?.result) || out.result.length === 0 || out.result.some(r => r?.success !== true))
         deny('customer_d1_schema_unverified');
       return {databaseId};
+    },
+    // Returns the new Turnstile secret for the immediate Worker upload. Callers must not store or log it.
+    async rotateTurnstileSecret(site, {hostname, sitekey} = {}) {
+      formsTarget(site, hostname);
+      if (typeof sitekey !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(sitekey)) deny('turnstile_widget_unverified');
+      const out = (await cfPost(accountRoot() + '/challenges/widgets/' + encodeURIComponent(sitekey) + '/rotate_secret',
+        {invalidate_immediately: false}))?.result;
+      if (out?.sitekey !== sitekey || typeof out.secret !== 'string' || out.secret.length < 16)
+        deny('turnstile_secret_unverified');
+      return out.secret;
+    },
+    async readWorkersSubdomain() {
+      const sub = (await cfGet(accountRoot() + '/workers/subdomain'))?.result?.subdomain;
+      if (typeof sub !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(sub)) deny('workers_subdomain_required');
+      return sub;
+    },
+    async uploadFormWorker(site, {hostname, databaseId, gate, secret} = {}) {
+      const names = formsTarget(site, hostname);
+      if (!isCustomerFormsDatabaseId(databaseId) || typeof secret !== 'string' || secret.length < 16)
+        deny('form_worker_config_invalid');
+      const scripts = await cfGet(accountRoot() + '/workers/scripts');
+      if (!Array.isArray(scripts?.result) || scripts.result.some(item => item?.id === names.script))
+        deny('form_worker_exists_reconcile');
+      const metadata = formWorkerMetadata({hostname, databaseId, gate});
+      const sent = {...metadata, bindings: metadata.bindings.map(binding =>
+        binding.type === 'secret_text' ? {...binding, text: secret} : binding)};
+      const form = new FormData();
+      form.set('metadata', new Blob([JSON.stringify(sent)], {type: 'application/json'}));
+      form.set(CUSTOMER_FORM_WORKER_MODULE, new Blob([CUSTOMER_FORM_WORKER_SOURCE], {type: 'application/javascript+module'}),
+        CUSTOMER_FORM_WORKER_MODULE);
+      const out = (await cfPut(accountRoot() + '/workers/scripts/' + names.script,
+        {metadata, module: CUSTOMER_FORM_WORKER_SOURCE}, {wire: form}))?.result;
+      if (out?.id !== names.script) deny('form_worker_unverified');
+      return {script: names.script};
+    },
+    async enableFormWorkerSubdomain(site, {hostname} = {}) {
+      const names = formsTarget(site, hostname);
+      const out = (await cfPost(accountRoot() + '/workers/scripts/' + names.script + '/subdomain',
+        {enabled: true, previews_enabled: false}))?.result;
+      if (out?.enabled !== true) deny('form_worker_address_unverified');
+      return {enabled: true};
+    },
+    async setFormWorkerSchedule(site, {hostname} = {}) {
+      const names = formsTarget(site, hostname);
+      const out = (await cfPut(accountRoot() + '/workers/scripts/' + names.script + '/schedules',
+        FORM_WORKER_SCHEDULES.map(item => ({...item}))))?.result;
+      if (!Array.isArray(out?.schedules) || out.schedules.length !== 1 || out.schedules[0]?.cron !== FORM_WORKER_SCHEDULES[0].cron)
+        deny('form_worker_schedule_unverified');
+      return {cron: FORM_WORKER_SCHEDULES[0].cron};
     },
     async createEmailRoutingRule(zoneId, rule) {
       if (!verifiedZoneIds.has(zoneId) || !rule ||

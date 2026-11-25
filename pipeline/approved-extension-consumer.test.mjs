@@ -130,7 +130,12 @@ function rig(reviewRow = row(), overrides = {}) {
     async createCustomerD1() {
       calls.push('provider.d1'); return {id: formsDatabaseId};
     },
-    async applyCustomerSchema() { calls.push('provider.schema'); return {}; }
+    async applyCustomerSchema() { calls.push('provider.schema'); return {}; },
+    async rotateTurnstileSecret() { calls.push('provider.rotate'); return 'rotated-secret-not-in-response'; },
+    async uploadFormWorker(_site, {secret}) { calls.push('provider.upload'); state.uploadedSecret = secret; return {}; },
+    async readWorkersSubdomain() { calls.push('provider.subdomainRead'); return 'acct'; },
+    async enableFormWorkerSubdomain() { calls.push('provider.subdomain'); return {enabled: true}; },
+    async setFormWorkerSchedule() { calls.push('provider.schedule'); return {}; }
   };
   state.receipt = null;
   const formsReceipts = {
@@ -367,22 +372,26 @@ test('forms have no activation from a review-only #89 plan or a mere boolean gat
   await rejected(s, 'cost_privacy_gate_required', {noProvider: true});
 });
 
-const FORM_WRITES = ['provider.turnstile', 'provider.d1', 'provider.schema'];
+const FORM_WRITES = ['provider.turnstile', 'provider.d1', 'provider.schema', 'provider.rotate', 'provider.upload',
+  'provider.subdomain', 'provider.schedule'];
 
 test('forms stage resources with receipts and return an exact Worker review', async () => {
   const review = row('forms');
   const r = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
   const out = await consumeStoredToolkitApproval(r.api);
   assert.equal(out.kind, 'forms');
-  assert.equal(out.status, 'form_resources_staged');
+  assert.equal(out.status, 'form_worker_deployed');
   assert.equal(out.workingForm, false);
-  assert.equal(out.workerReview.readyForProviderWrite, false);
+  assert.equal(out.workerUrl, 'https://' + out.workerReview.scriptName + '.acct.workers.dev');
+  assert.equal(r.state.uploadedSecret, 'rotated-secret-not-in-response', 'the rotated secret goes only to the upload');
+  assert.equal(JSON.stringify(out).includes('rotated-secret'), false);
+  assert.equal(JSON.stringify(r.state.receipt).includes('rotated-secret'), false);
   assert.equal(out.workerReview.bindings.find(binding => binding.name === 'DB').id, formsDatabaseId);
   assert.deepEqual(r.calls.filter(s => FORM_WRITES.includes(s)), FORM_WRITES);
-  assert.equal(r.calls.filter(s => s === 'receipt.record').length, 4);
+  assert.equal(r.calls.filter(s => s === 'receipt.record').length, 7);
   assert.equal(JSON.stringify(out).includes('not-in-response'), false);
   assert.equal(JSON.stringify(r.state.receipt).includes('not-in-response'), false);
-  assert.equal(r.state.finished.status, 'form_resources_staged');
+  assert.equal(r.state.finished.status, 'form_worker_deployed');
 });
 
 test('interrupted forms staging resumes from receipts without recreating resources', async () => {
@@ -400,8 +409,9 @@ test('interrupted forms staging resumes from receipts without recreating resourc
   const again = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
   again.state.receipt = r.state.receipt;
   const out = await consumeStoredToolkitApproval(again.api);
-  assert.equal(out.status, 'form_resources_staged');
-  assert.deepEqual(again.calls.filter(s => FORM_WRITES.includes(s)), ['provider.schema']);
+  assert.equal(out.status, 'form_worker_deployed');
+  assert.deepEqual(again.calls.filter(s => FORM_WRITES.includes(s)),
+    ['provider.schema', 'provider.rotate', 'provider.upload', 'provider.subdomain', 'provider.schedule']);
 
   const changed = rig(review, {verifyFormsCostPrivacyGate: async () => gate(review)});
   changed.state.receipt = {...r.state.receipt, gateApprovalId: 'other-gate'};

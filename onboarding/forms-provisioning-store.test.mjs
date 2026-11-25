@@ -44,8 +44,15 @@ test('forms receipts are owner- and job-scoped, gate-bound and write-once', asyn
   assert.equal(await store.record({gateApprovalId: 'gate_2', widgetSitekey: 'other'}), null);
   assert.equal(await store.record({gateApprovalId: 'gate_1', schemaApplied: false}), null);
   assert.equal(await store.record({gateApprovalId: 'gate_1', secret: 'unapproved'}), null);
+  const steps = {workerDeployed: false, workerSubdomainEnabled: false, workerScheduleSet: false, workerUrl: null};
   assert.deepEqual(await store.read(), {gateApprovalId: 'gate_1', widgetSitekey: 'site1',
-    databaseId: DB_ID, schemaApplied: true});
+    databaseId: DB_ID, schemaApplied: true, ...steps});
+  assert.equal((await store.record({gateApprovalId: 'gate_1', workerDeployed: true})).workerDeployed, true);
+  const address = await store.record({gateApprovalId: 'gate_1', workerSubdomainEnabled: true,
+    workerUrl: 'https://esp-test-site-form.acct.workers.dev'});
+  assert.equal(address.workerUrl, 'https://esp-test-site-form.acct.workers.dev');
+  assert.equal(await store.record({gateApprovalId: 'gate_1', workerUrl: 'https://other.acct.workers.dev'}), null, 'write-once');
+  assert.equal(await store.record({gateApprovalId: 'gate_1', workerDeployed: false}), null);
 
   const stranger = createD1FormsProvisioningStore(env, {...owner, github_user_id: 7}, ids);
   const otherJob = createD1FormsProvisioningStore(env, owner, {...ids, jobId: 'job-2'});
