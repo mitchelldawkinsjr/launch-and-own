@@ -18,6 +18,9 @@ test('previewed change shows before/after, exact preview, and a single-use bound
   assert.match(html,/Nothing goes live until you merge it/);
   assert.match(html,/never merges for you/);
   assert.match(html,/aria-current="step">Preview ready/);
+  const sealed='a'.repeat(50);
+  assert.match(editReviewMarkup({...base,ticket:sealed}),new RegExp('name="ticket" value="'+sealed+'"'));
+  assert.throws(()=>editReviewMarkup({...base,ticket:'../secret'}),TypeError);
   assert.doesNotMatch(html,/<script|\bon[a-z]+=/i);
 });
 
