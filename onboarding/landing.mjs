@@ -23,7 +23,15 @@ const tabsCss = `
 .lo-marketing .lo-path{background:#fff;border:1px solid var(--line);border-radius:15px;padding:18px;display:grid;gap:8px;align-content:start}
 .lo-marketing .lo-path p{color:var(--muted);font-size:.9rem}.lo-marketing .lo-path-badge{justify-self:start;font-size:.72rem;font-weight:800;border-radius:999px;padding:2px 10px;background:#e0f4ec;color:var(--green)}
 .lo-marketing .lo-path-badge.plan{background:#fff4dc;color:#8a5300}
-@media(max-width:700px){.lo-marketing .lo-tabs{grid-template-columns:1fr}.lo-marketing .lo-tab{grid-template-columns:auto 1fr;align-items:baseline;column-gap:10px}.lo-marketing .lo-paths{grid-template-columns:1fr}}
+.lo-marketing .lo-asst{margin-top:18px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:clamp(16px,3vw,22px)}
+.lo-marketing .lo-asst>h3{margin:0 0 12px;font-size:1.1rem}
+.lo-marketing .lo-asst-steps{list-style:none;margin:0 0 8px;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.lo-marketing .lo-asst-steps li{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start;padding:10px;border-radius:12px;background:#f8fafc}
+.lo-marketing .lo-asst-steps p{margin:2px 0 0;font-size:.85rem;color:var(--muted)}
+.lo-marketing .lo-asst-n{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#fff4dc;color:#8a5300;font-weight:800;font-size:.85rem}
+.lo-marketing .lo-asst ul{margin:0;padding-left:18px;color:var(--muted);font-size:.9rem}
+@media(max-width:900px){.lo-marketing .lo-asst-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.lo-marketing .lo-asst-steps{grid-template-columns:1fr}.lo-marketing .lo-tabs{grid-template-columns:1fr}.lo-marketing .lo-tab{grid-template-columns:auto 1fr;align-items:baseline;column-gap:10px}.lo-marketing .lo-paths{grid-template-columns:1fr}}
 `;
 
 export const landingCss = marketingPipelineCss + tabsCss + `
@@ -76,7 +84,33 @@ const tab=(id,label,hint,checked)=>'<label class="lo-tab"><input class="lo-radio
 // Honest maintenance paths (#165, #43/#55): only the independent tool path is available today.
 const maintainPaths = '<div class="lo-paths" aria-label="Ways to make changes">'+
   '<article class="lo-path"><span class="lo-path-badge">Available with your own tools</span><h3>Your own AI coding tool</h3><p>Codex (ChatGPT), Claude Code or another GitHub coding tool with write access can propose changes in your repository. Read-only ChatGPT GitHub access cannot push changes, and setup and permissions depend on the tool you choose.</p><p>Ask it for a separate branch and a pull request you review. Do not let it write straight to your production branch.</p></article>'+
-  '<article class="lo-path"><span class="lo-path-badge plan">Planned · not released</span><h3>Your own website assistant</h3><p>We are designing a private assistant that would run in your own Cloudflare account, use your own Workers AI allowance, and prepare changes for you to preview and approve. It would never merge for you.</p><p>Not available yet, and no release date is promised.</p></article></div>';
+  '<article class="lo-path"><span class="lo-path-badge plan">Planned · not released</span><h3>Your own website assistant</h3><p>A private assistant you would set up in your own GitHub and Cloudflare accounts. Ask for a change in everyday words, see an exact preview, approve it once, and merge the pull request yourself.</p><p>Launch &amp; Own would have no access to it, and it would keep working if Launch &amp; Own is offline. Not available yet, and no release date is promised.</p></article></div>'+
+  '<div class="lo-asst"><h3 id="lo-asst-title">How the planned assistant would work</h3>'+
+  '<ol class="lo-asst-steps">'+
+  [['Ask','Describe the change, such as new Saturday hours.'],['Prepare','It prepares the change on a separate branch. Your live site is untouched.'],['Preview','You see an exact private preview of the changed pages.'],['Approve','You approve that exact version. The approval works once and expires after 15 minutes.'],['You merge','It opens a pull request in your GitHub. Only you can merge it.'],['Publish and check','Cloudflare publishes the merged files and the assistant checks the live site.']]
+    .map(([t,d],i)=>'<li><span class="lo-asst-n" aria-hidden="true">'+(i+1)+'</span><div><strong>'+t+'</strong><p>'+d+'</p></div></li>').join('')+'</ol>'+
+  '<details><summary>What could it change first?</summary><p>Simple, checkable edits: text, links, business details such as hours and phone numbers, and colors your site already defines. Up to 10 changes in up to 5 files per request. Anything that would touch code is refused, and every other file stays exactly the same.</p></details>'+
+  '<details><summary>What stays in your control?</summary><ul>'+
+  '<li>You run the setup in your own accounts and review everything it would create first. The Grow tab lists those resources.</li>'+
+  '<li>Only you can sign in to it.</li>'+
+  '<li>It can open pull requests but cannot merge them, change repository settings or create other resources.</li>'+
+  '<li>Security fixes and other urgent assistant updates would come as pull requests for you to review, or as a notice if you prefer.</li>'+
+  '<li>On Cloudflare\'s free plan, it stops for the day at the daily AI limit instead of charging you. On a paid plan, Cloudflare bills usage above the included amount.</li>'+
+  '<li>You can remove it at any time without touching your website.</li></ul></details></div>';
+
+/** Grow: resources the planned assistant would add in the customer's own accounts (design #170). Planned, never shown as active. */
+const ASSISTANT_RESOURCES=[
+  ['GitHub','Assistant repository','A private repository for the assistant\'s own code, separate from your website so it can never end up on your public site.'],
+  ['GitHub','Private GitHub app','Created for you alone and installed only on your website repository. It can read files and open pull requests. It cannot merge, change settings or edit workflows.'],
+  ['Cloudflare','Workers','Run the assistant and a separate preview in your Cloudflare account.'],
+  ['Cloudflare','D1 database','Keeps your requests, previews and approvals. Uses 1 of the databases included in Cloudflare\'s free plan.'],
+  ['Cloudflare','Workers AI','Reads your request and proposes the change, using your account\'s daily AI allowance.'],
+  ['Cloudflare','Access','Lets only you sign in to the assistant. You set this up in the Cloudflare dashboard.']
+];
+const assistantResources='<div class="lo-explorer"><div class="sx-group"><div class="sx-group-title"><h3 id="lo-grow-asst">04 · Your private website assistant</h3><span>Planned · not released · created only by you</span></div>'+
+  '<p class="sx-note">When it is released, setting up the assistant would add these to your own accounts. These are separate from the Workers, D1 and Access a contact form uses.</p><div class="sx-grid">'+
+  ASSISTANT_RESOURCES.map(([provider,name,detail])=>'<details class="sx-card"><summary><span class="sx-label"><strong>'+name+'</strong><small>'+provider+' · planned</small></span></summary><div class="sx-detail"><p>'+detail+'</p></div></details>').join('')+
+  '</div><p class="sx-foot">Nothing here exists yet, and exploring creates nothing. Before setup you would see everything it creates and the provider limits. On free plans it stops at a daily limit instead of charging you; on paid plans the provider bills you directly. You can remove it all without touching your website.</p></div></div>';
 
 /** Tabbed explorer built from #164's components (consumed unchanged). */
 export function exploreMarkup({zipEnabled=false}={}){
@@ -95,7 +129,7 @@ export function exploreMarkup({zipEnabled=false}={}){
     pipeline.slice(from,to)+
     (zipEnabled?'<details><summary>What kind of website can I bring?</summary>'+zipCompatibilityHtml+'</details>':'')+'</section>'+
     '<section class="lo-panel lo-p-maintain" aria-label="Maintain: make changes">'+journey+maintainPaths+'</section>'+
-    '<section class="lo-panel lo-p-grow" aria-label="Grow beyond a website">'+serviceExplorerMarkup()+'</section>'+
+    '<section class="lo-panel lo-p-grow" aria-label="Grow beyond a website">'+serviceExplorerMarkup()+assistantResources+'</section>'+
     pipeline.slice(foot,pipeline.lastIndexOf('</div>'))+'</div>';
 }
 
@@ -104,7 +138,7 @@ const faq = zipEnabled => [
   ['What will I connect, and what can Launch &amp; Own do?','You sign in to GitHub and install the Launch &amp; Own GitHub app so it can create a private repository for your website files. You connect Cloudflare and pick the account that hosts the site. Cloudflare also needs its own Workers &amp; Pages GitHub app with access to that repository. Each provider shows you the permissions before you agree. No repository or hosting project is created until you approve the exact preview.'],
   ['What does it cost?','GitHub and Cloudflare offer free plans that suit many simple sites, subject to their plan and usage limits. Launch &amp; Own does not sell you a hosting subscription. A custom domain or extra services may cost money from the provider you choose.'],
   ['Can I use my own domain?','Your site launches on a free <code>pages.dev</code> address. After launch you can save a custom domain request from your toolkit. Saving it does not change DNS. Each step needs your separate review and approval.'],
-  ['Can AI update my website?','Today, you can use your own AI coding tool with write access to your repository, such as Codex or Claude Code, to propose changes as pull requests you review and merge. A private assistant running in your own Cloudflare account is planned and has not been released; it would never approve or merge for you. With your own tool, ask for pull requests and keep merging in your own hands.'],
+  ['Can AI update my website?','Today, you can use your own AI coding tool with write access to your repository, such as Codex or Claude Code, to propose changes as pull requests you review and merge. A private assistant you would set up in your own GitHub and Cloudflare accounts is planned and has not been released; it would never approve or merge for you. With your own tool, ask for pull requests and keep merging in your own hands.'],
   ['What happens if I stop using Launch &amp; Own?','Your files stay in your GitHub repository and your site stays in your Cloudflare account. You can disconnect at any time and remove app access in each provider\'s settings.']
 ];
 
