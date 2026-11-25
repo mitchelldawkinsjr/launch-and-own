@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {pageShell,stepperHtml} from './ui.mjs';
-import {landingMarkup} from './landing.mjs';
+import {exploreMarkup,landingMarkup} from './landing.mjs';
+import {aiUpdateJourneyMarkup} from './ai-update-journey.mjs';
 import {harness} from './worker-test-support.mjs';
 
 test('stepper marks active and completed steps without invented job percentages',()=>{
@@ -32,8 +33,32 @@ test('landing leads with the outcome, keeps one panel open and links CTAs to the
   assert.match(html,/Planned · not released/);
   assert.match(html,/<a href="\/connect\/github">Connect GitHub<\/a><\/section>/);
   assert.doesNotMatch(html,/<(?:script|img|iframe)\b|\bon[a-z]+=/i);
-  assert.doesNotMatch(landingMarkup(),/Upload an existing ZIP|upload one you already built/);
-  assert.match(landingMarkup({zipEnabled:true}),/upload one you already built/);
+  assert.doesNotMatch(html,/Preview every page/);
+});
+
+test('ZIP-first copy follows only the strict verified flag and states compatibility limits',()=>{
+  for(const off of [landingMarkup(),landingMarkup({zipEnabled:'true'})]){
+    assert.doesNotMatch(off,/Build anywhere|Bring my website|Upload an existing ZIP|What kind of website can I bring/);
+    assert.match(off,/Describe it\. Launch it\. Own it\./);
+  }
+  const on=landingMarkup({zipEnabled:true});
+  assert.ok(on.indexOf('Build anywhere. Own everything.')<on.indexOf('id="explore"'));
+  assert.equal(on.match(/>Bring my website</g).length,2);
+  assert.match(on,/No site yet\? Create one/);
+  assert.match(on,/Upload an existing ZIP/);
+  assert.match(on,/Not supported yet<\/strong><ul><li>Unbuilt project source/);
+  assert.match(on,/Up to 6 MB zipped, 128 files/);
+  assert.doesNotMatch(on,/<p>[^<]*<div/,'block content must not sit inside <p>');
+});
+
+test('Maintain tab reuses #164 unchanged and marks the customer-owned assistant as planned',()=>{
+  const html=exploreMarkup();
+  assert.ok(html.includes(aiUpdateJourneyMarkup()));
+  assert.match(html,/Planned · not released<\/span><h3>Your own website assistant/);
+  assert.match(html,/Available with your own tools/);
+  assert.doesNotMatch(html,/assistant is (?:available|live|released)/i);
+  assert.ok(html.indexOf('lo-p-launch')<html.indexOf('lo-p-maintain')&&html.indexOf('lo-p-maintain')<html.indexOf('lo-p-grow'));
+  assert.match(html,/Hosted beta\./);
 });
 
 test('signed-out landing renders through the Worker with security headers intact',async()=>{

@@ -30,7 +30,7 @@ import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 import {providerConnectionCards,providerHelpCss} from './provider-connection-help.mjs';
 import {pageShell} from './ui.mjs';
-import {landingCss,landingMarkup} from './landing.mjs';
+import {landingCss,landingMarkup,zipCompatibilityHtml} from './landing.mjs';
 import {connectPagesAccess,getPagesAccess,removePagesAccess,PagesAccessChanged} from './pages-access.mjs';
 import {isPagesAccessError,pagesAccessLink,pagesAccessPath,renderPagesAccess} from './pages-access-view.mjs';
 import {
@@ -238,6 +238,7 @@ async function home(env,current,notice){
     button('/draft','Draft my website copy',current.csrf,aiFields)+'</section>':'';
   const zipEntry=ready&&zipEnabled?`<section><h2>Upload a website you already built</h2>
     <p>Upload a ZIP of your finished site for a private preview. Put <code>index.html</code> and its files at the top of the ZIP, or inside one folder.</p>
+    <details><summary>What kind of website can I bring?</summary>${zipCompatibilityHtml}</details>
     <form method="POST" action="/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="${escape(current.csrf)}">
     <label for="zip-name">Business or website name</label><input id="zip-name" name="name" maxlength="80" required>
     <label for="website-zip">Website ZIP (up to 6 MB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
