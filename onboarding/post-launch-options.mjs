@@ -425,6 +425,7 @@ export function createSiteOptionsRoutes({
       '<section><h2>Visitor insights</h2>' +
       '<p>New sites launch with visitor insights on. If this site launched without them, save a request to turn them on.</p>' +
       stored(byKind.analytics, 'visitor insights') +
+      turnOn('analytics', 'Turn on visitor insights', byKind.analytics) +
       button('/site-options-prepare', 'Review visitor insights request', current.csrf,
         hidden(job.id, 'analytics') +
         '<label><input type="checkbox" name="analyticsConsent" value="true" required> ' +

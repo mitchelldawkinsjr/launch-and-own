@@ -90,7 +90,7 @@ export function createCloudflareExtensionProvider({
     if (method === 'GET') {
       if (++getCount > MAX_GETS) deny('provider_request_budget_exceeded');
     } else {
-      if (method !== 'POST' && method !== 'PUT') deny('unsupported_mutation');
+      if (method !== 'POST' && method !== 'PUT' && method !== 'PATCH') deny('unsupported_mutation');
       if (typeof assertOperatorApprovedExecution !== 'function')
         deny('separate_execution_approval_required');
       let allowed = false;
@@ -139,6 +139,7 @@ export function createCloudflareExtensionProvider({
   const cfGet = (path, opts) => request('cloudflare', 'GET', path, undefined, opts);
   const cfPost = (path, body) => request('cloudflare', 'POST', path, body);
   const cfPut = (path, body, opts) => request('cloudflare', 'PUT', path, body, opts);
+  const cfPatch = (path, body) => request('cloudflare', 'PATCH', path, body);
   const accountRoot = () => '/accounts/' + owner.cloudflareAccountId;
   function formsTarget(site, hostname) {
     safeSite(site, owner);
@@ -154,6 +155,28 @@ export function createCloudflareExtensionProvider({
   }
 
   return Object.freeze({
+    // Visitor insights (owner turn-on, 2026-11-26): reuse this host's Web Analytics site or create it, then set it on
+    // the managed Pages project. Each write still passes the per-kind allowlist (exact path and body).
+    async ensureWebAnalyticsSite(site) {
+      const host = site.pagesProjectName + '.pages.dev';
+      const listed = (await cfGet(accountRoot() + '/rum/site_info/list?per_page=100'))?.result;
+      let found = (Array.isArray(listed) ? listed : []).find(s => (s?.host ?? s?.ruleset?.zone_name) === host);
+      if (!found) found = (await cfPost(accountRoot() + '/rum/site_info', {host, auto_install: false}))?.result;
+      if (!/^[a-f0-9]{32}$/i.test(found?.site_tag || '') || !/^[a-f0-9]{32}$/i.test(found?.site_token || ''))
+        deny('analytics_site_unverified');
+      return {tag: found.site_tag.toLowerCase(), token: found.site_token.toLowerCase()};
+    },
+    async enablePagesAnalytics(site, beacon) {
+      const project = (await cfGet(pagesRoot(site)))?.result;
+      const b = project?.build_config || {};
+      // Only the managed layout; a project whose build settings were changed by hand is left alone.
+      if ((b.build_command ?? '') !== '' || b.destination_dir !== 'public' || (b.root_dir ?? '/') !== '/')
+        deny('pages_build_config_changed');
+      const out = (await cfPatch(pagesRoot(site), {build_config: {build_command: '', destination_dir: 'public', root_dir: '/',
+        web_analytics_tag: beacon.tag, web_analytics_token: beacon.token}}))?.result;
+      if (out?.build_config?.web_analytics_tag !== beacon.tag) deny('analytics_not_enabled');
+      return {enabled: true};
+    },
     async readPagesProject(site) {
       return (await cfGet(pagesRoot(site)))?.result;
     },

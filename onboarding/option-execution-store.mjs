@@ -2,6 +2,7 @@
 // This module never grants its own approvals. No browser values can create an
 // 'approved' row. An operator must authorize the exact immutable snapshot out
 // of band before this store can claim an action.
+import { isApprovedAnalyticsMutation } from '../pipeline/analytics-mutation.mjs';
 import {isApprovedFormsMutation} from '../pipeline/forms-provider-plan.mjs';
 import {createFormsCostPrivacyGate} from './forms-cost-privacy-store.mjs';
 import {createD1FormsProvisioningStore} from './forms-provisioning-store.mjs';
@@ -260,7 +261,8 @@ export function createD1OptionExecutionStore(env, current) {
   });
 
   async function assertOperatorApprovedExecution({provider, method, path, requestBody}) {
-    if (provider !== 'cloudflare' || (method !== 'POST' && !(method === 'PUT' && pending?.raw.kind === 'forms')) ||
+    if (provider !== 'cloudflare' || (method !== 'POST' && !(method === 'PUT' && pending?.raw.kind === 'forms') &&
+        !(method === 'PATCH' && pending?.raw.kind === 'analytics')) ||
         !pending || !claims.has(pending.raw.id) ||
         !await assertCurrentAuthorization()) return false;
     const x = pending.raw, p = pending.reviewed.normalizedPayload;
@@ -278,6 +280,11 @@ export function createD1OptionExecutionStore(env, current) {
       return isApprovedFormsMutation({method, path, requestBody, gate, receipt,
         accountId: x.cloudflare_account_id, pagesProjectName: site.pagesProjectName, hostname: p.hostname}) &&
         await assertCurrentAuthorization();
+    }
+    if (x.kind === 'analytics') {
+      const name = pending.reviewed.currentSite.pagesProjectName;
+      return p.pagesProjectName === name && isApprovedAnalyticsMutation({method, path, requestBody,
+        accountId: x.cloudflare_account_id, pagesProjectName: name}) && await assertCurrentAuthorization();
     }
     if (x.kind === 'domain') {
       return path === '/accounts/' + x.cloudflare_account_id +

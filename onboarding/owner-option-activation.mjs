@@ -6,7 +6,7 @@ import { isOptionExecutionConfigured } from './option-execution-store.mjs';
 import { buildFormsCostPrivacyReview } from '../pipeline/forms-cost-privacy-approval.mjs';
 
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
-const OWNER_KINDS = new Set(['domain', 'email', 'forms']);
+const OWNER_KINDS = new Set(['domain', 'email', 'forms', 'analytics']);
 const GATE_TTL = 60 * 60;
 /** Defaults shown on the owner's forms turn-on page; the owner can change them within the #89 bounds. */
 export const OWNER_FORMS_DEFAULTS = Object.freeze({ retentionDays: 30, maxSubmissionsPerDay: 50, maxBodyBytes: 8192 });
@@ -18,6 +18,7 @@ export function ownerSelfActivationEnabled(env, kind) {
   if (kind === 'domain') return env.OPTION_DOMAIN_ENABLED === 'true';
   if (kind === 'email') return env.OPTION_EMAIL_ENABLED === 'true';
   if (kind === 'forms') return env.OPTION_FORMS_ENABLED === 'true';
+  if (kind === 'analytics') return env.OPTION_ANALYTICS_ENABLED === 'true';
   return false;
 }
 
@@ -56,7 +57,7 @@ export async function mintOwnerExecutionGrant(env, current, approvalId, time = M
     JOIN onboarding_sessions s ON s.id_hash = ? AND s.authorization_epoch = ?
       AND s.github_user_id = j.github_user_id AND s.cloudflare_account_id = j.cloudflare_account_id
       AND s.expires_at > ? AND s.github_token_ct IS NOT NULL AND s.cloudflare_token_ct IS NOT NULL
-    WHERE o.id = ? AND o.status = 'stored' AND o.kind IN ('domain', 'email', 'forms')
+    WHERE o.id = ? AND o.status = 'stored' AND o.kind IN ('domain', 'email', 'forms', 'analytics')
       AND j.id = o.job_id AND j.status = 'live' AND j.expires_at > ?
       AND j.github_user_id = ? AND j.cloudflare_account_id = ?`
   ).bind(
