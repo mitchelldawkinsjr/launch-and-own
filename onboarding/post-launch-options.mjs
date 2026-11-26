@@ -48,7 +48,7 @@ async function ownedLiveJob(env, current, id, time) {
 export async function listOptionApprovals(env, jobId) {
   if (!isLaunchId(jobId)) return [];
   const result = await env.DB.prepare(
-    `SELECT kind, approval_digest, payload_json, status, updated_at
+    `SELECT id, kind, approval_digest, payload_json, status, updated_at
      FROM onboarding_option_approvals WHERE job_id = ? ORDER BY kind`)
     .bind(jobId).all();
   return result.results || [];
