@@ -257,7 +257,7 @@ async function home(env,current,notice){
     <label for="website-zip">Website ZIP (up to 6 MB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
     <button type="submit">Upload and preview</button></form></section>`:'';
   const next=ready?
-    '<section><h2>Create a simple website</h2><p>Fill in your business details, then preview the page. You will approve it in a separate step before anything goes live. After the site is live, you can save optional domain, email, and form requests from your toolkit; that does not change DNS or create a form by itself.</p>'+
+    '<section><h2>Create a simple website</h2><p>Fill in your business details, then preview the page. You will approve it in a separate step before anything goes live. After a verified launch, <strong>Your website toolkit</strong> shows recorded results and can open live account checks. Optional domain, email, and form <em>requests</em> are reviewed and stored there only—they do not change DNS, turn on mail, or create a form.</p>'+
     button('/preview','Preview my website',current.csrf,siteFields)+'</section>':'';
   const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Your launches</a> · '+pagesAccessLink+'</p>':'';
   const cloudflareLine=connected

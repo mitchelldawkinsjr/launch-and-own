@@ -1,6 +1,6 @@
 # Post-launch website toolkit (#87)
 
-Choose **Your website toolkit** after connecting GitHub and selecting a Cloudflare account. The page shows recent launches and finds current managed sites independently of the 30-day launch-history window.
+Choose **Your website toolkit** after connecting GitHub and selecting a Cloudflare account. The page shows recent launches and finds current managed sites independently of the 30-day launch-history window. Owner-facing copy and nav alignment are tracked in [TOOLKIT_DASHBOARD_GAPS.md](./TOOLKIT_DASHBOARD_GAPS.md).
 
 | Surface | Behavior |
 | --- | --- |

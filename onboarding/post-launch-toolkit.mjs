@@ -216,17 +216,25 @@ export async function loadToolkitCards(env, session, time) {
   return cards;
 }
 
+const TOOLKIT_INTRO = 'This page combines <strong>recorded launch results</strong> (about 30 days) with <strong>live account reads</strong> when Pages access works. ' +
+  'Matched sites show live GitHub and Cloudflare links inside their launch card. Optional service requests are stored for review only—they are not applied here.';
+
 export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = '', siteDetails = new Map()} = {}) {
   if (!current?.cloudflare_account_id)
     return view('Your website toolkit',
-      '<p>Connect GitHub and choose your Cloudflare account to see your sites here.</p>' +
+      '<p>Connect GitHub and choose your Cloudflare account to open toolkit and launch history.</p>' +
+      '<p class="muted">Until then, finish setup on the home page—nothing here configures domain, email, or forms.</p>' +
       '<p><a href="/">Back to setup</a></p>');
-  const body = cards.length
+  const launches = cards.length
     ? cards.map((card, i) => renderCard(card, escape, i, siteDetails.get(card.slug))).join('')
-    : '<p>No websites in your launches yet. Create or upload a site first.</p>';
+    : '<p>No websites in your recent launches. Create or upload a site from setup, then return after approval.</p>';
+  const launchesSection = '<section aria-labelledby="tk-recent-title"><h2 id="tk-recent-title">Recent launches</h2>' +
+    '<p class="muted">Rows stay for 30 days after your first approval. Status, address, and fingerprints come from ' +
+    'what we recorded when the launch was checked—not a live provider poll. When the site is still in your accounts, ' +
+    'live links appear under <strong>In your accounts now</strong> on that card.</p>' + launches + '</section>';
   return view('Your website toolkit',
-    '<style>' + serviceExplorerCss + toolkitTabsCss + '</style><p>Recent launches stay here for 30 days. The details below come from the launch we recorded for you.</p>' +
-    body + currentInventoryHtml +
+    '<style>' + serviceExplorerCss + toolkitTabsCss + '</style><p>' + TOOLKIT_INTRO + '</p>' +
+    launchesSection + currentInventoryHtml +
     '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p>');
 }
 
@@ -248,7 +256,9 @@ function renderCard(card, escape, index = 0, found = '') {
       (card.editPath.startsWith('/imported-edit') ? 'Edit imported website' : 'Update this website') +
       '</a></p>' : '';
   const options = card.optionsPath
-    ? '<p><a href="' + escape(card.optionsPath) + '">Optional domain, email, and form requests</a></p>' : '';
+    ? '<p><a href="' + escape(card.optionsPath) + '">Review optional requests (store only)</a></p>' +
+      '<p class="muted">Domain, email, forms, analytics, previews, SEO, and redirects are saved for review. ' +
+      'They are not applied from this page.</p>' : '';
   const caps = Object.entries(card.capabilities || {}).map(([id, item]) => {
     const label = CAP_LABELS[id] || id;
     const state = STATE_LABELS[item.state] || item.state;

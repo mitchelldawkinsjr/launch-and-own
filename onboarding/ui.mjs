@@ -87,7 +87,7 @@ export function stepperHtml(activeId='connect',{complete=false}={}){
 
 const NAVS={
   app:[['/','Setup'],['/toolkit','Toolkit'],['/history','Launches']],
-  marketing:[['#explore','How it works'],['#faq','FAQ'],['/toolkit','Owner toolkit'],['#get-started','Get started','nav-cta']]
+  marketing:[['#explore','How it works'],['#faq','FAQ'],['#get-started','Toolkit after sign-in'],['#get-started','Get started','nav-cta']]
 };
 
 /** css: extra trusted inline CSS; nav: 'app' | 'marketing'; current: href to mark as the current page. */

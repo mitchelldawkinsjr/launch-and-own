@@ -307,9 +307,9 @@ export async function inspectSealedManagedSource(env, session, ticketRaw, {
 export function renderCurrentSitesSection(inventory, {escape}, {matched = new Set(), hasCards = false} = {}) {
   if (!inventory || inventory.status === 'unavailable') {
     const code = inventory?.code ? ' (' + escape(inventory.code) + ')' : '';
-    return '<section><h2>Sites we found in your accounts</h2>' +
+    return '<section aria-labelledby="tk-accounts-title"><h2 id="tk-accounts-title">Sites in your accounts</h2>' +
       '<p class="muted">Could not refresh that list right now' + code +
-      '. Your launches above are unchanged.</p></section>';
+      '. Recent launches above are unchanged.</p></section>';
   }
   const all = inventory.sites || [];
   const sites = all.filter(site => !matched.has(site.repositoryName));
@@ -323,8 +323,11 @@ export function renderCurrentSitesSection(inventory, {escape}, {matched = new Se
     ? '<p><a href="/toolkit?page=' + encodeURIComponent(String(inventory.nextPage)) +
       '">Show more sites</a></p>'
     : '';
-  return '<section><h2>' + (matched.size || hasCards ? 'Other sites in your accounts' : 'Sites we found in your accounts') + '</h2>' +
-    '<p>Choose a site to check its current deployment and settings.</p>' +
+  const title = matched.size || hasCards ? 'Other sites in your accounts' : 'Sites in your accounts';
+  return '<section aria-labelledby="tk-accounts-title"><h2 id="tk-accounts-title">' + escape(title) + '</h2>' +
+    '<p class="muted">Live read when Pages access works. Sites that match a recent launch card are listed under ' +
+    '<strong>In your accounts now</strong> on that card instead.</p>' +
+    '<p>Choose a site to run deployment, analytics, preview, or plan checks in site toolkit.</p>' +
     body + pager + '</section>';
 }
 
@@ -333,7 +336,7 @@ function renderCurrentSite(site, escape) {
     ? site.repositoryName.slice(4)
     : site.repositoryName;
   return '<article class="tk-site"><h3>' + escape(name || site.siteId) + '</h3>' +
-    '<p class="pill">Live content not re-checked here</p>' + currentSiteDetails(site, escape) + '</article>';
+    '<p class="pill">Managed site · open site toolkit for live checks</p>' + currentSiteDetails(site, escape) + '</article>';
 }
 
 /** GitHub, Cloudflare and version details for one found site, for its toolkit card. */
