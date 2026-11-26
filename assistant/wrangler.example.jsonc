@@ -1,0 +1,29 @@
+// Template for the customer's private assistant repo (ADR-003). The customer deploys it with their own
+// `wrangler login` (ADR-001 B1); Launch & Own never holds this account's credentials.
+// Secrets (never in this file): KEK (>= 32 chars), GH_APP_PRIVATE_KEY. Set with `wrangler secret put`.
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "lo-assistant-<site-slug>",
+  "main": "assistant/worker.mjs",
+  "compatibility_date": "2026-11-21",
+  // Access protects the custom hostname; never expose an unprotected second hostname (threat model #3).
+  "workers_dev": false,
+  "preview_urls": false,
+  // No cron triggers: the account allows only 5 and the customer may already use them.
+  "vars": {
+    "ASSISTANT_VERSION": "0.1.0",
+    "UPSTREAM_SHA": "<40-hex upstream commit>",
+    "ASSISTANT_ORIGIN": "https://assistant.<customer-domain>",
+    "ACCESS_TEAM_DOMAIN": "<team>.cloudflareaccess.com",
+    "ACCESS_AUD": "<Access application AUD tag>",
+    "OWNER_SUB": "<owner's Access sub>",
+    "WEBSITE_REPO_ID": "<numeric GitHub repository id>",
+    "GH_APP_ID": "<customer App id>",
+    "GH_INSTALLATION_ID": "<installation id>",
+    "DAILY_NEURON_BUDGET": "8000"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "lo-assistant-<site-slug>", "database_id": "<id>", "migrations_dir": "assistant/migrations" }
+  ],
+  "ai": { "binding": "AI" }
+}
