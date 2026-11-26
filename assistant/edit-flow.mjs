@@ -3,6 +3,9 @@
 // Nothing is stored between steps except the single-use approval claim; every step re-reads GitHub, so a moved base fails closed.
 import { escape } from '../onboarding/ui.mjs';
 import { editReviewMarkup } from '../onboarding/edit-review.mjs';
+import { livePreviewUrl, VISUAL_EDITOR_CSS, visualEditorMarkup } from '../onboarding/visual-editor.mjs';
+import { defaultEditorPage, editablePages, listEditTargets, pickEditTarget } from '../imported/targets.mjs';
+import { structuralPath } from '../imported/intelligence.mjs';
 import { base64Decode, base64Encode } from '../imported/bytes.mjs';
 import { readCurrentRevision } from '../imported/revision.mjs';
 import { inspectSite } from '../imported/intelligence.mjs';
@@ -26,7 +29,7 @@ export const AI_REQUEST_NEURONS = 150;
 export const DEFAULT_AI_MODEL = '@cf/openai/gpt-oss-120b';
 const PAGE_HEADERS = {
   'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer',
-  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 };
 const MESSAGES = {
   stale_base: 'Your website changed since this preview. Start again so the change is based on the latest version.',
@@ -36,7 +39,8 @@ const MESSAGES = {
   not_found_anywhere: 'That text was not found on any page the assistant can edit. Copy it exactly as it appears.',
   no_match: 'That text was not found in that page.', ambiguous_match: 'That text appears more than once on the page. Use a longer, unique piece of text.',
   context_not_allowed: 'That part of the page cannot be changed this way.', kind_not_allowed: 'That kind of change is not allowed in that file.',
-  limit_exceeded: 'That change is too large.', invalid_output: 'The assistant could not turn that request into a safe change. Try typing the exact change.',
+  limit_exceeded: 'That change is too large for one preview.',
+  invalid_output: 'The assistant could not turn that request into a safe change. Try typing the exact change.',
   'repository-mismatch': 'The website repository does not match the assistant settings.', compiled_bundle: 'This site is a compiled bundle, which the assistant cannot edit.',
   source_project: 'This repository holds source code rather than a built site, which the assistant cannot edit.', unsupported: 'This site type is not supported.'
 };
@@ -109,19 +113,41 @@ async function reviewedTree(site, ticket, deps) {
 const modelText = out => typeof out?.response === 'string' ? out.response : out?.response && typeof out.response === 'object' ? JSON.stringify(out.response) : out?.choices?.[0]?.message?.content ?? '';
 const outermostObject = raw => { const a = raw.indexOf('{'), b = raw.lastIndexOf('}'); return a >= 0 && b > a ? raw.slice(a, b + 1) : raw; };
 
-function home(env, csrf) {
+async function home(env, site, url, { csrf, fetchFn, now }) {
+  const live = await liveSite(site, { fetchFn, now });
+  const pages = editablePages(live.inspection);
+  const rawPage = url.searchParams.get('page');
+  const activePage = typeof rawPage === 'string' && pages.includes(rawPage) ? rawPage : defaultEditorPage(pages);
+  const targets = listEditTargets(live.files, live.inspection);
+  const picked = pickEditTarget(targets, url.searchParams.get('pick'));
+  const iframeSrc = livePreviewUrl('/live/', activePage, '');
   const ai = env.AI_EDITS === 'on' && env.AI;
-  return page('Change your website',
-    '<p>Every change is previewed first. <strong>Nothing goes live until you approve it</strong>. Approving publishes exactly that change, or you can open a pull request instead and merge it yourself.</p>' +
-    '<form method="post" action="/preview"><input type="hidden" name="csrf" value="' + escape(csrf) + '"><input type="hidden" name="mode" value="typed">' +
-    '<p><label>What kind of change<br><select name="kind"><option value="text">Text</option><option value="link">Link</option><option value="business_info">Email or phone</option><option value="css_color">Color</option></select></label></p>' +
-    '<p><label>Current text, exactly as it appears<br><input name="old" maxlength="500" required size="50"></label></p>' +
-    '<p><label>Replace it with<br><input name="replacement" maxlength="500" required size="50"></label></p>' +
-    '<details><summary>Same text on more than one page?</summary><p><label>Page file<br><input name="path" maxlength="240" placeholder="contact.html"></label></p></details>' +
-    '<p><button>Preview the change</button></p></form>' +
-    (ai ? '<h2>Or describe it</h2><form method="post" action="/preview"><input type="hidden" name="csrf" value="' + escape(csrf) + '"><input type="hidden" name="mode" value="ai">' +
+  const aiBlock = ai
+    ? '<h2>Or describe it</h2><form method="post" action="/preview"><input type="hidden" name="csrf" value="' + escape(csrf) + '"><input type="hidden" name="mode" value="ai">' +
       '<p><label>What should change?<br><textarea name="request" maxlength="1000" rows="3" cols="50" required></textarea></label></p>' +
-      '<p><small>Uses your own Cloudflare Workers AI allowance. You still see the exact change before anything happens.</small></p><p><button>Prepare a preview</button></p></form>' : ''));
+      '<p><small>Uses your own Cloudflare Workers AI allowance. You still see the exact change before anything happens.</small></p><p><button>Prepare a preview</button></p></form>'
+    : '';
+  const body = '<style>' + VISUAL_EDITOR_CSS + '</style>' +
+    '<p>Every change is previewed first. <strong>Nothing goes live until you approve it</strong>.</p>' +
+    visualEditorMarkup({
+      jobId: 'site', page: activePage, pages, iframeSrc, targets, picked, csrf,
+      previewAction: '/preview', editorPath: '/', aiBlock
+    });
+  return page('Change your website', body);
+}
+
+async function liveFile(site, url, { fetchFn, now }) {
+  const relative = url.pathname.startsWith('/live/') ? url.pathname.slice('/live/'.length) : '';
+  if (!relative || !structuralPath(relative)) return page('Preview', '<p>That page is not available.</p>', 404);
+  const { files } = await liveSite(site, { fetchFn, now });
+  const out = previewResponse({ credentialsIncluded: false, files }, '/' + relative);
+  return new Response(out.body, {
+    status: out.status,
+    headers: {
+      ...out.headers,
+      'content-security-policy': "sandbox allow-same-origin; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'self'"
+    }
+  });
 }
 
 async function preview(env, site, form, { sub, fetchFn, now }) {
@@ -231,10 +257,12 @@ async function prStatus(env, site, url, { sub, fetchFn, now }) {
 /** Routes after the Worker has verified Access, the owner and (for POST) origin + CSRF. Returns null for unknown routes. */
 export async function editRoute(request, url, form, env, ctx) {
   const routes = { 'GET /': 1, 'POST /preview': 1, 'GET /review': 1, 'GET /file': 1, 'POST /approve': 1, 'GET /pr': 1 };
-  if (!routes[request.method + ' ' + url.pathname]) return null;
+  const live = url.pathname.startsWith('/live/') && request.method === 'GET';
+  if (!routes[request.method + ' ' + url.pathname] && !live) return null;
   const site = siteConfig(env);
   if (!site) return page('Assistant not set up', '<p>Finish the GitHub setup (App ID, installation, website repository) first. See <code>/status</code>.</p>', 503);
-  if (url.pathname === '/') return home(env, ctx.csrf);
+  if (url.pathname === '/') return await home(env, site, url, ctx);
+  if (live) return await liveFile(site, url, ctx);
   try {
     if (url.pathname === '/preview') return await preview(env, site, form, ctx);
     if (url.pathname === '/review') return await review(env, site, url, ctx);

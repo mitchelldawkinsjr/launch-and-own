@@ -167,10 +167,10 @@ test('a live imported site can preview and approve one pull request without merg
     const editorHtml = await editor.text();
     assert.match(editorHtml, /When you approve, we publish exactly that change/);
     assert.match(editorHtml, /open a pull request instead/);
-    assert.doesNotMatch(editorHtml, /name="path"[^>]*required/);
-    assert.match(editorHtml, /index\.html<\/code> \(visible text, link address, business email or phone\)/);
-    assert.doesNotMatch(editorHtml, /styles\.css/);
+    assert.match(editorHtml, /ve-targets/);
+    assert.match(editorHtml, /Willow Studio/);
     assert.match(editorHtml, /Preview this edit/);
+    assert.match(editorHtml, /imported-edit-live\/index\.html/);
     const pkg = text('{"name":"site"}\n');
     const pkgSha = await gitBlobSha(pkg);
     files.blobs.set(pkgSha, pkg);

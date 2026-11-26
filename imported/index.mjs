@@ -1,5 +1,6 @@
 export { ImportedEditError } from './errors.mjs';
 export { inspectSite } from './intelligence.mjs';
+export { editablePages, listEditTargets, pickEditTarget } from './targets.mjs';
 export { readCurrentRevision } from './revision.mjs';
 export { buildModelRequest, retrieveSnippets } from './snippets.mjs';
 export { parseModelOutput, unrelatedFilesIdentical, validateEdits } from './edits.mjs';

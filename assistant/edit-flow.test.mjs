@@ -117,11 +117,13 @@ const writes = gh => gh.history.filter(h => h.method !== 'GET');
 test('happy path: typed edit -> preview -> review -> exact file -> Approve and publish -> one PR merged at the approved head, never /user', async () => {
   const w = await world();
   const home = await (await w.call('/')).text();
-  assert.match(home, /Preview the change/);
+  assert.match(home, /Preview this edit/);
   assert.doesNotMatch(home, /Or describe it/, 'AI path off by default');
+  const repoWrites = () => writes(w.gh).filter(h => !h.path.endsWith('/access_tokens'));
+  const beforePreview = repoWrites().length;
   const review = w.loc(await w.call('/preview', { method: 'POST', form: { mode: 'typed', kind: 'text', old: 'Saturday: 9 AM-2 PM', replacement: 'Saturday: 10 AM-4 PM' } }));
   assert.match(review, /^\/review\?ticket=/);
-  assert.equal(writes(w.gh).length, 1, 'only the token mint so far (no GitHub writes before approval)');
+  assert.equal(repoWrites().length, beforePreview, 'no GitHub writes before approval');
   const page = await (await w.call(review)).text();
   assert.match(page, /Saturday: 10 AM-4 PM/);
   assert.match(page, /Approve and publish/);
@@ -207,7 +209,9 @@ const hoursEdit = user => { const f = user.capabilities.files.find(x => x.path =
 test('AI path (opt-in): budget reserved before the call, proposal validated, then the same review flow', async () => {
   const w = await world({ ai: aiProposal(hoursEdit) });
   assert.match(await (await w.call('/')).text(), /Or describe it/);
-  const review = w.loc(await w.call('/preview', { method: 'POST', form: { mode: 'ai', request: 'Open Saturdays 10 to 4' } }));
+  const aiPreview = await w.call('/preview', { method: 'POST', form: { mode: 'ai', request: 'Open Saturdays 10 to 4' } });
+  if (aiPreview.status !== 303) throw new Error(await aiPreview.text());
+  const review = aiPreview.headers.get('location');
   assert.match(await (await w.call(review)).text(), /Saturday: 10 AM-4 PM/);
   assert.equal(w.aiCalls.length, 1);
   const { AI_REQUEST_NEURONS, DEFAULT_AI_MODEL } = await import('./edit-flow.mjs');

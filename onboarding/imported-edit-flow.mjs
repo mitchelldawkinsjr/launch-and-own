@@ -7,8 +7,11 @@ import {readFormService} from './form-service.mjs';
 import {bindApproval,newApprovalId} from '../imported/approval.mjs';
 import {d1ApprovalStore} from '../imported/approval-store.mjs';
 import {ImportedEditError} from '../imported/errors.mjs';
-import {inspectSite} from '../imported/intelligence.mjs';
+import {inspectSite,structuralPath} from '../imported/intelligence.mjs';
+import {locateTypedEdit} from '../imported/locate.mjs';
 import {parseModelOutput,validateEdits} from '../imported/edits.mjs';
+import {defaultEditorPage,editablePages,listEditTargets,pickEditTarget} from '../imported/targets.mjs';
+import {livePreviewUrl,VISUAL_EDITOR_CSS,visualEditorMarkup} from './visual-editor.mjs';
 import {artifactDigest,isolatePreview,previewResponse} from '../imported/preview.mjs';
 import {proposeImportedPullRequest,readImportedPullRequest} from '../imported/pull-request.mjs';
 import {readCurrentRevision} from '../imported/revision.mjs';
@@ -38,6 +41,7 @@ const SAFE={
   'page_body_missing':'That page has no body element, so the form could not be connected.',
   'site_policy_unreadable':'The page\'s security settings could not be updated safely. No pull request was opened.',
   'not_found_anywhere':'We could not find that text on any page you can edit. Copy it exactly as it appears on your site.',
+  'ambiguous_pages':'That text is on more than one page. Choose the page in the editor or enter the page file under Advanced.',
   'context_not_allowed':'That replacement is not an allowed text, link, business-info, or custom-property color edit.',
   'overlapping_edits':'Those edits overlap. Preview one unique phrase at a time.',
   'kind_not_allowed':'That change is not available for this file. JavaScript, dependencies, and hosting configuration stay unchanged.',
@@ -218,39 +222,63 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     });
     return inspectSite(revision.files.map(file=>({path:file.path,bytes:file.bytes})));
   }
-  async function editor(env,current,id){
+  const editorCsp="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-src 'self'; frame-ancestors 'none'";
+  const editorHeaders={
+    'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-frame-options':'DENY',
+    'x-content-type-options':'nosniff','referrer-policy':'same-origin','content-security-policy':editorCsp
+  };
+  async function editor(env,current,id,url){
     const item=await ownedZip(env,current,id);
     if(!item)return fail('Open a live imported website you own from your launches.',404);
-    let inspection;
-    try{inspection=await currentInspection(env,current,item);}
-    catch(error){return safeFailure(error);}
+    let inspection,revision,files;
+    try{
+      const fetchFn=fencedFetch(env,current);
+      revision=await readCurrentRevision({
+        owner:item.job.github_login,repo:'esp-'+item.job.site_slug,
+        token:item.grants.githubAccessToken,fetchFn
+      });
+      files=revision.files.map(file=>({path:file.path,bytes:file.bytes}));
+      inspection=await inspectSite(files);
+    }catch(error){return safeFailure(error);}
     const notes=reasonLines(inspection).map(line=>'<p>'+escape(line)+'</p>').join('');
     const heading='<p><strong>Repository:</strong> '+escape('esp-'+item.job.site_slug)+'</p>';
     if(inspection.classification!=='static'&&inspection.classification!=='static_multipage'){
       return view('Edit imported website',heading+notes+'<p><a href="/history">Back to your launches</a></p>');
     }
-    const paths=inspection.files.filter(file=>file.editable.length).map(file=>{
-      const path=file.path.startsWith('public/')?file.path.slice('public/'.length):file.path;
-      const labels=file.editable.map(kind=>KIND_LABEL[kind]||kind).join(', ');
-      return '<li><code>'+escape(path)+'</code> ('+escape(labels)+')</li>';
-    }).join('');
-    const fields=[
-      '<input type="hidden" name="id" value="'+escape(id)+'">',
-      '<label for="kind">Change</label><select id="kind" name="kind">'+
-        '<option value="text">Unique visible text</option>'+
-        '<option value="link">Unique link address</option>'+
-        '<option value="business_info">Unique business email or phone</option>'+
-        '<option value="css_color">Existing CSS custom property color</option></select>',
-      '<label for="old">Current text on your site</label><input id="old" name="old" maxlength="500" required>',
-      '<label for="replacement">Replacement</label><input id="replacement" name="replacement" maxlength="500" required>',
-      '<details><summary>Same text on more than one page?</summary>'+
-        '<label for="path">Page file (optional)</label><input id="path" name="path" maxlength="240" placeholder="contact.html"></details>'
-    ].join('');
-    return view('Edit imported website','<p>Type the text as it appears on your site and what it should say instead. We find the page it is on and show you a preview. When you approve, we publish exactly that change. You can choose to open a pull request instead and merge it yourself.</p>'+
-      heading+notes+
-      (paths?'<p>Files you can edit:</p><ul>'+paths+'</ul>':'')+
-      button('/imported-edit-preview','Preview this edit',current.csrf,fields)+
-      '<p><a href="/history">Back to your launches</a></p>');
+    const pages=editablePages(inspection);
+    const rawPage=url?.searchParams?.get('page');
+    const page=typeof rawPage==='string'&&pages.includes(rawPage)?rawPage:defaultEditorPage(pages);
+    const targets=listEditTargets(files,inspection);
+    const picked=pickEditTarget(targets,url?.searchParams?.get('pick'));
+    const iframeSrc=livePreviewUrl('/imported-edit-live/',page,'id='+encodeURIComponent(id));
+    const body=heading+notes+visualEditorMarkup({
+      jobId:id,page,pages,iframeSrc,targets,picked,csrf:current.csrf,
+      previewAction:'/imported-edit-preview',editorPath:'/imported-edit',
+      notes:'<p>When you approve, we publish exactly that change. You can choose to open a pull request instead and merge it yourself.</p>'
+    })+'<p><a href="/history">Back to your launches</a></p>';
+    return view('Edit imported website',body,200,editorHeaders,{wide:true,css:VISUAL_EDITOR_CSS,omitTitle:false});
+  }
+  async function live(env,current,url){
+    const relative=url.pathname.startsWith('/imported-edit-live/')?decodeURIComponent(url.pathname.slice('/imported-edit-live/'.length)):null;
+    if(!relative||!structuralPath(relative))return fail('This preview page is not available.',404);
+    const item=await ownedZip(env,current,url.searchParams.get('id'));
+    if(!item)return fail('This preview is not available.',404);
+    try{
+      const fetchFn=fencedFetch(env,current);
+      const revision=await readCurrentRevision({
+        owner:item.job.github_login,repo:'esp-'+item.job.site_slug,
+        token:item.grants.githubAccessToken,fetchFn
+      });
+      const response=previewResponse({credentialsIncluded:false,files:revision.files},'/'+relative);
+      const headers={
+        ...response.headers,
+        'content-security-policy':"sandbox allow-same-origin; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'self'"
+      };
+      return new Response(response.body,{status:response.status,headers});
+    }catch(error){
+      if(error instanceof ImportedEditError)return safeFailure(error);
+      return fail('This preview is not available.',404);
+    }
   }
   async function prepare(request,env,current){
     await limitAttempts(request,env);
@@ -277,35 +305,17 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     }
       const requestId=crypto.randomUUID();
       const summary='Owner preview';
-      const attempt=async relative=>{
-        const source=files.find(file=>file.path===relative);
-        if(!source)throw new ImportedEditError('kind_not_allowed');
-        const contractEdits=[{
-          kind,path:'public/'+relative,expectedBlobSha:await gitBlobSha(source.bytes),find:oldValue,replace:replacement
-        }];
-        const proposal=parseModelOutput(JSON.stringify({
-          v:1,requestId,repositoryId:revision.repositoryId,baseCommitSha:revision.commitSha,summary,edits:contractEdits
-        }));
-        const validated=await validateEdits({
-          baseCommitSha:revision.commitSha,files,inspection,proposal,repositoryId:revision.repositoryId
-        });
-        return {contractEdits,validated};
-      };
       let located;
-      if(path){
-        located=await attempt(path.startsWith('public/')?path.slice('public/'.length):path);
-      }else{
-        // No page given: try every file that allows this kind of edit, and use the one place the text appears.
-        const candidates=inspection.files.filter(file=>file.editable.includes(kind))
-          .map(file=>file.path.startsWith('public/')?file.path.slice('public/'.length):file.path);
-        const matches=[];let lastError;
-        for(const relative of candidates){
-          try{matches.push({relative,...await attempt(relative)});}catch(error){lastError=error;}
+      try{
+        located=await locateTypedEdit({
+          files,inspection,revision,kind,find:oldValue,replace:replacement,path,requestId,summary
+        });
+      }catch(error){
+        if(error instanceof ImportedEditError&&error.code==='ambiguous_pages'){
+          return fail('That text is on more than one page: '+error.paths.join(', ')+
+            '. Choose the page in the editor or enter the page file under Advanced.',400);
         }
-        if(matches.length>1)return fail('That text is on more than one page: '+matches.map(m=>m.relative).join(', ')+
-          '. Open "Same text on more than one page?" and enter the page file to change.',400);
-        if(!matches.length)throw lastError instanceof ImportedEditError&&lastError.code!=='no_match'?lastError:new ImportedEditError('not_found_anywhere');
-        located=matches[0];
+        throw error;
       }
       const {contractEdits,validated}=located;
       if(validated.changed.length!==1)throw new ImportedEditError('context_not_allowed');
@@ -611,5 +621,5 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       return safeFailure(error);
     }
   }
-  return {editor,prepare,review,file,approve,status,connectForm,connectFormApprove};
+  return {editor,prepare,review,file,approve,status,connectForm,connectFormApprove,live};
 }

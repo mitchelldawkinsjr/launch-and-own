@@ -999,7 +999,8 @@ export default {
         if(url.pathname==='/site-update-review')return await siteUpdates.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-html')return await siteUpdates.html(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-status')return await siteUpdates.status(env,current,url.searchParams.get('ticket'));
-        if(url.pathname==='/imported-edit')return await importedEdits.editor(env,current,url.searchParams.get('id'));
+        if(url.pathname.startsWith('/imported-edit-live/'))return await importedEdits.live(env,current,url);
+        if(url.pathname==='/imported-edit')return await importedEdits.editor(env,current,url.searchParams.get('id'),url);
         if(url.pathname==='/imported-edit-review')return await importedEdits.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/imported-edit-file')return await importedEdits.file(env,current,url);
         if(url.pathname==='/imported-edit-status')return await importedEdits.status(env,current,url.searchParams.get('ticket'));
