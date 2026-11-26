@@ -11,3 +11,5 @@ site-preview/
 
 # Playwright visual walkthrough output (screenshots + gallery).
 visual-walkthrough/
+playwright-report/
+test-results/

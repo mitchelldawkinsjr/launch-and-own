@@ -103,18 +103,24 @@ export async function handleCustomerFormSubmission({
   } catch { deny('invalid_form_body'); }
   if (!form || typeof form.get !== 'function') deny('invalid_form_body');
 
-  const name = String(form.get('name') || '').trim();
-  const email = String(form.get('email') || '').trim();
-  const message = String(form.get('message') || '').trim();
+  // Same field rules as the deployable Worker: the site's own safe field names, bounded.
+  const fields = {};
+  let count = 0;
+  const entries = typeof form.entries === 'function' ? [...form.entries()] : [];
+  for (const [key, value] of entries) {
+    if (key === 'cf-turnstile-response' || key === 'turnstileToken') continue;
+    if (typeof value !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(key) || Object.hasOwn(fields, key)) deny('field_invalid');
+    if (++count > 20) deny('too_many_fields');
+    if (value.trim().length > 4000) deny('field_too_long');
+    fields[key] = value.trim();
+  }
+  if (!Object.values(fields).some(Boolean)) deny('form_empty');
+  const emailKey = Object.keys(fields).find(key => /e-?mail/i.test(key) && fields[key]);
+  const email = emailKey ? fields[emailKey] : null;
+  if (email !== null && (!EMAIL.test(email) || email.length > 254)) deny('email_invalid');
   const token = String(form.get('cf-turnstile-response') || form.get('turnstileToken') || '');
-  if (!name || name.length > 120) deny('name_invalid');
-  if (!EMAIL.test(email) || email.length > 90) deny('email_invalid');
-  if (!message || message.length > 4000) deny('message_invalid');
-
-  const bodyBytes = Buffer.byteLength(
-    JSON.stringify({name, email, message}),
-    'utf8'
-  );
+  const fieldsJson = JSON.stringify(fields);
+  const bodyBytes = Buffer.byteLength(fieldsJson, 'utf8');
   const today = db.prepare(
     'SELECT COUNT(*) AS n FROM contact_submissions WHERE hostname = ? AND created_at >= ?'
   ).get(config.hostname.toLowerCase(), dayStart(nowSec));
@@ -142,11 +148,11 @@ export async function handleCustomerFormSubmission({
   const id = randomUUID();
   db.prepare(
     'INSERT INTO contact_submissions ' +
-    '(id, hostname, gate_approval_id, name, email, message, body_bytes, turnstile_hostname, created_at) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    '(id, hostname, gate_approval_id, fields_json, reply_email, body_bytes, turnstile_hostname, created_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
     id, config.hostname.toLowerCase(), config.gateApprovalId,
-    name, email, message, bodyBytes, verified.hostname, nowSec
+    fieldsJson, email, bodyBytes, verified.hostname, nowSec
   );
 
   return Object.freeze({
@@ -215,7 +221,7 @@ export async function verifyCustomerFormAcceptance({
   try {
     const result = await handleCustomerFormSubmission({
       request: {
-        formData: async () => ({get: key => form.get(key)}),
+        formData: async () => ({get: key => form.get(key), entries: () => form.entries()}),
         headers: {get: () => null}
       },
       db,

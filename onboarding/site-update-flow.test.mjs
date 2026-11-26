@@ -383,3 +383,30 @@ test('non-editable generated site variants never show an update link',async()=>{
   }finally{globalThis.fetch=originalFetch}
  }
 });
+
+test('once the form service is set up, a created site\'s update preview adds the built-in contact form',async()=>{
+  const h=harness();globalThis.fetch=h.fetchFn;
+  try{
+    const tenant=await liveSite(h);
+    const workerUrl='https://esp-willow-studio-site-form.acct.workers.dev';
+    const job=h.sqlite.prepare('SELECT * FROM onboarding_launch_jobs WHERE id=?').get(tenant.id);
+    const time=Math.floor(Date.now()/1000);
+    h.sqlite.prepare(`INSERT INTO onboarding_option_approvals(id,job_id,github_user_id,cloudflare_account_id,kind,
+      approval_digest,payload_json,status,created_at,updated_at) VALUES ('forms-1',?,?,?,'forms',?,'{}','stored',?,?)`)
+      .run(tenant.id,job.github_user_id,job.cloudflare_account_id,'b'.repeat(64),time,time);
+    h.sqlite.prepare(`INSERT INTO onboarding_forms_provisioning(forms_option_approval_id,job_id,github_user_id,
+      cloudflare_account_id,gate_approval_id,widget_sitekey,database_id,schema_applied,worker_deployed,
+      worker_subdomain_enabled,worker_schedule_set,worker_url,created_at,updated_at)
+      VALUES ('forms-1',?,?,?,'gate_0001','0x4AAAAAAAtestkey','11111111-2222-3333-4444-555555555555',1,1,1,1,?,?,?)`)
+      .run(tenant.id,job.github_user_id,job.cloudflare_account_id,workerUrl,time,time);
+    const connect=await h.request('/form-connect?id='+tenant.id,{cookie:tenant.cookie});
+    assert.equal(connect.status,303);
+    assert.equal(connect.headers.get('location'),'/site-update?id='+tenant.id);
+    const editor=await (await h.request('/site-update?id='+tenant.id,{cookie:tenant.cookie})).text();
+    assert.match(editor,/adds a contact form to the Contact section/);
+    const ticket=await reviewedEdit(h,tenant);
+    const preview=await (await h.request('/site-update-html?ticket='+encodeURIComponent(ticket),{cookie:tenant.cookie})).text();
+    assert.match(preview,/<form class="lo-form" action="https:\/\/esp-willow-studio-site-form\.acct\.workers\.dev\/submit"/);
+    assert.match(preview,/data-sitekey="0x4AAAAAAAtestkey"/);
+  }finally{globalThis.fetch=originalFetch;h.sqlite.close()}
+});

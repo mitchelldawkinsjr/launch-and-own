@@ -46,8 +46,8 @@ export function importReportMarkup(inventory){
     row(publishes,publishes?'Ready for a private preview':'Cannot be published yet',publishes?'Next you see a private preview. Nothing goes live until you review and approve it.':'Nothing will be published. Fix the issues above and upload again.')+
     '</ul>'+
     (reasons.length?'<details><summary>What we found</summary><ul>'+reasons.map(r=>'<li>'+r+'</li>').join('')+'</ul></details>':'')+
-    '<div class="ir-future"><span class="badge badge-plan">Planned · not released</span><p>Launch &amp; Own editing for uploaded sites is not available yet. '+
-    (kinds.length?'When it is, simple updates to '+(kinds.length>1?kinds.slice(0,-1).join(', ')+' and '+kinds.at(-1):kinds[0])+' in '+editable.length+' '+(editable.length===1?'file':'files')+' could be prepared for your review.':'No files in this upload would be suitable for simple guided updates.')+
-    ' Today you can edit your site with your own AI coding tool.</p></div>'+
+    (!publishes?'':'<div class="ir-future"><span class="badge">Beta · after launch</span><p>'+
+    (kinds.length?'After launch you can update '+(kinds.length>1?kinds.slice(0,-1).join(', ')+' and '+kinds.at(-1):kinds[0])+' in '+editable.length+' '+(editable.length===1?'file':'files')+' from your toolkit. You see a preview, and you merge the change yourself.':'No files in this upload are suitable for simple toolkit updates.')+
+    ' You can also edit your site with your own AI coding tool.</p></div>')+
     '<details><summary>Files in this upload ('+inventory.files.length+')</summary><ul class="ir-files">'+files+'</ul></details></section>';
 }

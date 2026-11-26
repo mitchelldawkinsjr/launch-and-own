@@ -5,7 +5,8 @@ import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {CUSTOMER_FORM_WORKER_SOURCE} from './customer-form-worker-source.mjs';
 import {
-  buildFormWorkerReview, CUSTOMER_FORM_SCHEMA_SQL, PLATFORM_D1_IDS, formsResourceNames, isApprovedFormsMutation
+  buildFormWorkerReview, CUSTOMER_FORM_SCHEMA_SQL, PLATFORM_D1_IDS, formsResourceNames, isApprovedFormsMutation,
+  formWorkerMetadata, FORM_WORKER_SCHEDULES
 } from './forms-provider-plan.mjs';
 import {createCloudflareExtensionProvider} from './cloudflare-extension-provider.mjs';
 
@@ -286,4 +287,69 @@ test('provider refuses staging with a missing grant, resource collision or unsup
   const noSchemaProof = providerHarness({schemaResult: [], receipt: receiptFor({widgetSitekey: 'site', databaseId: DBID})});
   await assert.rejects(noSchemaProof.provider.applyCustomerSchema(site, {hostname: HOST, databaseId: DBID}),
     /customer_d1_schema_unverified/);
+});
+
+test('form Worker keeps the site form\'s own fields and sends a browser form back to its page', async t => {
+  const worker = await loadWorker();
+  const DB = fakeD1();
+  const env = workerEnv(DB, {MAX_SUBMISSIONS_PER_DAY: '10'});
+  t.mock.method(globalThis, 'fetch', async () => Response.json({success: true, hostname: HOST}));
+  const post = (fields, headers = {}) => worker.fetch(new Request('https://' + PROJECT + '-form.acct.workers.dev/submit', {
+    method: 'POST', body: new URLSearchParams({'cf-turnstile-response': freshToken(), ...fields}),
+    headers: {origin: 'https://' + HOST, 'content-type': 'application/x-www-form-urlencoded',
+      accept: 'text/html,application/xhtml+xml', referer: 'https://' + HOST + '/contact?x=1', ...headers}}), env);
+  // The Green Willow booking form: no message field, a date and a select.
+  const sent = await post({name: 'Ada', email: 'ada@example.net', date: '2026-12-05', type: 'portrait'});
+  assert.equal(sent.status, 303);
+  assert.equal(sent.headers.get('location'), 'https://' + HOST + '/contact?form=sent#form-sent');
+  const row = DB.sqlite.prepare('SELECT fields_json, reply_email FROM contact_submissions').get();
+  assert.deepEqual(JSON.parse(row.fields_json), {name: 'Ada', email: 'ada@example.net', date: '2026-12-05', type: 'portrait'});
+  assert.equal(row.reply_email, 'ada@example.net');
+  // A phone-only form works without an email field.
+  assert.equal((await post({phone: '555-0142'})).headers.get('location'), 'https://' + HOST + '/contact?form=sent#form-sent');
+  assert.equal(DB.sqlite.prepare('SELECT count(*) n FROM contact_submissions WHERE reply_email IS NULL').get().n, 1);
+  // Errors go back to the page too; a foreign referer never becomes the redirect target.
+  const bad = await post({email: 'nope'}, {referer: 'https://evil.example/x'});
+  assert.equal(bad.headers.get('location'), 'https://' + HOST + '/?form=error&reason=email_invalid#form-error');
+  assert.equal((await post({'bad name': 'x'})).headers.get('location').includes('reason=field_invalid'), true);
+  assert.equal((await post({})).headers.get('location').includes('reason=form_empty'), true);
+  const many = Object.fromEntries(Array.from({length: 21}, (_, i) => ['f' + i, 'x']));
+  assert.equal((await post(many)).headers.get('location').includes('reason=too_many_fields'), true);
+  // fetch() callers still get JSON.
+  const api = await post({email: 'ada@example.net', message: 'Hi'}, {accept: 'application/json'});
+  assert.deepEqual(await api.json(), {ok: true});
+});
+
+test('Worker setup is allowed only in order, with the reviewed module and bindings, and never names the secret', () => {
+  const names = formsResourceNames(PROJECT);
+  const root = '/accounts/' + ACCOUNT;
+  const script = root + '/workers/scripts/' + names.script;
+  const allowed = (receipt, method, path, requestBody) =>
+    isApprovedFormsMutation({accountId: ACCOUNT, pagesProjectName: PROJECT, hostname: HOST, gate, receipt, method, path, requestBody});
+  const staged = receiptFor({widgetSitekey: 'site-key', databaseId: DBID, schemaApplied: true});
+  const rotate = root + '/challenges/widgets/site-key/rotate_secret';
+  const metadata = formWorkerMetadata({hostname: HOST, databaseId: DBID, gate});
+  const upload = {metadata, module: CUSTOMER_FORM_WORKER_SOURCE};
+  assert.equal(metadata.bindings.find(binding => binding.type === 'secret_text').text, undefined);
+  assert.equal(allowed(staged, 'POST', rotate, {invalidate_immediately: false}), true);
+  assert.equal(allowed(staged, 'PUT', script, upload), true);
+  const deployed = {...staged, workerDeployed: true};
+  assert.equal(allowed(deployed, 'POST', script + '/subdomain', {enabled: true, previews_enabled: false}), true);
+  const addressed = {...deployed, workerSubdomainEnabled: true};
+  assert.equal(allowed(addressed, 'PUT', script + '/schedules', FORM_WORKER_SCHEDULES), true);
+  // Out of order, repeated, changed code, changed bindings, another database or a leaked secret: refused.
+  assert.equal(allowed(receiptFor({widgetSitekey: 'site-key', databaseId: DBID}), 'PUT', script, upload), false);
+  assert.equal(allowed(deployed, 'PUT', script, upload), false);
+  assert.equal(allowed(deployed, 'POST', rotate, {invalidate_immediately: false}), false);
+  assert.equal(allowed(staged, 'POST', rotate, {invalidate_immediately: true}), false);
+  assert.equal(allowed(staged, 'PUT', script, {...upload, module: CUSTOMER_FORM_WORKER_SOURCE + '//x'}), false);
+  const swap = (name, change) => ({...upload, metadata: {...metadata, bindings: metadata.bindings.map(binding =>
+    binding.name === name ? {...binding, ...change} : binding)}});
+  assert.equal(allowed(staged, 'PUT', script, swap('DB', {database_id: PLATFORM_D1_IDS[0]})), false);
+  assert.equal(allowed(staged, 'PUT', script, swap('SITE_HOSTNAME', {text: 'evil.example'})), false);
+  assert.equal(allowed(staged, 'PUT', script, swap('MAX_SUBMISSIONS_PER_DAY', {text: '100000'})), false);
+  assert.equal(allowed(staged, 'PUT', script, swap('TURNSTILE_SECRET', {text: 'shown-to-approval'})), false);
+  assert.equal(allowed(staged, 'PUT', root + '/workers/scripts/another-worker', upload), false);
+  assert.equal(allowed(addressed, 'PUT', script + '/schedules', [{cron: '* * * * *'}]), false);
+  assert.equal(allowed({...addressed, workerScheduleSet: true}, 'PUT', script + '/schedules', FORM_WORKER_SCHEDULES), false);
 });

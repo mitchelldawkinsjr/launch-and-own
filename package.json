@@ -8,7 +8,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "test": "node --test pipeline/*.test.mjs onboarding/*.test.mjs site/*.test.mjs scripts/*.test.mjs skills/**/*.test.mjs clients/**/*.test.mjs integration/*.test.mjs",
+    "test": "node --test pipeline/*.test.mjs onboarding/*.test.mjs site/*.test.mjs scripts/*.test.mjs skills/**/*.test.mjs clients/**/*.test.mjs integration/*.test.mjs imported/*.test.mjs",
     "preflight:onboarding": "node onboarding/validate-config.mjs",
     "demo:export": "node scripts/export-preview.mjs --input examples/willow-studio.json --out ./site-preview",
     "demo:serve": "node scripts/serve-preview.mjs --dir ./site-preview --port 4173",
@@ -16,9 +16,13 @@
     "qa:rehearse": "node scripts/beta-rehearsal.mjs",
     "qa:rehearse:recovery": "node scripts/worker-recovery/rehearse.mjs",
     "qa:distribution": "node distribution/release-gates.mjs",
+    "qa:public-smoke": "node scripts/public-smoke.mjs",
+    "test:browser": "playwright test",
     "visual:walkthrough": "node scripts/visual-walkthrough.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.1",
+    "@playwright/test": "^1.65.1",
     "playwright": "^1.65.1"
   }
 }

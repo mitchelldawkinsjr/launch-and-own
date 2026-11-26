@@ -1,7 +1,6 @@
 /** Review screen for a proposed edit to an imported site: changes, exact preview, single-use approval, status.
  * Renders contract §2 (proposal), §3 (binding) and §4 (status/codes) from docs/contracts/IMPORTED_SITE_CONTRACTS.md.
- * Presentation only. Not wired to a route until WS3 exists and M1.5 is authorized (#165/#171).
- * The server must verify proposal/binding identity and the changed-file mapping; nothing here is approval authority. */
+ * The hosted review route renders this. The server still verifies the sealed ticket and the recomputed digests. */
 import {escape} from './ui.mjs';
 
 const KINDS={text:'Text',link:'Link',business_info:'Business details',css_color:'Color'};
@@ -26,13 +25,14 @@ const CODES={
   deploy_unverified:'Merged, but the live site does not match yet. Check again in a few minutes.'
 };
 const SHA=/^[a-f0-9]{40}$/i, DIGEST=/^[a-f0-9]{64}$/i, ID=/^[a-f0-9]{32}$/i, CSRF=/^[A-Za-z0-9_-]{16,256}$/;
+const TICKET=/^[A-Za-z0-9_-]{50,6000}$/;
 // Canonical same-origin path only: no scheme, no '//' (protocol-relative), no dots, no trailing slash.
 const ACTION=/^(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
 const own=(o,k)=>typeof k==='string'&&Object.hasOwn(o,k);
 
 /** status: §4 status; code: optional §4 failure code; approve: {action, csrf} renders the approval form when status is 'previewed';
  * previewOrigin: the isolated preview origin, the only origin the preview link may point to. now: ms clock, for tests. */
-export function editReviewMarkup({proposal,binding,status='previewed',code,approve,previewOrigin,now=Date.now()}={}){
+export function editReviewMarkup({proposal,binding,status='previewed',code,approve,previewOrigin,ticket,now=Date.now()}={}){
   if(!Array.isArray(proposal?.edits)||!proposal.edits.every(e=>own(KINDS,e?.kind)&&[e.path,e.find,e.replace].every(v=>typeof v==='string'))
      ||!binding||!SHA.test(binding.baseCommitSha||'')||!DIGEST.test(binding.proposalDigest||'')||!DIGEST.test(binding.artifactDigest||'')
      ||!(own(TERMINAL,status)||STEPS.some(([s])=>s===status))||(code!=null&&!own(CODES,code))
@@ -55,9 +55,11 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
     return '<li class="'+state+'"'+(state==='is-active'?' aria-current="step"':'')+'>'+label+'</li>';}).join('')+'</ol>';
   const problem=own(TERMINAL,status)||why!=null
     ?'<p role="alert"><strong>'+(own(TERMINAL,status)?TERMINAL[status]:'Needs attention')+'.</strong> '+(why!=null?CODES[why]:'Something went wrong. Nothing was published.')+'</p>':'';
+  if(ticket!=null&&!TICKET.test(ticket))throw new TypeError('Unknown edit review shape');
   const canApprove=live&&ACTION.test(approve?.action||'')&&CSRF.test(approve?.csrf||'')&&ID.test(binding.approvalId||'');
   const form=canApprove
     ?'<form action="'+escape(approve.action)+'" method="POST"><input type="hidden" name="csrf" value="'+escape(approve.csrf)+'">'+
+      (ticket?'<input type="hidden" name="ticket" value="'+escape(ticket)+'">':'')+
       '<input type="hidden" name="approvalId" value="'+escape(binding.approvalId)+'"><input type="hidden" name="proposalDigest" value="'+escape(binding.proposalDigest)+'">'+
       '<input type="hidden" name="artifactDigest" value="'+escape(binding.artifactDigest)+'"><button type="submit">Approve and open a pull request</button></form>'+
       '<p class="er-note">Approving creates a pull request in your GitHub account. <strong>Nothing goes live until you merge it.</strong> Launch &amp; Own never merges for you. This approval works once and expires in 15 minutes.</p>':'';

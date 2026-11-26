@@ -11,6 +11,7 @@ import {isLegacyRepositoryDescription,isManagedRepositoryDescription,managedRepo
 import {ProviderRequestError} from "./provider-errors.mjs";
 import {pagesRequestError} from "./cloudflare-pages-errors.mjs";
 import {pinImportedCommit} from "./provision-imported-site.mjs";
+import {analyticsBuildConfig,ensureWebAnalyticsSite} from "./web-analytics.mjs";
 
 function checkedName(name) {
   if(!/^[a-z0-9][a-z0-9-]*$/.test(name))throw Error("Unsafe generated resource name");
@@ -178,6 +179,7 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn,ap
     if(project.source?.type!=="github"||config?.owner?.toLowerCase()!==owner.toLowerCase()||config?.repo_name!==name||String(config?.repo_id)!==String(repository.id)||project.production_branch!==branch||
        (approved&&!matchesApprovedPagesProject(project,expectedProject)))
       throw Error("Existing Pages project is not connected to the expected GitHub repository and branch; refusing to adopt it");
+    // shortcut: a reused project keeps its analytics settings; turning analytics on later goes through the toolkit.
     journal.push({resource:"cloudflare-pages",name:pages,action:"reused"});
   }else{
     if(approved){
@@ -186,10 +188,23 @@ export async function applyWebsite(input,{githubToken,cloudflareToken,fetchFn,ap
       const head=await api.github(repoPath+"/branches/"+encodeURIComponent(branch));
       if(head?.commit?.sha!==headCommitSha)throw Error("GitHub branch moved before Pages creation");
     }
+    // Visitor insights are on unless the owner opted out before approving (input.analytics, bound in the approval).
+    // Created before the project so its first deployment already carries the beacon.
+    let beacon=null;
+    if(input.analytics===true){
+      try{
+        beacon=await ensureWebAnalyticsSite(api,plan.accountId,pages+".pages.dev");
+        journal.push({resource:"cloudflare-web-analytics",name:pages+".pages.dev",action:"enabled"});
+      }catch(error){
+        // A grant made before Account Settings Write was requested: launch the site without analytics.
+        if(!(error instanceof ProviderRequestError&&error.status===403&&!error.retryable))throw error;
+        journal.push({resource:"cloudflare-web-analytics",name:pages+".pages.dev",action:"skipped-permission"});
+      }
+    }
     project=await api.cloudflare(cloudPath,{method:"POST",body:{
       name:pages,production_branch:branch,
       source:{type:"github",config:{owner,repo_name:name,production_branch:branch,production_deployments_enabled:true,preview_deployment_setting:"none"}},
-      build_config:{build_command:"",destination_dir:"public",root_dir:"/"}
+      build_config:{build_command:"",destination_dir:"public",root_dir:"/",...analyticsBuildConfig(beacon)}
     }});
     if(approved&&!matchesApprovedPagesProject(project,expectedProject))
       throw Error("Pages did not confirm the approved project configuration");

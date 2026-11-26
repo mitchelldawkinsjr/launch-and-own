@@ -22,10 +22,15 @@ import {executeOwnedStoredOption,OptionExecutionDisabled} from './execute-option
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
-import {readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
+import {loadZipFiles,readZipManifest,retainZip,stageZip} from './zip-artifacts.mjs';
+import {inspectSite} from '../imported/intelligence.mjs';
+import {importReportMarkup} from './import-report.mjs';
 import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {showAgentLink,confirmAgentLink} from './agent-link.mjs';
 import {bridgeLaunchStatus,importBridgeDraft} from './bridge-draft-review.mjs';
+import {createImportedEditRoutes} from './imported-edit-flow.mjs';
+import {readFormService} from './form-service.mjs';
+import {FormMessagesUnavailable,messagesProblem,readFormMessages,renderFormMessages} from './form-messages.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 import {providerConnectionCards,providerHelpCss} from './provider-connection-help.mjs';
@@ -34,7 +39,7 @@ import {landingCss,landingMarkup,zipCompatibilityHtml} from './landing.mjs';
 import {connectPagesAccess,getPagesAccess,removePagesAccess,PagesAccessChanged} from './pages-access.mjs';
 import {isPagesAccessError,pagesAccessLink,pagesAccessPath,renderPagesAccess} from './pages-access-view.mjs';
 import {
-  loadCurrentManagedSitesPage,renderCurrentSitesSection,
+  loadCurrentManagedSitesPage,renderCurrentSitesSection,currentSiteDetails,
   inspectSealedManagedSource,renderCurrentSourcePage
 } from './toolkit-current-sites.mjs';
 
@@ -160,10 +165,18 @@ async function gitHubCallback(request,env,current){
   response.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
   return response;
 }
+// D1 and Workers scope IDs come from the Cloudflare OAuth client registration (Domain), only while forms are on.
+// A malformed ID is dropped rather than sent, so a typo cannot break sign-in for everyone.
+export function cloudflareScopes(env){
+  const scopes=String(env.CF_SCOPES).trim().split(/\s+/);
+  const forms=env.OPTION_FORMS_ENABLED==='true'?String(env.CF_FORMS_SCOPES||'').trim().split(/\s+/)
+    .filter(scope=>scope==='workers-scripts.admin'||/^[a-z0-9-]+\.(?:read|write)$/.test(scope)):[];
+  return [...new Set([...scopes,...forms])];
+}
 async function cloudflareStart(request,env,current){
   await limitAttempts(request,env);
   if(!current)return fail('Connect GitHub before connecting Cloudflare.',401);
-  const origin=baseUrl(env),scopes=String(env.CF_SCOPES).trim().split(/\s+/);
+  const origin=baseUrl(env),scopes=cloudflareScopes(env);
   const {authorizationUrl,session:flow}=beginCloudflareOAuth({clientId:env.CF_CLIENT_ID,redirectUri:origin+'/oauth/cloudflare/callback',scopes});
   await saveFlow(env,{provider:'cloudflare',binding:current.hash,...flow});
   return redirect(authorizationUrl);
@@ -264,11 +277,35 @@ async function toolkit(env,current,request){
   if(['authorization_changed','github_reauthorization_required',
     'provider_reauthorization_required'].includes(inventory.code)||!await hasCurrentOwnerSession(env,current,now()))
     return fail('Reconnect your accounts to view your website toolkit.',401);
+  // One card per site: details found in the accounts join the matching launch card.
+  const found=new Map((inventory.status==='unavailable'?[]:inventory.sites||[])
+    .filter(site=>site.repositoryName?.startsWith('esp-')).map(site=>[site.repositoryName.slice(4),site]));
+  const siteDetails=new Map(cards.filter(card=>found.has(card.slug)).map(card=>[card.slug,currentSiteDetails(found.get(card.slug),escape)]));
   return renderToolkitPage(cards,current,{view,escape},{
+    siteDetails,
     currentInventoryHtml:['cloudflare_reauthorization_required','cloudflare_permission_denied'].includes(inventory.code)
       ? '<p>Cloudflare Pages access is unavailable. '+pagesAccessLink+' to verify your sites.</p>'
-      : renderCurrentSitesSection(inventory,{escape})
+      : renderCurrentSitesSection(inventory,{escape},{hasCards:cards.length>0,matched:new Set([...siteDetails.keys()].map(slug=>'esp-'+slug))})
   });
+}
+// Read-only inbox: the owner's own customer D1, read with the owner's grant, never stored here.
+async function formMessages(env,current,id){
+  if(!current?.cloudflare_account_id||!isLaunchId(id))return fail('Open a live website you own from your toolkit.',404);
+  const job=await getOwnedJob(env,current,id,now());
+  if(!job||job.status!=='live'||job.github_user_id!==current.github_user_id||job.cloudflare_account_id!==current.cloudflare_account_id)
+    return fail('Open a live website you own from your toolkit.',404);
+  const grants=await assertHistoryAccess(env,current);
+  const service=await readFormService(env,current,job.id);
+  const back='<p><a href="/site-options?id='+encodeURIComponent(job.id)+'">Optional features</a> · <a href="/toolkit">Toolkit</a></p>';
+  if(!service)return view('Messages for '+job.customer_name,'<p>'+escape(messagesProblem('form_service_not_ready'))+'</p>'+back);
+  try{
+    const messages=await readFormMessages({accountId:current.cloudflare_account_id,databaseId:service.databaseId,
+      cloudflareToken:grants.cloudflareAccessToken});
+    return view('Messages for '+job.customer_name,renderFormMessages(messages,{escape,databaseName:'esp-'+job.site_slug+'-site-forms'})+back);
+  }catch(error){
+    if(!(error instanceof FormMessagesUnavailable))throw error;
+    return view('Messages for '+job.customer_name,'<p role="alert">'+escape(messagesProblem(error.code))+'</p>'+back,503);
+  }
 }
 async function toolkitSource(env,current,request){
   if(!current?.cloudflare_account_id)
@@ -383,7 +420,7 @@ async function preview(request,env,current){
     (id,session_hash,customer_name,cloudflare_account_id,github_login,plan_json,status,created_at,updated_at,preview_html)
     VALUES(?,?,?,?,?,?,'preview',?,?,?)`)
     .bind(id,current.hash,site.name,current.cloudflare_account_id,current.github_login,
-      JSON.stringify({...plan,site}),ts,ts,renderSite(site)).run();
+      JSON.stringify({...plan,site,analytics:true}),ts,ts,renderSite(site)).run();
   return redirect('/review?id='+encodeURIComponent(id));
 }
 async function uploadZip(request,env,current){
@@ -416,7 +453,7 @@ async function uploadZip(request,env,current){
     SELECT ?,id_hash,?,cloudflare_account_id,github_login,?,'preview',?,? FROM onboarding_sessions
     WHERE id_hash=? AND authorization_epoch=? AND cloudflare_account_id=? AND cloudflare_token_ct IS NOT NULL
       AND expires_at>? RETURNING id`)
-    .bind(id,name,JSON.stringify({...plan,zip}),time,time,current.hash,current.authorization_epoch,current.cloudflare_account_id,time).first();
+    .bind(id,name,JSON.stringify({...plan,zip,analytics:true}),time,time,current.hash,current.authorization_epoch,current.cloudflare_account_id,time).first();
   if(!staged)return fail('Your connection changed. Review your account selection and upload again.',409);
   return redirect(reviewPath(id));
 }
@@ -443,6 +480,22 @@ async function assertHistoryAccess(env,current){
 
 const launchIdField=id=>'<input type="hidden" name="id" value="'+escape(id)+'">';
 const reviewPath=id=>'/review?id='+encodeURIComponent(id);
+// Visitor insights are on by default. The owner can switch them off (or back on) before approving;
+// the choice is part of plan_json, which the approval digest covers. Reapprovals keep the job's plan.
+async function setReviewAnalytics(request,env,current){
+  await limitAttempts(request,env);
+  const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
+  const id=form.get('id'),value=form.get('analytics');
+  if(!isLaunchId(id)||!['true','false'].includes(value))return fail('Choose whether to turn visitor insights on.');
+  const item=await getLaunch(env,current,id);
+  if(!item||item.status!=='preview'||item.job_id||item.legacy_receipt_id)return fail('This launch can no longer be changed.',409);
+  const plan=JSON.parse(item.plan_json);
+  const changed=await env.DB.prepare(`UPDATE onboarding_launches SET plan_json=?,updated_at=?
+    WHERE id=? AND session_hash=? AND status='preview' AND job_id IS NULL AND legacy_receipt_id IS NULL AND plan_json=?`)
+    .bind(JSON.stringify({...plan,analytics:value==='true'}),now(),id,current.hash,item.plan_json).run();
+  if(!changed.meta?.changes)return fail('This launch can no longer be changed.',409);
+  return redirect(reviewPath(id));
+}
 const receiptOwner=(current,time)=>({
   githubUserId:current.github_user_id,cloudflareAccountId:current.cloudflare_account_id,time
 });
@@ -463,9 +516,11 @@ async function launchHistory(env,current){
     const deletion=item.can_delete?button('/delete-launch-history','Remove from this list',current.csrf,launchIdField(item.id)):'';
     const update=item.can_edit?
       '<p><a href="/site-update?id='+encodeURIComponent(item.id)+'">Update this website</a></p>':'';
+    const imported=Number(item.uploaded_zip)===1&&item.display_status==='live'?
+      '<p><a href="/imported-edit?id='+encodeURIComponent(item.id)+'">Edit imported website</a></p>':'';
     const diagnostic=item.error_code?`<p>Last result code: <code>${escape(item.error_code)}</code> (share this if you need help)</p>`:'';
     const pagesHelp=isPagesAccessError(item.error_code)?'<p>'+pagesAccessLink+' to continue this launch.</p>':'';
-    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${pagesHelp}${live}${update}${action}${deletion}</section>`;
+    return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${pagesHelp}${live}${update}${imported}${action}${deletion}</section>`;
   }).join('');
   return view('Your launches','<p>This list keeps launches for 30 days after you first approve them. Your live website and its private files stay in your accounts even if a row drops off this list. If a launch paused, reconnect and continue it from here.</p>'+
     (cards||'<p>No launches yet for this GitHub and Cloudflare pair.</p>')+
@@ -589,10 +644,12 @@ async function review(env,current,id){
     failed:'Needs attention',
     needs_reauthorization:'Reconnect required'
   };
+  const analyticsOn=JSON.parse(item.plan_json).analytics===true;
   const details=`<p><strong>Website name:</strong> ${escape(item.customer_name)}</p>`+
     `<p><strong>GitHub account:</strong> ${escape(item.github_login)}</p>`+
     `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
     `<p><strong>Public website address:</strong> ${escape(website)}</p>`+
+    `<p><strong>Visitor insights:</strong> ${analyticsOn?'On. Cloudflare Web Analytics counts visits and page speed in your own Cloudflare account. It uses no cookies and collects no personal data from visitors.':'Off.'}</p>`+
     (verifyExisting
       ? '<p>With your approval, Launch &amp; Own will check the existing Pages project and verify that it published the exact version you reviewed.</p>'
       : '<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>')+
@@ -604,14 +661,24 @@ async function review(env,current,id){
   let fileList='';
   if(status==='preview'){
     if(zip){
-      const manifest=await readZipManifest(env.ZIP_ARTIFACTS,zip,item.job_id?'approved':'draft');
-      fileList=`<details><summary>Files included in this launch</summary><ul>${manifest.map(file=>`<li><code>${escape(file.path)}</code></li>`).join('')}</ul></details>`;
+      const stage=item.job_id?'approved':'draft';
+      const manifest=await readZipManifest(env.ZIP_ARTIFACTS,zip,stage);
+      let report='';
+      try{
+        report=importReportMarkup(await inspectSite(await loadZipFiles(env.ZIP_ARTIFACTS,zip,stage)));
+      }catch(error){
+        if(!(error instanceof TypeError))throw error;
+        report='<p>The compatibility check could not be shown for this upload.</p>';
+      }
+      fileList=report+`<details><summary>Files included in this launch</summary><ul>${manifest.map(file=>`<li><code>${escape(file.path)}</code></li>`).join('')}</ul></details>`;
     }
     if(verifyExisting&&!item.expected_commit_sha){
       output='<p>This launch needs its private GitHub files first. '+pagesAccessLink+' with Pages Edit to create them and launch.</p>';
     }else{
       const accessField=pagesAccess?'<input type="hidden" name="pagesAccessId" value="'+escape(pagesAccess.access_id)+'">':'';
-      controls=button('/approve',verifyExisting?'Approve and verify existing project':'Approve and create website',current.csrf,
+      const analyticsToggle=item.job_id||item.legacy_receipt_id?'':button('/review-analytics',analyticsOn?'Turn off visitor insights':'Turn on visitor insights',current.csrf,
+        launchIdField(id)+'<input type="hidden" name="analytics" value="'+(analyticsOn?'false':'true')+'">');
+      controls=analyticsToggle+button('/approve',verifyExisting?'Approve and verify existing project':'Approve and create website',current.csrf,
         launchIdField(id)+accessField+'<input type="hidden" name="digest" value="'+escape(digest)+'">');
     }
   }else{
@@ -720,6 +787,7 @@ async function logout(request,env,current){
   return result;
 }
 const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
+const importedEdits=createImportedEditRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 async function applyApprovedOption(request,env,current){
   await limitAttempts(request,env);
@@ -736,7 +804,9 @@ async function applyApprovedOption(request,env,current){
     throw error;
   }
   if(result.kind==='forms')return view('Contact form setup',
-    '<p>Your Turnstile widget and dedicated database are ready for Worker review. Publishing the form and testing a submission need separate approval.</p>'+
+    '<p>Your form service is set up in your own Cloudflare account: spam protection, a private database for messages, and a small Worker that receives them.</p>'+
+    '<p>Next, connect your site\'s contact form. You review the exact change and merge it yourself.</p>'+
+    (isLaunchId(result.jobId)?'<p><a href="/form-connect?id='+encodeURIComponent(result.jobId)+'">Connect your contact form</a></p>':'')+
     '<p>Worker <code>'+escape(result.workerReview.scriptName)+'</code></p>'+
     '<p>Code SHA-256 <code>'+escape(result.workerReview.moduleSha256)+'</code></p>'+
     '<p><a href="/toolkit">Back to toolkit</a></p>');
@@ -783,6 +853,7 @@ export default {
         if(url.pathname==='/history')return await launchHistory(env,current);
         if(url.pathname==='/toolkit')return await toolkit(env,current,request);
         if(url.pathname==='/toolkit/source')return await toolkitSource(env,current,request);
+        if(url.pathname==='/form-messages')return await formMessages(env,current,url.searchParams.get('id'));
         if(url.pathname===pagesAccessPath)return await pagesAccessPage(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
@@ -790,6 +861,11 @@ export default {
         if(url.pathname==='/site-update-review')return await siteUpdates.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-html')return await siteUpdates.html(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-status')return await siteUpdates.status(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/imported-edit')return await importedEdits.editor(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/imported-edit-review')return await importedEdits.review(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/imported-edit-file')return await importedEdits.file(env,current,url);
+        if(url.pathname==='/imported-edit-status')return await importedEdits.status(env,current,url.searchParams.get('ticket'));
+        if(url.pathname==='/form-connect')return await importedEdits.connectForm(env,current,url.searchParams.get('id'));
         if(url.pathname==='/site-options')return await siteOptions.page(env,current,url.searchParams.get('id'));
       }
       if(request.method==='POST'){
@@ -801,6 +877,7 @@ export default {
         if(url.pathname==='/preview')return await preview(request,env,current);
         if(url.pathname==='/draft')return await draft(request,env,current);
         if(url.pathname==='/approve')return await approve(request,env,current,context);
+        if(url.pathname==='/review-analytics')return await setReviewAnalytics(request,env,current);
         if(url.pathname==='/launch')return await runDueStep(request,env,current,context,'queued');
         if(url.pathname==='/verify')return await runDueStep(request,env,current,context,'pending_deployment');
         if(url.pathname==='/logout')return await logout(request,env,current);
@@ -808,6 +885,9 @@ export default {
         if(url.pathname==='/delete-launch-history')return await removeLaunchHistory(request,env,current);
         if(url.pathname==='/site-update-preview')return await siteUpdates.prepare(request,env,current);
         if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
+        if(url.pathname==='/imported-edit-preview')return await importedEdits.prepare(request,env,current);
+        if(url.pathname==='/imported-edit-approve')return await importedEdits.approve(request,env,current);
+        if(url.pathname==='/form-connect-approve')return await importedEdits.connectFormApprove(request,env,current);
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
         if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);

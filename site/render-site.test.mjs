@@ -44,6 +44,24 @@ test("does not load external scripts, images or remote fonts",()=>{
  assert(!/<script\b/i.test(html));
  assert(!/<img\b/i.test(html));
  assert(!/@import/i.test(html));
- assert(!/https:\/\//i.test(html));
+ // Only the Cloudflare Web Analytics origins in the CSP, no other remote address.
+ assert(!/https:\/\//i.test(html.replace(/script-src https:\/\/static\.cloudflareinsights\.com; connect-src &#39;self&#39; https:\/\/cloudflareinsights\.com; /,"")));
  assert.match(html,/Content-Security-Policy/);
+});
+test("a deployed form service adds the built-in contact form; without one the page is unchanged",async()=>{
+ const contactForm={workerUrl:"https://esp-willow-studio-site-form.acct.workers.dev",sitekey:"0x4AAAAAAAtestkey"};
+ const plain=renderSite(site);
+ assert.equal(renderSite(site,{}),plain);
+ assert.equal(renderSite(site,{contactForm:{workerUrl:"https://evil.example",sitekey:"x"}}),plain,"an untrusted service is ignored");
+ const html=renderSite(site,{contactForm});
+ assert.match(html,/<form class="lo-form" action="https:\/\/esp-willow-studio-site-form\.acct\.workers\.dev\/submit" method="post">/);
+ assert.match(html,/name="name"[^>]*required/);assert.match(html,/name="email" type="email"/);assert.match(html,/<textarea id="lo-message" name="message"/);
+ assert.match(html,/<div class="cf-turnstile" data-sitekey="0x4AAAAAAAtestkey"><\/div>/);
+ assert.match(html,/<script src="https:\/\/challenges\.cloudflare\.com\/turnstile\/v0\/api\.js" async defer><\/script><\/body>/);
+ assert.match(html,/form-action https:\/\/esp-willow-studio-site-form\.acct\.workers\.dev"/);
+ assert.match(html,/frame-src https:\/\/challenges\.cloudflare\.com/);
+ assert.match(html,/<p id="form-sent" class="lo-form-note" role="status">/);
+ const {previewWebsiteUpdate}=await import("../pipeline/propose-site-update.mjs");
+ const input={name:site.name,githubOwner:"tester",accountId:"a".repeat(32),forms:false,site};
+ assert.notEqual((await previewWebsiteUpdate({...input,contactForm})).htmlSha256,(await previewWebsiteUpdate(input)).htmlSha256);
 });

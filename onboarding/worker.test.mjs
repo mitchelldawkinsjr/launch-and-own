@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.mjs';
-import {accountId, approvePreview, bootstrap, connectCloudflare, csrfFrom, form, GENERATED_SHA, harness,
- jobRow, launchId, makeDue, origin, originalFetch, post, reviewDigest} from './worker-test-support.mjs';
+import {accountId, approvePreview, bootstrap, connectCloudflare, connectTenant, csrfFrom, form, GENERATED_SHA, harness,
+ jobRow, launchId, makeDue, newPreview, origin, originalFetch, post, reviewDigest} from './worker-test-support.mjs';
 
 // Node test suite uses one file; each test replaces fetch then restores it.
 test('unauthenticated page shows GitHub connect and refuses contact account provisioning',async()=>{
@@ -222,6 +222,7 @@ test('product onboarding shows Launch & Own identity and customer ownership tagl
  const result=await h.request('/');
  const html=await result.text();
  assert.match(html,/Launch & Own/);
+ assert.match(html,/by 360 Web Solutions/);
  assert.match(html,/Describe it\. Launch it\. Own it\./);
 });
 
@@ -736,4 +737,71 @@ test('connection explainer icons remain interactive and truthful through both pr
     assert.match(selected,/Preview my website/);
     assert.doesNotMatch(selected,/href="\/connect\/cloudflare"/);
   }finally{globalThis.fetch=originalFetch}
+});
+test('visitor insights are on by default: the launch creates Web Analytics and the live check allows only its beacon',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await connectTenant(h);
+  const id=await newPreview(h,tenant);
+  const review=await (await h.request('/review?id='+id,{cookie:tenant.cookie})).text();
+  assert.match(review,/<strong>Visitor insights:<\/strong> On\./);
+  assert.match(review,/Turn off visitor insights/);
+  assert.equal((await approvePreview(h,tenant.cookie,tenant.csrf,id)).status,303);
+  assert.deepEqual(h.resourceState.rumSites.map(site=>site.host),['esp-willow-studio-site.pages.dev']);
+  assert.equal(h.resourceState.pages.build_config.web_analytics_token,'7b'.repeat(16));
+  assert.equal(h.resourceState.pages.build_config.web_analytics_tag,'7a'.repeat(16));
+  assert.equal(h.resourceState.homepageHtml.includes('cloudflareinsights'),true,'CSP allows the beacon');
+  assert.equal(h.resourceState.homepageHtml.includes('<script'),false,'the repository keeps the approved bytes');
+  assert.equal((await post(h,'/verify',tenant.cookie,{csrf:tenant.csrf,id})).status,303);
+  assert.equal(jobRow(h).status,'live');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('an owner can turn visitor insights off before approving, and nothing is registered',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await connectTenant(h);
+  const id=await newPreview(h,tenant);
+  const forged=await post(h,'/review-analytics',tenant.cookie,{csrf:'bad',id,analytics:'false'});
+  assert.equal(forged.status,400);
+  const off=await post(h,'/review-analytics',tenant.cookie,{csrf:tenant.csrf,id,analytics:'false'});
+  assert.equal(off.status,303);
+  const review=await (await h.request('/review?id='+id,{cookie:tenant.cookie})).text();
+  assert.match(review,/<strong>Visitor insights:<\/strong> Off\./);
+  assert.equal((await approvePreview(h,tenant.cookie,tenant.csrf,id)).status,303);
+  assert.equal(h.calls.some(call=>call.url.includes('/rum/')),false);
+  assert.equal(h.resourceState.pages.build_config.web_analytics_token,undefined);
+  const late=await post(h,'/review-analytics',tenant.cookie,{csrf:tenant.csrf,id,analytics:'true'});
+  assert.equal(late.status,409,'the choice is fixed once approved');
+  assert.equal((await post(h,'/verify',tenant.cookie,{csrf:tenant.csrf,id})).status,303);
+  assert.equal(jobRow(h).status,'live');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('a grant without Account Settings Write still launches the site, without analytics',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;h.resourceState.denyAnalytics=true;
+ try{
+  const tenant=await connectTenant(h);
+  const id=await newPreview(h,tenant);
+  assert.equal((await approvePreview(h,tenant.cookie,tenant.csrf,id)).status,303);
+  assert.equal(h.resourceState.pages.build_config.web_analytics_token,undefined);
+  assert.equal((await post(h,'/verify',tenant.cookie,{csrf:tenant.csrf,id})).status,303);
+  assert.equal(jobRow(h).status,'live');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('any other script on the live homepage still fails the launch check',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await connectTenant(h);
+  const id=await newPreview(h,tenant);
+  assert.equal((await approvePreview(h,tenant.cookie,tenant.csrf,id)).status,303);
+  h.resourceState.publicHtml=h.resourceState.homepageHtml.replace('</body>','<script src="https://evil.example/x.js"></script></body>');
+  await post(h,'/verify',tenant.cookie,{csrf:tenant.csrf,id});
+  assert.notEqual(jobRow(h).status,'live');
+ }finally{globalThis.fetch=originalFetch}
+});
+test('forms scope IDs are requested only while forms are on, and malformed IDs are dropped',async()=>{
+ const {cloudflareScopes}=await import('./worker.mjs');
+ const env={CF_SCOPES:'account-settings.read page.write',CF_FORMS_SCOPES:'d1.write workers-scripts.admin workers-scripts.write d1.admin bad_scope page.write'};
+ assert.deepEqual(cloudflareScopes(env),['account-settings.read','page.write']);
+ assert.deepEqual(cloudflareScopes({...env,OPTION_FORMS_ENABLED:'true'}),
+  ['account-settings.read','page.write','d1.write','workers-scripts.admin','workers-scripts.write']);
 });

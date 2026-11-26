@@ -16,11 +16,12 @@ const schemaNames=["onboarding_flows","onboarding_sessions","onboarding_launches
  "onboarding_option_approvals","idx_onboarding_option_approvals_owner","idx_onboarding_option_approvals_job",
  "onboarding_option_executions","idx_option_executions_owner","idx_option_executions_job_kind",
  "onboarding_forms_cost_privacy_approvals","idx_forms_cost_privacy_owner","idx_forms_cost_privacy_digest",
- "onboarding_forms_provisioning","idx_forms_provisioning_owner","onboarding_pages_access","onboarding_clear_pages_access"];
+ "onboarding_forms_provisioning","idx_forms_provisioning_owner","onboarding_pages_access","onboarding_clear_pages_access",
+ "onboarding_imported_edit_approvals"];
 const migrationNames=["0001_initial.sql","0002_token_rotation.sql","0003_launch_receipts.sql","0004_launch_jobs.sql",
  "0005_option_approvals.sql","0006_option_executions.sql","0007_option_kinds_analytics_previews.sql",
  "0008_forms_cost_privacy_approvals.sql","0009_option_kinds_seo_redirects.sql","0010_forms_provisioning_receipts.sql",
- "0011_cloudflare_pages_access.sql"];
+ "0011_cloudflare_pages_access.sql","0012_imported_edit_approvals.sql","0013_forms_worker_receipts.sql"];
 const tokenColumns=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
  "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
 const mock=(overrides={})=>{
@@ -65,8 +66,8 @@ test("remote readiness checks exact D1 metadata before read-only schema query",a
  const h=mock();
  const ready=await checkRemoteSchema({accountId,token:"test-secret",databaseId:expectedId,fetchFn:h.fetchFn});
  assert.equal(ready.status,"schema-ready");
- assert.equal(ready.tables,11);assert.equal(ready.indexes,17);assert.equal(ready.triggers,2);
- assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,11);
+ assert.equal(ready.tables,12);assert.equal(ready.indexes,17);assert.equal(ready.triggers,2);
+ assert.equal(ready.tokenColumns,8);assert.equal(ready.migrations,13);
  assert.equal(h.calls.length,5);
  assert.equal(h.calls[0].options.method,"GET");
  assert.equal(JSON.parse(h.calls[4].options.body).sql,LAUNCH_SCHEMA_PROBE);

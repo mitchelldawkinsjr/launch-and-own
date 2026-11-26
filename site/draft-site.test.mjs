@@ -97,5 +97,6 @@ test("AI-generated copy is only a draft: renderer does not create scripts or emb
  const html=renderSite(result);
  assert(!/<script\b/i.test(html));
  assert(!/<form\b/i.test(html));
- assert(!/https:\/\/[^\s"']+/i.test(html));
+ // Only the Cloudflare Web Analytics origins in the CSP, no other remote address.
+ assert(!/https:\/\/[^\s"']+/i.test(html.replace(/script-src https:\/\/static\.cloudflareinsights\.com; connect-src &#39;self&#39; https:\/\/cloudflareinsights\.com; /,"")));
 });

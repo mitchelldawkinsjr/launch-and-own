@@ -1,5 +1,16 @@
 # Customer-owned contact forms
 
+**Update (2026-11-25, owner authorized the next forms phase).**
+- **Worker deploy:** after the widget, database and schema, an approved run rotates the Turnstile secret straight into the Worker upload, so the secret is never stored, logged or returned. It then turns on the `workers.dev` address and sets the retention cron. The operator allowlist checks each step in order (`isApprovedFormsMutation`) against the reviewed module and redacted bindings (`formWorkerMetadata`). Each step is recorded in migration `0013` receipts, so a retry resumes. The result is `form_worker_deployed`.
+- **The site's own fields:** the Worker keeps up to 20 safely named fields (4,000 characters each, byte-capped overall) as `fields_json`, with an optional `reply_email`. A plain browser form goes back to its page with `?form=sent#form-sent` or `?form=error&reason=…#form-error`. `fetch()` callers still get JSON. The customer schema changed in place; it had never been applied to a customer database.
+- **Connecting the site's form:** `/form-connect` (uploaded sites) detects the existing contact form and shows the exact change. That change sets the form's action to the Worker, adds Turnstile, re-enables the submit button, adds CSS-only sent and error notes, and widens that page's CSP `<meta>` if it has one. On approval it opens one pull request through the imported-edit approval path. The owner merges it.
+- **Scopes:** Turnstile accepts Account Settings Write, which is already requested. The D1 and Workers scope IDs go in `CF_FORMS_SCOPES` and are sent only while `OPTION_FORMS_ENABLED` is `true`. Domain must copy the exact IDs from the Cloudflare OAuth client registration. Malformed IDs are dropped.
+- **Still required per site:** the #89 cost and privacy row and an operator grant (unchanged), and migration `0013` on the onboarding D1 before deploy.
+- **Created sites:** once the form service is set up, `renderSite` adds a built-in Name, Email and Message form with Turnstile. It appears in the next "Update this website" preview and stays in every later update. `/form-connect` sends created sites to that editor.
+- **Messages:** `/form-messages` reads the newest 50 messages from the owner's customer D1 with the owner's Cloudflare grant, using one fixed `SELECT`. Nothing is stored or logged. It needs the D1 scope in `CF_FORMS_SCOPES`.
+- **Inline scripts:** `/form-connect` warns when the form's page has an inline script that may block sending. It does not remove scripts.
+- **Not yet done:** a live acceptance on a real account.
+
 The forms execution path stages a Turnstile widget and a dedicated customer D1 after separate operator approval and a current cost and privacy grant. The result `form_resources_staged` includes a Worker review with the exact source digest, bindings and retention schedule. The product shows the setup as pending Worker review.
 
 | File | Role |

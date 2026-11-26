@@ -422,10 +422,26 @@ async function formsWork({provider, site, row, owner, verifyFormsCostPrivacyGate
     gateApprovalId: gate.approvalId, maxBodyBytes: gate.maxBodyBytes,
     maxSubmissionsPerDay: gate.maxSubmissionsPerDay, retentionDays: gate.retentionDays
   }));
+  if (!receipt.workerDeployed) {
+    // The rotated secret goes straight into the upload and is never saved or returned.
+    const secret = await guarded(fence, () => provider.rotateTurnstileSecret(site, {hostname, sitekey: receipt.widgetSitekey}));
+    await guarded(fence, () => provider.uploadFormWorker(site, {hostname, databaseId: receipt.databaseId, gate, secret}));
+    await save({workerDeployed: true});
+  }
+  if (!receipt.workerSubdomainEnabled) {
+    const subdomain = await guarded(fence, () => provider.readWorkersSubdomain());
+    await guarded(fence, () => provider.enableFormWorkerSubdomain(site, {hostname}));
+    await save({workerSubdomainEnabled: true, workerUrl: 'https://' + workerReview.scriptName + '.' + subdomain + '.workers.dev'});
+  }
+  if (!receipt.workerScheduleSet) {
+    await guarded(fence, () => provider.setFormWorkerSchedule(site, {hostname}));
+    await save({workerScheduleSet: true});
+  }
+  // The Worker is live; the site's own form starts using it once the owner merges the connect pull request.
   return {
-    kind: 'forms', hostname, status: 'form_resources_staged', workingForm: false,
+    kind: 'forms', jobId: row.jobId, hostname, status: 'form_worker_deployed', workingForm: false,
     sitekey: receipt.widgetSitekey, customerDatabaseId: receipt.databaseId,
-    gateApprovalId: gate.approvalId, workerReview
+    gateApprovalId: gate.approvalId, workerUrl: receipt.workerUrl, workerReview
   };
 }
 

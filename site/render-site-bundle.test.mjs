@@ -50,7 +50,8 @@ test("does not use third-party scripts, fonts, images, forms or trackers",()=>{
  for(const {html} of renderSiteBundle(input).pages){
    assert(!/<script\b|<img\b|<form\b|<iframe\b/i.test(html));
    assert(!/@import|fetch\(|google-analytics|http:\/\//i.test(html));
-   assert(!/https:\/\//i.test(html));
+   // Only the Cloudflare Web Analytics origins in the CSP, no other remote address.
+ assert(!/https:\/\//i.test(html.replace(/script-src https:\/\/static\.cloudflareinsights\.com; connect-src &#39;self&#39; https:\/\/cloudflareinsights\.com; /,"")));
    assert.match(html,/Content-Security-Policy/);
  }
 });

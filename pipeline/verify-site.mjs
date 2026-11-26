@@ -10,6 +10,9 @@ import {matchesApprovedPagesProject} from "./approved-pages-project.mjs";
 import {ProviderRequestError} from "./provider-errors.mjs";
 import {pagesRequestError} from "./cloudflare-pages-errors.mjs";
 import {readBounded} from "./bounded-body.mjs";
+import {matchesApprovedBytes,projectBeaconToken,withoutProjectBeacon} from "./web-analytics.mjs";
+
+const BEACON_ALLOWANCE = 2048; // The Pages analytics script tag and its comments.
 
 const MAX_PUBLIC_HOMEPAGE_BYTES = 2 * 1024 * 1024; // The largest supported ZIP homepage.
 
@@ -141,7 +144,9 @@ export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedC
   try{
     if(approved){
       const expectedBytes=approved.htmlBytes??new TextEncoder().encode(approved.html);
-      if(await responseMatchesBytes(page,expectedBytes))homepageBytes=expectedBytes;
+      // Pages adds the project's own analytics beacon on deploy; that one script is allowed, nothing else.
+      const served=await readBounded(page.body,expectedBytes.length+BEACON_ALLOWANCE);
+      if(served&&matchesApprovedBytes(served,expectedBytes,projectBeaconToken(project)))homepageBytes=expectedBytes;
     }else{
       homepageBytes=await readBounded(page.body,MAX_PUBLIC_HOMEPAGE_BYTES);
     }
@@ -151,7 +156,13 @@ export async function verifyWebsite(input,{cloudflareToken,githubToken,expectedC
   }
   if(!homepageBytes||(!approved?.htmlBytes&&!/<html\b/i.test(new TextDecoder().decode(homepageBytes))))
     return {status:"unexpected-public-content",...resultTarget,contentType};
-  const publicHtmlSha256=createHash("sha256").update(homepageBytes).digest("hex");
+  const digestOf=bytes=>createHash("sha256").update(bytes).digest("hex");
+  let publicHtmlSha256=digestOf(homepageBytes);
+  if(expectedHtmlSha256&&publicHtmlSha256!==expectedHtmlSha256.toLowerCase()){
+    // Same allowance as the byte check above: only this project's own Pages analytics beacon.
+    const stripped=withoutProjectBeacon(homepageBytes,projectBeaconToken(project)).find(bytes=>digestOf(bytes)===expectedHtmlSha256.toLowerCase());
+    if(stripped)publicHtmlSha256=digestOf(stripped);
+  }
   if(expectedHtmlSha256&&publicHtmlSha256!==expectedHtmlSha256.toLowerCase())
     return {status:"pending-expected-html",...resultTarget,
       expectedHtmlSha256:expectedHtmlSha256.toLowerCase(),publicHtmlSha256};

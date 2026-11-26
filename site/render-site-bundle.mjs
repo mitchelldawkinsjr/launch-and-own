@@ -49,7 +49,7 @@ function page(site,key,title,body){
   return '<!doctype html><html lang="en"><head><meta charset="utf-8">'+
     '<meta name="viewport" content="width=device-width,initial-scale=1">'+
     '<meta name="description" content="'+esc(site.about.slice(0,155))+'">'+
-    '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;">'+
+    '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; script-src https://static.cloudflareinsights.com; connect-src &#39;self&#39; https://cloudflareinsights.com; base-uri &#39;none&#39;; form-action &#39;none&#39;">'+
     "<title>"+esc(title)+" | "+name+"</title><style>"+cssColors+CSS+"</style></head><body>"+
     '<a class="skip" href="#main">Skip to content</a>'+
     '<header><nav class="wrap" aria-label="Main navigation"><a class="brand" href="/">'+name+

@@ -71,12 +71,17 @@ test('the toolkit displays exact launch evidence only for complete successful re
   assert.equal(projectToolkitCard(record, {canEdit: true}).optionsPath, null);
 });
 
-test('history capabilities mark ZIP sites without the editor', () => {
+test('history capabilities offer imported editing only after a live ZIP launch', () => {
   const caps = historyToolkitCapabilities({
     verified: true, canEdit: false, uploadedZip: true
   });
-  assert.equal(caps.website_updates.state, 'not_available');
-  assert.equal(caps.website_updates.reason, 'uploaded_source_has_no_supported_editor');
+  assert.equal(caps.website_updates.state, 'available_opt_in');
+  assert.equal(caps.website_updates.reason, 'imported_edit_ready');
+  const waiting = historyToolkitCapabilities({
+    verified: false, canEdit: false, uploadedZip: true
+  });
+  assert.equal(waiting.website_updates.state, 'not_available');
+  assert.equal(waiting.website_updates.reason, 'uploaded_source_has_no_supported_editor');
 });
 
 test('update status HTML leads with Open the change to publish for open PRs', () => {
@@ -135,8 +140,11 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   assert.match(html, /30 days/);
   assert.match(html, /Public address when checked: <code>https:\/\/esp-willow-studio-site\.pages\.dev\//);
   assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
-  assert.match(html, /Sites we found in your accounts/);
-  assert.match(html, /href="https:\/\/github\.com\/tester\/esp-willow-studio"/);
+  // One card per site: the found GitHub/Cloudflare details sit inside the launch card, not a second list.
+  assert.doesNotMatch(html, /Sites we found in your accounts|Other sites in your accounts/);
+  const card = html.slice(html.indexOf('<section class="tk-site">'), html.indexOf('</section>', html.indexOf('<section class="tk-site">')));
+  assert.match(card, /In your accounts now/);
+  assert.match(card, /href="https:\/\/github\.com\/tester\/esp-willow-studio"/);
   assert.match(html, /Update this website/);
   assert.match(html, /Visitor insights/);
   const writesAfter = h.calls.filter(c =>
@@ -151,7 +159,8 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   h.sqlite.prepare("UPDATE onboarding_launch_jobs SET plan_json = json_set(plan_json, '$.zip', json('{}'))").run();
   const zip = await (await toolkit()).text();
   assert.doesNotMatch(zip, /Update this website/);
-  assert.match(zip, /uploaded as a ZIP are updated in GitHub/i);
+  assert.match(zip, /Edit imported website/);
+  assert.match(zip, /unique text, link, business detail, or existing color/i);
   assert.match(zip, /Safe website updates/);
 
   h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_account_id = ?').run('a'.repeat(32));
@@ -180,4 +189,26 @@ test('toolkit page without Cloudflare account stays a soft prompt', () => {
     escape: s => String(s)
   });
   assert.match(html, /Connect GitHub/);
+});
+
+test('toolkit groups each site into Overview, Updates, Services and Settings without losing evidence or actions', () => {
+  const card = {name: 'Willow <b>', statusLabel: 'Live and checked', statusDetail: 'Recorded live.',
+    recordedWebsite: 'https://willow.pages.dev/', verifiedAt: '2026-11-25T10:00:00.000Z', verifiedCommitSha: 'a'.repeat(40),
+    approvalFingerprint: 'b'.repeat(64), editPath: '/site-update?id=x', optionsPath: '/options?id=x',
+    capabilities: {website_updates: {state: 'available_opt_in', detail: 'Change the copy safely.'},
+      static_hosting: {state: 'included_verified', detail: 'Recorded hosting'}}};
+  const html = renderToolkitPage([card, {...card, name: 'Second'}], {cloudflare_account_id: 'test'},
+    {view: (_t, body) => body, escape: s => String(s).replace(/</g, '&lt;')});
+  const panel = id => html.match(new RegExp('<div class="tk-panel tk-p-' + id + '">([\\s\\S]*?)</div>(?=<div class="tk-panel|</section>)'))[1];
+  assert.deepEqual([...html.matchAll(/class="tk-tab"><input[^>]*aria-label="(\w+)"[^>]*><span aria-hidden="true">\1</g)].slice(0, 4).map(m => m[1]),
+    ['Overview', 'Updates', 'Services', 'Settings']);
+  assert.equal((html.match(/name="tk-site-0"/g) || []).length, 4);
+  assert.equal((html.match(/name="tk-site-1"/g) || []).length, 4, 'each site has its own tab group');
+  assert.equal((html.match(/ checked>/g) || []).length, 2, 'Overview selected per site');
+  assert.match(html, /<legend class="lo-sr">Sections for Willow &lt;b><\/legend>/);
+  assert.match(panel('overview'), /Public address when checked[\s\S]*Last checked <time/);
+  assert.match(panel('updates'), /href="\/site-update\?id=x">Update this website[\s\S]*Change the copy safely/);
+  assert.match(panel('services'), /href="\/options\?id=x"[\s\S]*Explore your website services/);
+  assert.match(panel('settings'), /Approval fingerprint <code>bbbbbbbbbbbb…[\s\S]*What this site includes/);
+  assert.doesNotMatch(html, /<script|\bon[a-z]+=/i);
 });

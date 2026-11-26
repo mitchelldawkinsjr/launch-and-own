@@ -1,6 +1,9 @@
 // Post-launch options screen: store digest-bound domain / email / forms /
 // analytics / PR-preview / SEO / redirect approvals. Store-only unless an
 // operator grant exists.
+import {readCurrentRevision} from '../imported/revision.mjs';
+import {contactFormSummary, detectContactForm} from './form-detection.mjs';
+import {readFormService} from './form-service.mjs';
 import { buildDomainApprovalReview } from '../pipeline/domain-approval-review.mjs';
 import {
   buildEmailRoutingApprovalReview, ToolkitApprovalExecutionError
@@ -309,7 +312,7 @@ export function createSiteOptionsRoutes({
     const time = now();
     const job = await ownedLiveJob(env, current, id, time);
     if (!job) return fail('Open an owned, verified live website from your toolkit.', 404);
-    await assertHistoryAccess(env, current);
+    const grants = await assertHistoryAccess(env, current);
     const rows = await listOptionApprovals(env, job.id);
     const byKind = Object.fromEntries(rows.map(row => [row.kind, row]));
     // A stored review is NOT an operator approval. Display activation only for
@@ -345,14 +348,14 @@ export function createSiteOptionsRoutes({
     const domainHost = storedDomainHostname(rows);
     const mailboxDefault = onboardingMailbox(job, current, domainHost);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const notice = '<p>These approvals only store your exact request. They do not attach a domain, change mail DNS, enable analytics, turn on preview builds, publish SEO files, create redirects, or create a contact form.</p>';
+    const notice = '<p>Each request below is saved for review. We set it up after that review, and you approve each change before it happens. Until then your site, domain and email stay exactly as they are.</p>';
     const stored = (row, label) => row
       ? '<p role="status">Stored ' + label + ' request. Fingerprint <code>' +
         escape(row.approval_digest.slice(0, 12)) + '…</code></p>'
       : '';
     const domainSection =
       '<section><h2>Custom domain</h2>' +
-      '<p>Enter the hostname you control. DNS stays unchanged until a later Domain-approved write.</p>' +
+      '<p>Enter a web address you own. We connect it after a review. Your DNS does not change until you approve that step.</p>' +
       stored(byKind.domain, 'domain') +
       (domainHost ? '<p>Current request: <code>' + escape(domainHost) + '</code></p>' : '') +
       button('/site-options-prepare', 'Review domain request', current.csrf,
@@ -365,8 +368,8 @@ export function createSiteOptionsRoutes({
     const emailSection =
       '<section><h2>Email forwarding</h2>' +
       (domainHost
-        ? '<p>Forward to an existing mailbox off <code>' + escape(domainHost) +
-          '</code>. This does not create a mailbox or write MX records.</p>' +
+        ? '<p>Forward mail for <code>' + escape(domainHost) +
+          '</code> to a mailbox you already have. We set it up after a review. No new mailbox is created, and your mail settings stay the same until you approve.</p>' +
           stored(byKind.email, 'email') +
           button('/site-options-prepare', 'Review email request', current.csrf,
             hidden(job.id, 'email') +
@@ -377,28 +380,43 @@ export function createSiteOptionsRoutes({
         : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
       activate('email', 'Apply operator-approved email routing') +
       '</section>';
+    // Read-only look at the current files so the request names the form it will connect.
+    let formNote = '';
+    try {
+      const revision = await readCurrentRevision({owner: job.github_login, repo: 'esp-' + job.site_slug,
+        token: grants?.githubAccessToken, fetchFn: (url, options) => fetch(url, {...options, signal: AbortSignal.timeout(8000)})});
+      formNote = contactFormSummary(detectContactForm(revision.files), escape);
+    } catch {
+      formNote = '';
+    }
+    const formService = await readFormService(env, current, job.id);
+    const connectLink = formService
+      ? '<p role="status">Your form service is set up. <a href="/form-connect?id=' + encodeURIComponent(job.id) +
+        '">Connect your contact form</a> to start receiving messages. <a href="/form-messages?id=' + encodeURIComponent(job.id) +
+        '">Read your messages</a></p>'
+      : '';
     const formsSection =
-      '<section><h2>Contact form</h2>' +
-      '<p>Reviews a Siteverify-bound form plan only. #89 cost/privacy approval, Turnstile, customer D1, and a form Worker stay off.</p>' +
+      '<section><h2>Contact form</h2>' + formNote + connectLink +
+      '<p>Connect your site\'s contact form so messages are saved in your own Cloudflare account, with spam protection. We set it up after a cost and privacy review.</p>' +
       stored(byKind.forms, 'form') +
       button('/site-options-prepare', 'Review form request', current.csrf,
         hidden(job.id, 'forms') +
         '<label for="opt-owner-email">Owner email for the form plan</label>' +
         '<input id="opt-owner-email" name="ownerEmail" type="email" required maxlength="254">' +
         '<label><input type="checkbox" name="formsConsent" value="true" required> ' +
-        'I want a separate form plan reviewed later. This does not create a working form.</label>') +
+        'Save this request for review. The form starts saving messages once it is set up and you approve it.</label>') +
       '</section>';
     const analyticsRequest = byKind.analytics?.status === 'stored'
       ? await currentAnalyticsRequestFingerprint(env, current, job, now())
       : null;
     const analyticsSection =
       '<section><h2>Visitor insights</h2>' +
-      '<p>Save a request to enable Cloudflare Web Analytics on this Pages project later. No beacon is turned on here.</p>' +
+      '<p>New sites launch with visitor insights on. If this site launched without them, save a request to turn them on.</p>' +
       stored(byKind.analytics, 'visitor insights') +
       button('/site-options-prepare', 'Review visitor insights request', current.csrf,
         hidden(job.id, 'analytics') +
         '<label><input type="checkbox" name="analyticsConsent" value="true" required> ' +
-        'I want visitor insights reviewed later. This does not enable analytics yet.</label>') +
+        'Save this request for review. Visitor insights start after you approve the change.</label>') +
       (analyticsRequest
         ? '<p>Review Web Analytics separately. Enabling it can add a browser beacon on the next deployment.</p>' +
           button('/site-options-prepare', 'Review Web Analytics enablement', current.csrf,
@@ -417,24 +435,24 @@ export function createSiteOptionsRoutes({
       button('/site-options-prepare', 'Review preview request', current.csrf,
         hidden(job.id, 'pr_previews') +
         '<label><input type="checkbox" name="previewConsent" value="true" required> ' +
-        'I want scoped preview builds reviewed later. This does not turn previews on.</label>' +
+        'Save this request for review. Previews start after setup and your approval.</label>' +
         '<label><input type="checkbox" name="acknowledgePublicPreviews" value="true" required> ' +
         'I understand draft preview links can be public until Access protects them.</label>') +
       '</section>';
     const seoSection =
       '<section><h2>SEO starter</h2>' +
-      '<p>Save a request for canonical, Open Graph, robots.txt, and sitemap review later. No site files are changed here.</p>' +
+      '<p>Save a request for search basics: canonical links, social previews, robots.txt and a sitemap. Your site files change only after you approve the update.</p>' +
       stored(byKind.seo, 'SEO') +
       button('/site-options-prepare', 'Review SEO request', current.csrf,
         hidden(job.id, 'seo') +
         '<label><input type="checkbox" name="seoConsent" value="true" required> ' +
-        'I want an SEO starter pack reviewed later. This does not publish SEO files.</label>') +
+        'Save this request for review.</label>') +
       '</section>';
     const redirectsSection =
       '<section><h2>Redirects</h2>' +
       (domainHost
         ? '<p>Same-host redirects for <code>' + escape(domainHost) +
-          '</code> only. No Page Rules, Bulk Redirects, or DNS writes happen here.</p>' +
+          '</code>. We set them up after a review and your approval.</p>' +
           stored(byKind.redirects, 'redirect') +
           button('/site-options-prepare', 'Review redirect request', current.csrf,
             hidden(job.id, 'redirects') +
@@ -449,7 +467,7 @@ export function createSiteOptionsRoutes({
             '<label for="opt-path-to">Optional path to</label>' +
             '<input id="opt-path-to" name="pathTo" maxlength="200" placeholder="/new">' +
             '<label><input type="checkbox" name="redirectConsent" value="true" required> ' +
-            'I want these redirects reviewed later. This does not create redirect rules.</label>')
+            'Save these redirects for review.</label>')
         : '<p>Save a custom domain request first. Redirects need that hostname.</p>') +
       '</section>';
     if (!await hasCurrentOwnerSession(env, current, now()))
