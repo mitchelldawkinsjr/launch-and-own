@@ -396,3 +396,91 @@ test('missing CSRF and altered request data never trigger provider calls',async 
   assert.equal(extra.status,400);
   assert.equal(providerWrites(h).length,0);
 });
+
+// Owner decision 2026-11-26: the owner can turn on the contact form after an explicit cost/privacy review,
+// replacing the out-of-band operator row. Same Cloudflare mock as the operator-path test above.
+function formsCloudflareMock(h,writes){
+  const fetchLaunch=h.fetchFn;
+  h.fetchFn=async (url, init={})=>{
+    const path=new URL(url).pathname;
+    const ok=result=>Response.json({success:true,result,result_info:{page:1,total_pages:1,total_count:0}});
+    if(path.endsWith('/rotate_secret')){writes.push({path});return ok({sitekey:'test-sitekey',secret:'rotated-test-secret-0001'});}
+    if(path.endsWith('/workers/subdomain'))return ok({subdomain:'acct'});
+    if(/\/workers\/scripts$/.test(path))return ok([]);
+    if(/\/workers\/scripts\/[^/]+$/.test(path)&&init.method==='PUT'){writes.push({path});return ok({id:path.split('/').pop()});}
+    if(path.endsWith('/subdomain')){writes.push({path});return ok({enabled:true,previews_enabled:false});}
+    if(path.endsWith('/schedules')){writes.push({path});return ok({schedules:[{cron:'17 3 * * *'}]});}
+    if(/\/challenges\/widgets$|\/d1\/database(?:\/[^/]+\/query)?$/.test(path)){
+      const data=init.body?JSON.parse(init.body):null;
+      if(init.method==='POST')writes.push({path});
+      const result=init.method!=='POST'?[]:path.endsWith('/widgets')?{...data,sitekey:'test-sitekey',secret:'test-secret'}:
+        path.endsWith('/database')?{name:data.name,uuid:'11111111-2222-3333-4444-555555555555'}:[{success:true}];
+      return ok(result);
+    }
+    return fetchLaunch(url,init);
+  };
+}
+async function storedFormsForOwner(h,t){
+  const writes=[];
+  formsCloudflareMock(h,writes);
+  Object.assign(h.env,{OPTION_EXECUTION_ENABLED:'true',OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_FORMS_ENABLED:'true'});
+  const {tenant,jobId}=await live(h,t);
+  const row=await store(h,tenant,jobId,'forms',{ownerEmail:'owner@example.net',formsConsent:'true'});
+  const choices={csrf:tenant.csrf,approvalId:row.id,retentionDays:'30',maxSubmissionsPerDay:'50',maxBodyBytes:'8192',costApproved:'true',privacyApproved:'true'};
+  return {tenant,jobId,row,writes,choices};
+}
+const gateRows=h=>h.sqlite.prepare('SELECT operator_grant_id, retention_days, max_submissions_per_day FROM onboarding_forms_cost_privacy_approvals').all();
+
+test('owner turns on the contact form after the cost/privacy review: gate row from the owner, then the real setup',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId,row,writes,choices}=await storedFormsForOwner(h,t);
+  const options=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
+  assert.match(options,/href="\/site-options-forms-turn-on\?approvalId=[^"]+">Turn on contact form</);
+  // Without the Cloudflare forms permission: consent page, nothing written.
+  assert.match(await (await h.request('/site-options-forms-turn-on?approvalId='+row.id,{cookie:tenant.cookie})).text(),/Allow form setup in Cloudflare/);
+  const early=await post(h,'/site-options-activate',tenant.cookie,choices);
+  assert.equal(early.status,403);
+  assert.deepEqual(gateRows(h),[]);
+  assert.equal(writes.length,0);
+  h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_forms_grant=1').run();
+  const review=await (await h.request('/site-options-forms-turn-on?approvalId='+row.id,{cookie:tenant.cookie})).text();
+  assert.match(review,/personal data/);
+  assert.match(review,/name="costApproved" value="true" required/);
+  assert.match(review,/name="privacyApproved" value="true" required/);
+  const on=await post(h,'/site-options-activate',tenant.cookie,choices);
+  const html=await on.text();
+  assert.equal(on.status,200,html);
+  assert.match(html,/Connect your contact form/);
+  assert.deepEqual(gateRows(h).map(r=>({...r})),[{operator_grant_id:'owner-self-cost-privacy:'+row.id,retention_days:30,max_submissions_per_day:50}]);
+  assert.equal(writes.length,7,'widget, D1, schema, secret rotation, Worker, subdomain, schedule');
+});
+
+test('owner forms turn-on refuses missing confirmations or out-of-range limits with no provider writes',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,writes,choices}=await storedFormsForOwner(h,t);
+  h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_forms_grant=1').run();
+  for(const [field,value,code] of [['privacyApproved','false','privacy_owner_approval_required'],['costApproved','false','cost_owner_approval_required'],
+    ['retentionDays','999','retention_days_out_of_range'],['maxSubmissionsPerDay','0','max_submissions_per_day_out_of_range']]){
+    const res=await post(h,'/site-options-activate',tenant.cookie,{...choices,[field]:value});
+    assert.equal(res.status,400,field);
+    assert.match(await res.text(),new RegExp(code));
+  }
+  assert.deepEqual(gateRows(h),[]);
+  assert.equal(writes.length,0);
+});
+
+test('an operator-approved forms gate row is never overwritten by the owner path',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId,row,writes,choices}=await storedFormsForOwner(h,t);
+  const job=jobRow(h),time=Math.floor(Date.now()/1000);
+  h.sqlite.prepare(`INSERT INTO onboarding_forms_cost_privacy_approvals(id,forms_option_approval_id,job_id,github_user_id,cloudflare_account_id,
+    pages_project_id,forms_digest,approval_digest,payload_json,retention_days,max_submissions_per_day,max_body_bytes,operator_grant_id,
+    approved_at,expires_at,status,updated_at) VALUES ('f2345678-1234-4234-8234-123456789abc',?,?,?,?,?,?,?,'{}',90,10,4096,'operator-x',?,?,'approved',?)`)
+    .run(row.id,jobId,job.github_user_id,job.cloudflare_account_id,job.pages_project_id,row.approval_digest,'a'.repeat(64),time,time+600,time);
+  h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_forms_grant=1').run();
+  const res=await post(h,'/site-options-activate',tenant.cookie,choices);
+  assert.equal(res.status,400);
+  assert.match(await res.text(),/cost_privacy_row_conflict/);
+  assert.deepEqual(gateRows(h).map(r=>({...r})),[{operator_grant_id:'operator-x',retention_days:90,max_submissions_per_day:10}]);
+  assert.equal(writes.length,0);
+});

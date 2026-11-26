@@ -355,8 +355,8 @@ export function createSiteOptionsRoutes({
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
     const notice = '<p>Save each request first. For <strong>custom domain</strong> and <strong>email forwarding</strong>, ' +
       'you can turn the feature on here after you store it—still bound to the exact hostname or mailbox you approved. ' +
-      'DNS and MX are not changed unless the provider action says so. Analytics, previews, SEO, redirects, and contact forms ' +
-      'remain store-only until their activation paths are released.</p>';
+      'DNS and MX are not changed unless the provider action says so. For the <strong>contact form</strong>, you turn it on after ' +
+      'reviewing what it creates, what it stores and what it costs.</p>';
     const stored = (row, label) => row
       ? '<p role="status">Stored ' + label + ' request. Fingerprint <code>' +
         escape(row.approval_digest.slice(0, 12)) + '…</code></p>'
@@ -409,6 +409,8 @@ export function createSiteOptionsRoutes({
       '<section><h2>Contact form</h2>' + formNote + connectLink +
       '<p>Connect your site\'s contact form so messages are saved in your own Cloudflare account, with spam protection. We set it up after a cost and privacy review.</p>' +
       stored(byKind.forms, 'form') +
+      (byKind.forms && !activations.forms && ownerSelfActivationEnabled(env, 'forms')
+        ? '<p><a class="btn" href="/site-options-forms-turn-on?approvalId=' + encodeURIComponent(byKind.forms.id) + '">Turn on contact form</a></p>' : '') +
       button('/site-options-prepare', 'Review form request', current.csrf,
         hidden(job.id, 'forms') +
         '<label for="opt-owner-email">Owner email for the form plan</label>' +
