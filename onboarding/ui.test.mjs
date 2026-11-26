@@ -18,7 +18,7 @@ test('stepper marks active and completed steps without invented job percentages'
 test('page shell stays CSP-safe: no images, remote scripts, fonts, or trackers',()=>{
   const html=pageShell({title:'Welcome <x>',body:'<p>Describe it. Launch it. Own it.</p>',step:'connect'});
   assert.match(html,/Launch &amp; Own/);
-  assert.match(html,/by 360 Web Solutions/);
+  assert.match(html,/by <a class="studio-link" href="https:\/\/360web\.solutions" target="_blank" rel="noopener noreferrer">360 Web Solutions<\/a>/);
   assert.match(html,/Welcome &lt;x&gt;/);
   assert.match(html,/href="#main"/);
   assert.doesNotMatch(html,/<(?:script|img|link)\b|cdn\.|fonts\.googleapis|googletagmanager/i);
@@ -141,4 +141,13 @@ test('GitHub, Cloudflare and pages.dev links open in a new tab; app links stay i
   assert.match(out, /<a href="https:\/\/github\.com\.evil\.example\/x">fake<\/a>/);
   assert.match(out, /target="_self">kept<\/a>/);
   assert.equal((out.match(/opens in a new tab/g) || []).length, 3);
+});
+
+test('every 360 Web Solutions mention links to 360web.solutions, with no link nested in another', () => {
+  const html = pageShell({title: 'Toolkit', body: '<p>Hello</p>'});
+  const studio = [...html.matchAll(/<a class="studio-link" href="https:\/\/360web\.solutions" target="_blank" rel="noopener noreferrer">360 Web Solutions<\/a>/g)];
+  assert.equal(studio.length, 2, 'header and footer');
+  assert.equal(html.replace(/<a [^>]*>[^<]*(?:<(?!\/?a\b)[^>]*>[^<]*)*<\/a>/g, '').includes('360 Web Solutions'), false, 'no unlinked mention');
+  assert.match(html, /<a class="brand-home" href="\/">/, 'the logo still links home');
+  assert.doesNotMatch(html, /<a\b[^>]*>(?:(?!<\/a>).)*<a\b/s, 'no nested anchors');
 });
