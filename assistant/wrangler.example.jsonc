@@ -1,6 +1,6 @@
 // Template for the customer's private assistant repo (ADR-003). The customer deploys it with their own
 // `wrangler login` (ADR-001 B1); Launch & Own never holds this account's credentials.
-// Secrets (never in this file): KEK (>= 32 chars), GH_APP_PRIVATE_KEY. Set with `wrangler secret put`.
+// Secrets (never in this file): KEK (>= 32 chars), GH_APP_PRIVATE_KEY, optional PAGES_READ_TOKEN. Set with `wrangler secret put`.
 {
   "$schema": "https://json.schemastore.org/wrangler.json",
   "name": "lo-assistant-<site-slug>",
@@ -23,6 +23,8 @@
     "GH_APP_ID": "<customer App id>",
     "GH_INSTALLATION_ID": "<installation id>",
     "DAILY_NEURON_BUDGET": "8000",
+    // Optional "Live and checked": your account id plus the secret PAGES_READ_TOKEN (Pages Read only).
+    "CF_ACCOUNT_ID": "<32-hex account id, or leave empty>",
     // Plain-language requests use your own Workers AI allowance. Owner opt-in; typed edits always work.
     // Default model met the 95/90 bar 3/3 on the 8-case set (2026-11-26). Cheaper fallback: @cf/google/gemma-4-26b-a4b-it
     "AI_EDITS": "off",
