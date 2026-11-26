@@ -484,3 +484,62 @@ test('an operator-approved forms gate row is never overwritten by the owner path
   assert.deepEqual(gateRows(h).map(r=>({...r})),[{operator_grant_id:'operator-x',retention_days:90,max_submissions_per_day:10}]);
   assert.equal(writes.length,0);
 });
+
+// Owner turn-on for visitor insights (owner decision 2026-11-26): two exact writes in the owner's account.
+function analyticsCloudflareMock(h,state){
+  const fetchLaunch=h.fetchFn;
+  h.fetchFn=async (url, init={})=>{
+    const u=new URL(url),path=u.pathname,method=init.method||'GET';
+    const ok=result=>Response.json({success:true,result,result_info:{page:1,total_pages:1,total_count:0}});
+    if(path.endsWith('/rum/site_info/list'))return ok(state.existing?[{host:state.host,site_tag:'a'.repeat(32),site_token:'b'.repeat(32)}]:[]);
+    if(path.endsWith('/rum/site_info')&&method==='POST'){state.writes.push({method,path,body:JSON.parse(init.body)});return ok({host:JSON.parse(init.body).host,site_tag:'c'.repeat(32),site_token:'d'.repeat(32)});}
+    if(/\/pages\/projects\/[^/]+$/.test(path)&&method==='PATCH'){state.writes.push({method,path,body:JSON.parse(init.body)});return ok({name:path.split('/').pop(),build_config:JSON.parse(init.body).build_config});}
+    if(/\/pages\/projects\/[^/]+$/.test(path)&&method==='GET'&&state.buildConfig){
+      const real=await (await fetchLaunch(url,init)).json();
+      return Response.json({...real,result:{...real.result,build_config:state.buildConfig}});
+    }
+    return fetchLaunch(url,init);
+  };
+}
+async function storedAnalyticsForOwner(h,t,state){
+  Object.assign(h.env,{OPTION_EXECUTION_ENABLED:'true',OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_ANALYTICS_ENABLED:'true'});
+  const {tenant,jobId}=await live(h,t);
+  const row=await store(h,tenant,jobId,'analytics',{analyticsConsent:'true'});
+  analyticsCloudflareMock(h,state); // only the turn-on sees the mocked analytics and project responses
+  globalThis.fetch=h.fetchFn;
+  state.host=jobRow(h).site_slug?'esp-'+jobRow(h).site_slug+'-site.pages.dev':null;
+  return {tenant,jobId,row};
+}
+
+test('owner turns on visitor insights: creates the Web Analytics site and sets it on the managed Pages project only',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const state={writes:[],buildConfig:{build_command:'',destination_dir:'public',root_dir:'/'}};
+  const {tenant,jobId,row}=await storedAnalyticsForOwner(h,t,state);
+  const options=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
+  assert.match(options,/Turn on visitor insights/);
+  const on=await post(h,'/site-options-activate',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id});
+  const html=await on.text();
+  assert.equal(on.status,200,html);
+  assert.match(html,/Visitor insights are turned on/);
+  assert.match(html,/next time your site is published/);
+  assert.deepEqual(state.writes.map(w=>w.method+' '+w.path.split('/').slice(-2).join('/')),['POST rum/site_info','PATCH projects/'+state.host.replace('.pages.dev','')]);
+  assert.deepEqual(state.writes[0].body,{host:state.host,auto_install:false});
+  assert.deepEqual(state.writes[1].body,{build_config:{build_command:'',destination_dir:'public',root_dir:'/',web_analytics_tag:'c'.repeat(32),web_analytics_token:'d'.repeat(32)}});
+});
+
+test('visitor insights reuse an existing analytics site and leave hand-changed build settings alone',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const state={writes:[],existing:true,buildConfig:{build_command:'',destination_dir:'public',root_dir:'/'}};
+  const {tenant,row}=await storedAnalyticsForOwner(h,t,state);
+  assert.equal((await post(h,'/site-options-activate',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id})).status,200);
+  assert.deepEqual(state.writes.map(w=>w.method),['PATCH'],'no second analytics site');
+  assert.equal(state.writes[0].body.build_config.web_analytics_tag,'a'.repeat(32));
+
+  const h2=harness();t.after(()=>h2.sqlite.close());
+  const changed={writes:[],buildConfig:{build_command:'npm run build',destination_dir:'dist',root_dir:'/'}};
+  const second=await storedAnalyticsForOwner(h2,t,changed);
+  const res=await post(h2,'/site-options-activate',second.tenant.cookie,{csrf:second.tenant.csrf,approvalId:second.row.id});
+  assert.notEqual(res.status,200);
+  assert.doesNotMatch(await res.text(),/Visitor insights are turned on/);
+  assert.deepEqual(changed.writes,[],'a hand-changed project is refused before any write, and never patched');
+});

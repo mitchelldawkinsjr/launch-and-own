@@ -851,6 +851,10 @@ function renderOptionExecutionResult(result){
     '<p>Worker <code>'+escape(result.workerReview.scriptName)+'</code></p>'+
     '<p>Code SHA-256 <code>'+escape(result.workerReview.moduleSha256)+'</code></p>'+
     '<p><a href="/toolkit">Back to toolkit</a></p>');
+  if(result.kind==='analytics')return view('Visitor insights',
+    '<p>Visitor insights are turned on for <code>'+escape(result.hostname)+'</code> in your Cloudflare account.</p>'+
+    '<p>Cloudflare adds the small, cookie-free analytics script the next time your site is published, for example after your next approved change. Visits appear under <strong>Web Analytics</strong> in your Cloudflare dashboard.</p>'+
+    '<p><a href="/toolkit">Back to toolkit</a></p>');
   const label=result.kind==='domain'
     ?result.status==='attached_active'
       ?'The custom hostname is active on your Pages project.'

@@ -14,7 +14,7 @@ const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const HOST = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const OPAQUE = /^[a-z0-9_-]{1,128}$/;
-const ACTIONS = new Set(['domain', 'email', 'forms']);
+const ACTIONS = new Set(['domain', 'email', 'forms', 'analytics']);
 
 export class ToolkitApprovalExecutionError extends Error {
   constructor(code) {
@@ -268,6 +268,13 @@ function validGate(gate, row, site) {
     gate.maxBodyBytes <= 65536;
 }
 
+async function analyticsWork({provider, site, row, fence}) {
+  const beacon = await provider.ensureWebAnalyticsSite(site);
+  await fence();
+  await provider.enablePagesAnalytics(site, beacon);
+  return {kind: 'analytics', jobId: row.jobId, hostname: site.pagesProjectName + '.pages.dev', status: 'analytics_enabled'};
+}
+
 async function domainWork({provider, site, row, owner, fence}) {
   const {hostname} = reviewedDomain(row, owner);
   const existing = await guarded(fence, () => provider.readPagesDomain(site, hostname));
@@ -483,6 +490,12 @@ export async function consumeStoredToolkitApproval({
   // Recompute exact approval BEFORE any claim or provider call.
   if (row.kind === 'domain') reviewedDomain(row, owner);
   if (row.kind === 'email') reviewedDomain(row, owner, {withMailbox: true});
+  if (row.kind === 'analytics') {
+    if (row.payload?.pagesProjectName !== site.pagesProjectName || row.payload?.feature !== 'cloudflare_web_analytics')
+      deny('analytics_site_mismatch');
+    if (typeof provider?.ensureWebAnalyticsSite !== 'function' || typeof provider?.enablePagesAnalytics !== 'function')
+      deny('analytics_provider_permissions_required');
+  }
   if (row.kind === 'forms') {
     const hostname = reviewedForms(row, site, owner);
     if (hostname !== site.pagesProjectName + '.pages.dev') deny('forms_hostname_not_active');
@@ -513,7 +526,8 @@ export async function consumeStoredToolkitApproval({
     const work = {provider, approvalStore, site, row, owner, verifyFormsCostPrivacyGate,
       preflightGate, formsReceipts, fence: () => fence(site)};
     const result = row.kind === 'domain' ? await domainWork(work) :
-      row.kind === 'email' ? await emailWork(work) : await formsWork(work);
+      row.kind === 'email' ? await emailWork(work) :
+      row.kind === 'analytics' ? await analyticsWork(work) : await formsWork(work);
     await fence(site);
     if (await approvalStore.finish(row, result) !== true)
       deny('execution_receipt_not_saved');

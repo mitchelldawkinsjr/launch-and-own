@@ -51,7 +51,8 @@ export async function executeOwnedStoredOption(env, current, executionId, {
     // Incremental consent: forms scopes come only from the separate forms consent, never from sign-in.
     if (current.cloudflare_forms_grant !== 1) throw new FormsConsentRequired();
   } else if ((grant.kind === 'domain' && env.OPTION_DOMAIN_ENABLED !== 'true') ||
-      (grant.kind === 'email' && env.OPTION_EMAIL_ENABLED !== 'true'))
+      (grant.kind === 'email' && env.OPTION_EMAIL_ENABLED !== 'true') ||
+      (grant.kind === 'analytics' && env.OPTION_ANALYTICS_ENABLED !== 'true'))
     throw new OptionExecutionDisabled();
   const githubAccessToken = await getFreshAccessToken({env,session:current,provider:'github'});
   const cloudflareAccessToken = await getFreshAccessToken({env,session:current,provider:'cloudflare'});

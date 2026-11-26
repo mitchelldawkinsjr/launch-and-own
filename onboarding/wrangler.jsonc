@@ -24,6 +24,7 @@
     "OPTION_DOMAIN_ENABLED": "true",
     "OPTION_EMAIL_ENABLED": "true",
     "OPTION_FORMS_ENABLED": "true",
+    "OPTION_ANALYTICS_ENABLED": "true",
     "CF_FORMS_SCOPES": "d1.write workers-scripts.admin"
   },
   "compatibility_flags": [
