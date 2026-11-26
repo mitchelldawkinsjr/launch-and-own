@@ -85,7 +85,8 @@ export function visualEditorMarkup({
     '<button type="submit" class="btn-secondary">Show this page</button></form>' +
     '<div class="ve-wrap">' +
     '<div class="ve-preview"><iframe title="Current site preview (read-only)" src="' + escape(iframeSrc) + '" loading="lazy" sandbox="allow-same-origin"></iframe>' +
-    '<p class="muted">Scripts are blocked. This is the current version from GitHub, not your live edit yet.</p></div>' +
+    '<p class="muted">Scripts are blocked for safety. Static HTML, linked CSS and images from your site should still appear. ' +
+    'If the page is empty, it may rely on JavaScript to render; use the list on the right or Advanced to edit exact text.</p></div>' +
     '<div class="ve-panel">' + targetList + pickedForm + '</div></div>' +
     aiBlock + advanced;
 }

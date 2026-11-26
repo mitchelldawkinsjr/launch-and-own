@@ -130,7 +130,8 @@ test('happy path: typed edit -> preview -> review -> exact file -> Approve and p
   assert.match(page, /Open a pull request instead/);
   const fileRes = await w.call('/file?ticket=' + encodeURIComponent(w.hidden(page, 'ticket')) + '&path=index.html');
   assert.equal(fileRes.status, 200);
-  assert.match(fileRes.headers.get('content-security-policy'), /sandbox; default-src 'none'; script-src 'none'/);
+  assert.match(fileRes.headers.get('content-security-policy'), /style-src 'self' 'unsafe-inline'/);
+  assert.match(fileRes.headers.get('content-security-policy'), /script-src 'none'/);
   assert.match(await fileRes.text(), /Saturday: 10 AM-4 PM/);
   const form = { ticket: w.hidden(page, 'ticket'), approvalId: w.hidden(page, 'approvalId'), proposalDigest: w.hidden(page, 'proposalDigest'), artifactDigest: w.hidden(page, 'artifactDigest'), action: 'publish' };
   const status = w.loc(await w.call('/approve', { method: 'POST', form }));

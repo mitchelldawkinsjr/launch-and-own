@@ -12,7 +12,7 @@ import { inspectSite } from '../imported/intelligence.mjs';
 import { locateTypedEdit } from '../imported/locate.mjs';
 import { parseModelOutput, validateEdits } from '../imported/edits.mjs';
 import { buildModelRequest, retrieveSnippets } from '../imported/snippets.mjs';
-import { isolatePreview, previewResponse } from '../imported/preview.mjs';
+import { isolatePreview, previewResponse, scriptFreePreviewHeaders } from '../imported/preview.mjs';
 import { bindApproval, newApprovalId } from '../imported/approval.mjs';
 import { proposeImportedPullRequest, readImportedPullRequest } from '../imported/pull-request.mjs';
 import { d1ApprovalStore } from '../imported/approval-store.mjs';
@@ -143,10 +143,7 @@ async function liveFile(site, url, { fetchFn, now }) {
   const out = previewResponse({ credentialsIncluded: false, files }, '/' + relative);
   return new Response(out.body, {
     status: out.status,
-    headers: {
-      ...out.headers,
-      'content-security-policy': "sandbox allow-same-origin; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'self'"
-    }
+    headers: { ...out.headers, ...scriptFreePreviewHeaders({ frameAncestors: 'self' }) }
   });
 }
 

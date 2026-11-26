@@ -12,7 +12,7 @@ import {locateTypedEdit} from '../imported/locate.mjs';
 import {parseModelOutput,validateEdits} from '../imported/edits.mjs';
 import {defaultEditorPage,editablePages,listEditTargets,pickEditTarget} from '../imported/targets.mjs';
 import {livePreviewUrl,VISUAL_EDITOR_CSS,visualEditorMarkup} from './visual-editor.mjs';
-import {artifactDigest,isolatePreview,previewResponse} from '../imported/preview.mjs';
+import {artifactDigest,isolatePreview,previewResponse,scriptFreePreviewHeaders} from '../imported/preview.mjs';
 import {proposeImportedPullRequest,readImportedPullRequest} from '../imported/pull-request.mjs';
 import {readCurrentRevision} from '../imported/revision.mjs';
 import {verifyPublishedRevision} from '../imported/verify-published.mjs';
@@ -270,10 +270,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
         token:item.grants.githubAccessToken,fetchFn
       });
       const response=previewResponse({credentialsIncluded:false,files:revision.files},'/'+relative);
-      const headers={
-        ...response.headers,
-        'content-security-policy':"sandbox allow-same-origin; default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; frame-ancestors 'self'"
-      };
+      const headers={...response.headers,...scriptFreePreviewHeaders({frameAncestors:'self'})};
       return new Response(response.body,{status:response.status,headers});
     }catch(error){
       if(error instanceof ImportedEditError)return safeFailure(error);

@@ -54,6 +54,22 @@ export function previewCredentialKeys(value) {
   return found;
 }
 
+// Script-free site preview: same resource policy as onboarding/zip-preview-worker bundled mode.
+export const SCRIPT_FREE_SITE_CSP =
+  "sandbox allow-same-origin; default-src 'none'; script-src 'none'; " +
+  "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; " +
+  "media-src 'self' blob:; connect-src 'none'; base-uri 'self'";
+
+export function scriptFreePreviewHeaders({ frameAncestors = "'none'" } = {}) {
+  return {
+    'cache-control': 'private, no-store',
+    'content-security-policy': SCRIPT_FREE_SITE_CSP + '; frame-ancestors ' + frameAncestors,
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+    'x-robots-tag': 'noindex, nofollow'
+  };
+}
+
 const TYPES = new Map([
   ['html', 'text/html; charset=utf-8'],
   ['htm', 'text/html; charset=utf-8'],
@@ -66,13 +82,7 @@ const TYPES = new Map([
 ]);
 
 export function previewResponse(preview, pathname) {
-  const headers = {
-    'cache-control': 'private, no-store',
-    'content-security-policy': "sandbox; default-src 'none'; script-src 'none'",
-    'referrer-policy': 'no-referrer',
-    'x-content-type-options': 'nosniff',
-    'x-robots-tag': 'noindex, nofollow'
-  };
+  const headers = scriptFreePreviewHeaders();
   if (!preview || preview.credentialsIncluded !== false || typeof pathname !== 'string' || pathname.includes('..') || pathname.includes('\\')) {
     return { status: 404, headers, body: null };
   }
