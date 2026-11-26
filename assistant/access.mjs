@@ -6,9 +6,10 @@ const b64url = text => base64Decode(String(text).replace(/-/g, '+').replace(/_/g
 const json = part => JSON.parse(new TextDecoder().decode(b64url(part)));
 
 /** Certs cache shared across requests in one isolate. Refetched once when an unknown `kid` appears (keys rotate every 6 weeks). */
-export function accessKeyCache({ fetchFn = fetch } = {}) {
-  let keys = null;
+export function accessKeyCache({ fetchFn = fetch, now = () => Date.now(), minRefetchMs = 60_000 } = {}) {
+  let keys = null, loadedAt = -Infinity;
   const load = async teamDomain => {
+    loadedAt = now();
     const response = await fetchFn('https://' + teamDomain + '/cdn-cgi/access/certs', { redirect: 'manual' });
     if (!response.ok) throw Error('access_certs_unavailable');
     const body = await response.json();
@@ -16,8 +17,9 @@ export function accessKeyCache({ fetchFn = fetch } = {}) {
   };
   return {
     async key(teamDomain, kid) {
-      if (!keys || !keys.has(kid)) await load(teamDomain);
-      const jwk = keys.get(kid);
+      // Unknown kid: refetch, but at most once per minute so random kids cannot turn every request into a certs fetch.
+      if (!keys || (!keys.has(kid) && now() - loadedAt >= minRefetchMs)) await load(teamDomain);
+      const jwk = keys?.get(kid);
       return jwk ? crypto.subtle.importKey('jwk', { kty: 'RSA', n: jwk.n, e: jwk.e, alg: 'RS256', ext: true }, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']) : null;
     }
   };
@@ -33,7 +35,8 @@ export async function verifyAccessJwt(token, { teamDomain, aud, cache, now = () 
   let key;
   try { key = await cache.key(teamDomain, header.kid); } catch { return null; }
   if (!key) return null;
-  const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64url(s), new TextEncoder().encode(h + '.' + p));
+  let ok = false;
+  try { ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64url(s), new TextEncoder().encode(h + '.' + p)); } catch { return null; }
   if (!ok) return null;
   const seconds = Math.floor(now() / 1000);
   const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];

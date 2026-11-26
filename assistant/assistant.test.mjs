@@ -52,11 +52,12 @@ async function setup({ keys, ghResponse, repoResponse } = {}) {
     WEBSITE_REPO_ID: '42', GH_APP_ID: '1001', GH_INSTALLATION_ID: '2002', GH_APP_PRIVATE_KEY: ghKeys.privateKey,
     DB: d1('./migrations/0001_assistant.sql'), ASSISTANT_VERSION: '0.1.0', UPSTREAM_SHA: 'b'.repeat(40)
   };
-  const opts = { fetchFn, now: () => NOW, cache: accessKeyCache({ fetchFn }) };
+  const clock = { t: NOW };
+  const opts = { fetchFn, now: () => clock.t, cache: accessKeyCache({ fetchFn, now: () => clock.t }) };
   const req = (path, { token, method = 'GET', origin, form } = {}) => handle(new Request(ORIGIN + path, {
     method, headers: { ...(token ? { 'cf-access-jwt-assertion': token } : {}), ...(origin ? { origin } : {}) }, body: form ? new URLSearchParams(form) : undefined
   }), env, opts);
-  return { k1, env, req, calls, certs, opts };
+  return { k1, env, req, calls, certs, opts, clock };
 }
 
 test('T-ACC-6: healthz is static; everything else fails closed until Access is configured', async () => {
@@ -99,14 +100,28 @@ test('T-ACC-1..5: missing, wrong-aud, wrong-iss, expired, not-yet-valid, tampere
   for (const token of bad) assert.equal((await req('/status', { token })).status, 403);
 });
 
-test('T-ACC-3: an unknown kid triggers exactly one cert refetch; a rotated key is then accepted', async () => {
-  const { req, calls, certs } = await setup();
+test('T-ACC-3: unknown kids refetch certs at most once a minute; a rotated key is accepted after that', async () => {
+  const { k1, req, calls, certs, clock } = await setup();
+  const certFetches = () => calls.filter(c => c.url.endsWith('/certs')).length;
+  assert.equal((await req('/status', { token: await jwt(k1, goodClaims()) })).status, 200);
   const k2 = await accessKey('k2');
-  const before = calls.filter(c => c.url.endsWith('/certs')).length;
-  assert.equal((await req('/status', { token: await jwt(k2, goodClaims()) })).status, 403);
-  assert.equal(calls.filter(c => c.url.endsWith('/certs')).length, before + 1);
   certs.keys.push(k2.jwk);
-  assert.equal((await req('/status', { token: await jwt(k2, goodClaims()) })).status, 200);
+  const before = certFetches();
+  for (let i = 0; i < 5; i++) assert.equal((await req('/status', { token: await jwt(k2, goodClaims()) })).status, 403, 'within the minute');
+  assert.equal(certFetches(), before, 'random kids cannot force a fetch per request');
+  clock.t += 61_000;
+  const fresh = await jwt(k2, goodClaims({ exp: clock.t / 1000 + 600, nbf: clock.t / 1000 - 10 }));
+  assert.equal((await req('/status', { token: fresh })).status, 200);
+  assert.equal(certFetches(), before + 1);
+});
+
+test('malformed token segments return 403, never a 500', async () => {
+  const { k1, req } = await setup();
+  const good = await jwt(k1, goodClaims());
+  const [h, p] = good.split('.');
+  for (const token of [h + '.' + p + '.abcde', h + '.' + p + '.a', 'a.b.c', h + '.x.' + good.split('.')[2]]) {
+    assert.equal((await req('/status', { token })).status, 403, token.slice(-8));
+  }
 });
 
 test('T-ACC-7: POSTs need the exact origin and the per-owner CSRF token', async () => {
