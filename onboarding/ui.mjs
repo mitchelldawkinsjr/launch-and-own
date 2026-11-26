@@ -24,6 +24,7 @@ p{overflow-wrap:anywhere}code{font-size:.9em;background:#eef3f8;padding:1px 5px;
 .site-header-inner{max-width:1200px;margin:0 auto;padding:10px clamp(14px,3vw,28px);display:flex;align-items:center;justify-content:space-between;gap:10px 18px;flex-wrap:wrap}
 .brand{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);font-weight:750;letter-spacing:-.01em}
 .brand-studio{font-weight:600;font-size:.82rem;color:var(--muted);letter-spacing:0}
+.brand-home{display:inline-flex;align-items:center;gap:10px;color:inherit;text-decoration:none}.studio-link{color:inherit}.brand .studio-link{text-decoration:none}.brand .studio-link:hover{text-decoration:underline}
 .brand-mark{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:9px;background:#1747a6;color:#fff;font-weight:800;font-size:.8rem;letter-spacing:-.02em}
 .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:700;line-height:1.6;background:var(--blue-soft);color:var(--blue-deep)}
 .badge-ok{background:var(--green-soft);color:var(--green)}.badge-plan{background:var(--warn-soft);color:var(--warn)}
@@ -71,6 +72,9 @@ summary{cursor:pointer;font-weight:700;color:var(--blue)}details[open]>summary{m
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}`;
 
 export const STUDIO_ATTRIBUTION='360 Web Solutions';
+export const STUDIO_URL='https://360web.solutions';
+// Every visible "360 Web Solutions" mention links to the studio site (external, new tab).
+const studioLink=`<a class="studio-link" href="${STUDIO_URL}" target="_blank" rel="noopener noreferrer">${STUDIO_ATTRIBUTION}</a>`;
 
 export const brandMark='<span class="brand-mark" aria-hidden="true">L&amp;O</span>';
 
@@ -105,8 +109,7 @@ export function pageShell({title,body,css='',step,stepComplete=false,wide=false,
     `<a href="${href}"${cls?` class="${cls}"`:''}${href===current?' aria-current="page"':''}>${label}</a>`).join('');
   body=providerLinksInNewTab(body);
   const content=omitTitle?body:`<div class="card"><h1 class="page-title">${escape(title)}</h1>${body}</div>`;
-  const studio=escape(STUDIO_ATTRIBUTION);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Launch & Own</title><style>${UI_CSS}${css}</style></head><body><a class="skip" href="#main">Skip to content</a><header class="site-header"><div class="site-header-inner"><a class="brand" href="/">${brandMark}<span>Launch &amp; Own</span><span class="brand-studio">by ${studio}</span><span class="badge">Beta</span></a><nav class="header-nav" aria-label="Primary">${links}</nav></div></header><main id="main" class="shell${wide?' shell-wide':''}">${step?stepperHtml(step,{complete:stepComplete}):''}${content}</main><footer class="site-footer"><div class="site-footer-inner"><span>Customer-controlled hosting · No paid email service · Beta onboarding · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · by ${studio}</span><span>Describe it. Launch it. Own it.</span></div></footer></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} | Launch & Own</title><style>${UI_CSS}${css}</style></head><body><a class="skip" href="#main">Skip to content</a><header class="site-header"><div class="site-header-inner"><div class="brand"><a class="brand-home" href="/">${brandMark}<span>Launch &amp; Own</span></a><span class="brand-studio">by ${studioLink}</span><span class="badge">Beta</span></div><nav class="header-nav" aria-label="Primary">${links}</nav></div></header><main id="main" class="shell${wide?' shell-wide':''}">${step?stepperHtml(step,{complete:stepComplete}):''}${content}</main><footer class="site-footer"><div class="site-footer-inner"><span>Customer-controlled hosting · No paid email service · Beta onboarding · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · by ${studioLink}</span><span>Describe it. Launch it. Own it.</span></div></footer></body></html>`;
 }
 
 export {escape};
