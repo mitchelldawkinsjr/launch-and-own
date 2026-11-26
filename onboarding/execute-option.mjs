@@ -11,6 +11,11 @@ import {
 } from './forms-cost-privacy-store.mjs';
 
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
+/** The owner must grant forms permissions in Cloudflare first (/connect/cloudflare?purpose=forms). */
+export class FormsConsentRequired extends Error {
+  constructor() { super('Cloudflare forms permission is required'); this.name = 'FormsConsentRequired'; }
+}
+
 export class OptionExecutionDisabled extends Error {
   constructor() {super('This optional feature has not been authorized for activation');}
 }
@@ -43,6 +48,8 @@ export async function executeOwnedStoredOption(env, current, executionId, {
     if (env.OPTION_FORMS_ENABLED !== 'true' ||
         !await formsCostPrivacySchemaReady(env.DB))
       throw new OptionExecutionDisabled();
+    // Incremental consent: forms scopes come only from the separate forms consent, never from sign-in.
+    if (current.cloudflare_forms_grant !== 1) throw new FormsConsentRequired();
   } else if ((grant.kind === 'domain' && env.OPTION_DOMAIN_ENABLED !== 'true') ||
       (grant.kind === 'email' && env.OPTION_EMAIL_ENABLED !== 'true'))
     throw new OptionExecutionDisabled();

@@ -55,6 +55,11 @@ test('the messages page shows only the owner\'s own site and never stores what i
     globalThis.fetch = async (url, init) => url.endsWith('/d1/database/' + DB + '/query')
       ? Response.json({success: true, result: [{results: [row({name: 'Ada', email: 'ada@example.net', message: 'Hello'})]}]})
       : inner(url, init);
+    // Incremental consent: reading messages needs the separate forms grant, never a plain sign-in.
+    const gated = await h.request('/form-messages?id=' + id, {cookie: tenant.cookie});
+    assert.equal(gated.status, 403);
+    assert.match(await gated.text(), /href="\/connect\/cloudflare\?purpose=forms"/);
+    h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_forms_grant=1').run();
     const page = await h.request('/form-messages?id=' + id, {cookie: tenant.cookie});
     const html = await page.text();
     assert.equal(page.status, 200, html);

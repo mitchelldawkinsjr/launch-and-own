@@ -322,6 +322,12 @@ test('approved forms execution sets up the widget, D1 and form Worker, and reapp
       limits.retentionDays,limits.maxSubmissionsPerDay,limits.maxBodyBytes,'forms-cost-test',time,time+600,time);
   operatorGrant(h,row);
   h.env.OPTION_FORMS_ENABLED='true';
+  // Incremental consent: forms setup needs the separate forms grant; a plain sign-in gets the consent page and no writes.
+  const gated=await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id});
+  assert.equal(gated.status,403);
+  assert.match(await gated.text(),/Allow form setup in Cloudflare/);
+  assert.equal(writes.length,0);
+  h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_forms_grant=1').run();
   const staged=await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id});
   const html=await staged.text();
   assert.equal(staged.status,200,html);
