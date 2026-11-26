@@ -4,6 +4,7 @@ import {normalizeSite} from '../site/render-site.mjs';
 import {readFormService} from './form-service.mjs';
 import {previewWebsiteUpdate,proposeWebsiteUpdate} from '../pipeline/propose-site-update.mjs';
 import {readManagedSiteBase,readApprovedUpdatePr} from '../pipeline/site-update-read.mjs';
+import {MergeRefused,mergeVerifiedPullRequest} from '../pipeline/merge-approved-pr.mjs';
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {getOwnedJob,isLaunchId,approvalSnapshot,hasCurrentOwnerSession} from './launch-jobs.mjs';
 import {seal,unseal} from './crypto.mjs';
@@ -173,11 +174,14 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     return view('Review your update',
       '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
       '<p><a href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener"><strong>See exactly how it will look</strong></a></p>'+
-      '<p>After you approve, we confirm automatic Cloudflare Pages preview builds are off before opening a change request on GitHub. To publish the update, open the request and click <strong>Merge</strong>. After you merge, Launch &amp; Own checks the public site.</p>'+
+      '<p><strong>Approve and publish</strong> confirms automatic Cloudflare Pages preview builds are off, commits exactly this page to your website\'s <code>main</code> branch and merges it. Cloudflare Pages publishes it, and Launch &amp; Own checks the public site. If your site changed since this preview, nothing is published. Prefer to review it in GitHub first? Choose <strong>Open a pull request instead</strong> and merge it yourself.</p>'+
       '<details><summary>Technical details</summary><p>Starting version: <code>'+escape(ticket.baseCommitSha)+
       '</code></p><p>Exact preview code: <code>'+escape(ticket.approvedHtmlSha256)+'</code></p></details>'+
-      button('/site-update-approve','Approve this update',current.csrf,
-        '<input type="hidden" name="ticket" value="'+escape(raw)+'">')+
+      // Owner decision 2026-11-26: approving publishes; a pull request stays available.
+      '<form action="/site-update-approve" method="POST"><input type="hidden" name="csrf" value="'+escape(current.csrf)+'">'+
+        '<input type="hidden" name="ticket" value="'+escape(raw)+'">'+
+        '<button type="submit" name="action" value="publish">Approve and publish</button> '+
+        '<button type="submit" name="action" value="pr">Open a pull request instead</button></form>'+
       '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p>');
   }
   async function html(env,current,raw) {
@@ -204,7 +208,21 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     if(proposal.status==='already-current')return view('No changes needed',
       '<p>The page you approved already matches what is in your private files. No change request was created. Check your live site or edit again.</p>'+
       '<p><a href="/history">Back to your launches</a></p>');
-    const receipt=await encodeTicket(env,'status',current,{jobId:item.job.id,repositoryId:item.job.repository_id,
+    // "Approve and publish": merge exactly this PR after re-verifying it; any refusal leaves it open.
+    let mergeNote=null;
+    if(form.get('action')!=='pr'){
+      try{
+        const pr=await readApprovedUpdatePr({...account(item.job),baseCommitSha:ticket.baseCommitSha,approvedHtmlSha256:ticket.approvedHtmlSha256,
+          number:proposal.number,headCommitSha:proposal.headCommitSha},{githubToken:item.grants.githubAccessToken,fetchFn});
+        if(pr.status!=='awaiting-customer-merge')throw new MergeRefused('merge_blocked');
+        await mergeVerifiedPullRequest({owner:item.job.github_login,repoName:'esp-'+item.job.site_slug,number:proposal.number,
+          headCommitSha:proposal.headCommitSha,baseCommitSha:ticket.baseCommitSha},{githubToken:item.grants.githubAccessToken,fetchFn});
+      }catch(error){
+        if(!(error instanceof MergeRefused))throw error;
+        mergeNote=error.code;
+      }
+    }
+    const receipt=await encodeTicket(env,'status',current,{mergeNote,jobId:item.job.id,repositoryId:item.job.repository_id,
       baseCommitSha:ticket.baseCommitSha,approvedHtmlSha256:ticket.approvedHtmlSha256,
       number:proposal.number,headCommitSha:proposal.headCommitSha});
     return new Response(null,{status:303,headers:{
@@ -231,8 +249,11 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     }
     if(!await hasCurrentOwnerSession(env,current,now()))
       return fail('Your connected accounts changed. Reconnect to check this update.',401);
+    const blocked=pr.status==='awaiting-customer-merge'&&receipt.mergeNote
+      ?'<p>'+(receipt.mergeNote==='stale_base'?'Your website changed after you approved, so it was not published automatically.'
+        :'GitHub did not allow an automatic merge, so it was not published.')+' Merge the pull request yourself when you are ready.</p>':'';
     return view('Update status',
-      '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
+      '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+blocked+
       renderUpdateStatusBody({
         pr, verifyResult: result, approvedHtmlSha256: receipt.approvedHtmlSha256,
         ticketRaw: raw, jobId: item.job.id, escape

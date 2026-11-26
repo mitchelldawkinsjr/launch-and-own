@@ -180,6 +180,14 @@ function harness({withJobs=true}={}){
       merged_at:null,merge_commit_sha:null};
     return Response.json(resourceState.updatePr,{status:201});
   }
+  if(url===root+'/pulls/55/merge'&&opts.method==='PUT'){
+    // "Approve and publish": merges only the exact approved head; a test can make GitHub refuse.
+    const payload=JSON.parse(opts.body);
+    resourceState.merges=(resourceState.merges||[]).concat([payload]);
+    if(resourceState.denyMerge||!resourceState.updatePr||payload.sha!==resourceState.updatePr.head.sha)return new Response('{}',{status:405});
+    resourceState.updatePr={...resourceState.updatePr,state:'closed',merged:true,merged_at:'2026-11-26T12:00:00Z',merge_commit_sha:'9'.repeat(40)};
+    return Response.json({merged:true,sha:'9'.repeat(40)});
+  }
   if(url===root+'/pulls/55')return resourceState.updatePr?Response.json(resourceState.updatePr):new Response('{}',{status:404});
   if(url===root+'/branches/main')return Response.json({commit:{
     sha:resourceState.headSha??(resourceState.homepage?GENERATED_SHA:BASE_SHA),

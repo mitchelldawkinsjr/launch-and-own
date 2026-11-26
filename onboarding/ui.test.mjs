@@ -75,13 +75,14 @@ test('Maintain explains how the planned assistant would work, matching the appro
   const maintain=html.slice(html.indexOf('lo-p-maintain'),html.indexOf('lo-p-grow'));
   assert.match(maintain,/How the planned assistant would work/);
   assert.deepEqual([...maintain.matchAll(/<li><span class="lo-asst-n" aria-hidden="true">\d<\/span><div><strong>([^<]+)</g)].map(m=>m[1]),
-    ['Ask','Prepare','Preview','Approve','You merge','Publish and check']);
+    ['Ask','Prepare','Preview','Approve','Merge','Publish and check']);
   assert.match(maintain,/works once and expires after 15 minutes/,'contract: 15-minute single-use approval');
   assert.match(maintain,/Up to 10 changes in up to 5 files/,'contract: edit limits');
   assert.match(maintain,/text, links, business details[^<]*colors/,'contract: edit kinds');
   assert.match(maintain,/set up in your own GitHub and Cloudflare accounts/,'ADR-001: customer-run setup');
-  assert.match(maintain,/Only you can merge it/);
-  assert.match(maintain,/cannot merge them/);
+  // Owner decision 2026-11-26: approving publishes the exact approved change; a pull request stays available.
+  assert.match(maintain,/merges only the exact change you just approved, and only if your site has not changed/);
+  assert.match(maintain,/choose a pull request and merge it yourself/);
   assert.doesNotMatch(maintain,/will (?:merge|publish) for you|automatically (?:merge|publish)/i);
 });
 

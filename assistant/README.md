@@ -12,7 +12,7 @@
 7. Optional: in the assistant repo only, turn on *Allow GitHub Actions to create and approve pull requests*. The weekly check then opens update PRs for security, breaking-change and end-of-support releases. Otherwise the dashboard tells you about updates.
 
 ## Using it
-Open the assistant's address and type the text as it appears on your site and what it should say. The assistant finds the one page it's on, shows the exact change and the changed file (with scripts blocked), and opens a pull request when you approve. **You merge it in GitHub; nothing is published before that.** Every step re-reads your repository, so if the site changed in between, it asks you to start again.
+Open the assistant's address and type the text as it appears on your site and what it should say. The assistant finds the one page it's on, shows the exact change and the changed file (with scripts blocked). **Approve and publish** opens a pull request and merges exactly that change, but only if your site hasn't changed since the preview. Choose **Open a pull request instead** to review and merge it in GitHub yourself. If GitHub refuses the merge, the pull request stays open for you. Every step re-reads your repository, so if the site changed in between, it asks you to start again.
 
 Plain-language requests ("open Saturdays 10 to 4") use your own Workers AI allowance and are an **owner opt-in** (`AI_EDITS`). The default model, `@cf/openai/gpt-oss-120b`, met the 95% valid / 90% correct bar in 3 of 3 runs on the 8-case accuracy set (2026-11-26); `@cf/google/gemma-4-26b-a4b-it` is the cheaper fallback. When on, the daily budget is reserved before every model call, and the model's proposal goes through the same checks as a typed edit.
 

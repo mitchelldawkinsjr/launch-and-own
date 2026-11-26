@@ -13,6 +13,7 @@ import {artifactDigest,isolatePreview,previewResponse} from '../imported/preview
 import {proposeImportedPullRequest,readImportedPullRequest} from '../imported/pull-request.mjs';
 import {readCurrentRevision} from '../imported/revision.mjs';
 import {verifyPublishedRevision} from '../imported/verify-published.mjs';
+import {MergeRefused,mergeVerifiedPullRequest} from '../pipeline/merge-approved-pr.mjs';
 import {getOwnedJob,hasCurrentOwnerSession,isLaunchId} from './launch-jobs.mjs';
 import {seal,unseal} from './crypto.mjs';
 import {isZipArtifact,stageZip} from './zip-artifacts.mjs';
@@ -245,7 +246,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       '<details><summary>Same text on more than one page?</summary>'+
         '<label for="path">Page file (optional)</label><input id="path" name="path" maxlength="240" placeholder="contact.html"></details>'
     ].join('');
-    return view('Edit imported website','<p>Type the text as it appears on your site and what it should say instead. We find the page it is on, show you a preview, and prepare a pull request. Nothing is merged or published for you.</p>'+
+    return view('Edit imported website','<p>Type the text as it appears on your site and what it should say instead. We find the page it is on and show you a preview. When you approve, we publish exactly that change. You can choose to open a pull request instead and merge it yourself.</p>'+
       heading+notes+
       (paths?'<p>Files you can edit:</p><ul>'+paths+'</ul>':'')+
       button('/imported-edit-preview','Preview this edit',current.csrf,fields)+
@@ -404,7 +405,20 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
         githubToken:item.grants.githubAccessToken,fetchFn,approvalStore:d1ApprovalStore(env.DB)
       });
       if(proposal.live!==false||proposal.merged!==false)throw new ImportedEditError('pull-request-unreadable');
-      const status=await encodeTicket(env,'status',current,{
+      // Owner decision 2026-11-26: "Approve and publish" merges this exact PR; "Open a pull request instead" leaves it open.
+      let mergeNote=null;
+      if(form.get('action')!=='pr'){
+        try{
+          const pull=await readImportedPullRequest(receipt,{githubToken:item.grants.githubAccessToken,fetchFn,number:proposal.number,headCommitSha:proposal.headCommitSha});
+          if(pull.status!=='pr_open')throw new MergeRefused('merge_blocked');
+          await mergeVerifiedPullRequest({owner:item.job.github_login,repoName:'esp-'+item.job.site_slug,number:proposal.number,
+            headCommitSha:proposal.headCommitSha,baseCommitSha:ticket.baseCommitSha},{githubToken:item.grants.githubAccessToken,fetchFn});
+        }catch(error){
+          if(!(error instanceof MergeRefused))throw error;
+          mergeNote=error.code; // the PR stays open; the status page explains why nothing was published
+        }
+      }
+      const status=await encodeTicket(env,'status',current,{mergeNote,
         jobId:item.job.id,repositoryId:item.job.repository_id,baseCommitSha:ticket.baseCommitSha,
         artifactDigest:receipt.artifactDigest,proposalDigest:ticket.proposalDigest,approvalDigest:receipt.digest,
         summary:ticket.summary,edits:ticket.edits,
@@ -482,8 +496,11 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
           :pull.status==='failed'
             ?'The pull request no longer matches the approved edit. The site was not published from this edit.'
             :'The pull request is open. Merge it yourself in GitHub. This page does not publish the site.';
+      const blocked=ticket.mergeNote==='stale_base'
+        ?'Your website changed after you approved, so it was not published automatically. '
+        :ticket.mergeNote?'GitHub did not allow an automatic merge, so it was not published. ':'';
       const follow=review.status==='pr_open'
-        ?'<p>Merge it yourself in GitHub. This page does not publish the site.</p>':'';
+        ?'<p>'+escape(blocked)+'Merge it yourself in GitHub when you are ready. This page does not publish the site.</p>':'';
       return view('Imported edit status',
         '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
         (screen||'<p>'+escape(detail)+'</p>')+follow+

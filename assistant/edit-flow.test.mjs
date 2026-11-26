@@ -40,7 +40,14 @@ function fakeGitHub({ repoId = 101 } = {}) {
       state.history.push({ method, path, body });
       assert.equal(u.hostname, 'api.github.com');
       if (path === '/user') throw Error('installation tokens cannot call /user');
-      if (path.includes('/merge')) throw Error('merge attempted');
+      if (path.startsWith(root + '/pulls/') && path.endsWith('/merge') && method === 'PUT') {
+        const p = state.pulls.find(x => x.number === Number(path.split('/').at(-2)));
+        state.merges = (state.merges || []).concat([body]);
+        if (state.denyMerge || !p || body.sha !== p.head.sha) return json({ message: 'not mergeable' }, 405);
+        Object.assign(p, { state: 'closed', merged: true, merged_at: '2026-11-26T12:00:00Z', merge_commit_sha: '9'.repeat(40) });
+        return json({ merged: true, sha: '9'.repeat(40) });
+      }
+      if (path.includes('/merge')) throw Error('unexpected merge route');
       if (path === '/app/installations/2002/access_tokens') { state.tokenBodies.push(body); return json({ token: 'ghs_test', repositories: [{ id: repoId }], permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } }, 201); }
       if (path === root && method === 'GET') return json({ id: repoId, name: 'esp-willow', private: true, default_branch: 'main', description: 'Launch & Own managed site: willow', owner: { login: 'tester', id: 42 } });
       if (path === root + '/branches/main') return json({ commit: { sha: state.main } });
@@ -107,7 +114,7 @@ async function world({ ai, envExtra = {} } = {}) {
 
 const writes = gh => gh.history.filter(h => h.method !== 'GET');
 
-test('happy path: typed edit -> preview -> review -> exact file -> approve -> one PR, never /user, never merge', async () => {
+test('happy path: typed edit -> preview -> review -> exact file -> Approve and publish -> one PR merged at the approved head, never /user', async () => {
   const w = await world();
   const home = await (await w.call('/')).text();
   assert.match(home, /Preview the change/);
@@ -117,14 +124,16 @@ test('happy path: typed edit -> preview -> review -> exact file -> approve -> on
   assert.equal(writes(w.gh).length, 1, 'only the token mint so far (no GitHub writes before approval)');
   const page = await (await w.call(review)).text();
   assert.match(page, /Saturday: 10 AM-4 PM/);
-  assert.match(page, /Approve and open a pull request/);
+  assert.match(page, /Approve and publish/);
+  assert.match(page, /Open a pull request instead/);
   const fileRes = await w.call('/file?ticket=' + encodeURIComponent(w.hidden(page, 'ticket')) + '&path=index.html');
   assert.equal(fileRes.status, 200);
   assert.match(fileRes.headers.get('content-security-policy'), /sandbox; default-src 'none'; script-src 'none'/);
   assert.match(await fileRes.text(), /Saturday: 10 AM-4 PM/);
-  const form = { ticket: w.hidden(page, 'ticket'), approvalId: w.hidden(page, 'approvalId'), proposalDigest: w.hidden(page, 'proposalDigest'), artifactDigest: w.hidden(page, 'artifactDigest') };
-  const approveRes = await w.call('/approve', { method: 'POST', form });
-  const status = w.loc(approveRes);
+  const form = { ticket: w.hidden(page, 'ticket'), approvalId: w.hidden(page, 'approvalId'), proposalDigest: w.hidden(page, 'proposalDigest'), artifactDigest: w.hidden(page, 'artifactDigest'), action: 'publish' };
+  const status = w.loc(await w.call('/approve', { method: 'POST', form }));
+  assert.equal(w.gh.merges.length, 1, 'Approve and publish merges once');
+  assert.equal(w.gh.merges[0].sha, w.gh.pulls[0].head.sha, 'exactly the approved head');
   assert.match(status, /^\/pr\?ticket=/);
   assert.equal(w.gh.pulls.length, 1);
   assert.match(await w.gh.blobText('public/index.html'), /Saturday: 10 AM-4 PM/);
@@ -133,7 +142,7 @@ test('happy path: typed edit -> preview -> review -> exact file -> approve -> on
   const claim = w.db.prepare('SELECT owner_provider, owner_id FROM onboarding_imported_edit_approvals').get();
   assert.deepEqual({ ...claim }, { owner_provider: 'cloudflare_access', owner_id: OWNER }, 'approval bound to the Access owner');
   const statusPage = await (await w.call(status)).text();
-  assert.match(statusPage, /Waiting for you to review and merge it/);
+  assert.match(statusPage, /Published: merged into your website/);
   assert.match(statusPage, /pull\/7/);
 });
 
@@ -150,8 +159,9 @@ test('T-SHA-1: main moves after the preview -> stale_base, no branch or commit',
 test('T-SHA-3 / T-RET-2: replaying an approval is refused and makes no second commit', async () => {
   const w = await world();
   const page = await (await w.call(w.loc(await w.call('/preview', { method: 'POST', form: { mode: 'typed', kind: 'text', old: 'Saturday: 9 AM-2 PM', replacement: 'Saturday: 10 AM-4 PM' } })))).text();
-  const form = { ticket: w.hidden(page, 'ticket'), approvalId: w.hidden(page, 'approvalId'), proposalDigest: w.hidden(page, 'proposalDigest'), artifactDigest: w.hidden(page, 'artifactDigest') };
+  const form = { ticket: w.hidden(page, 'ticket'), approvalId: w.hidden(page, 'approvalId'), proposalDigest: w.hidden(page, 'proposalDigest'), artifactDigest: w.hidden(page, 'artifactDigest'), action: 'pr' };
   w.loc(await w.call('/approve', { method: 'POST', form }));
+  assert.equal((w.gh.merges || []).length, 0, 'the pull-request choice never merges');
   const commitsBefore = writes(w.gh).filter(h => h.path.endsWith('/git/commits')).length;
   const replay = await w.call('/approve', { method: 'POST', form });
   assert.match(await replay.text(), /already used/);
@@ -260,4 +270,15 @@ test('an AI proposal too large for a review ticket fails clearly as too large', 
   const w = await world({ ai: aiProposal(big) });
   const res = await w.call('/preview', { method: 'POST', form: { mode: 'ai', request: 'long' } });
   assert.match(await res.text(), /too large/);
+});
+
+test('Approve and publish: a merge GitHub refuses leaves the PR open with an explanation', async () => {
+  const w = await world();
+  const page = await (await w.call(w.loc(await w.call('/preview', { method: 'POST', form: { mode: 'typed', kind: 'text', old: 'Saturday: 9 AM-2 PM', replacement: 'Saturday: 10 AM-4 PM' } })))).text();
+  w.gh.denyMerge = true;
+  const status = w.loc(await w.call('/approve', { method: 'POST', form: { ticket: w.hidden(page, 'ticket'), approvalId: w.hidden(page, 'approvalId'), proposalDigest: w.hidden(page, 'proposalDigest'), artifactDigest: w.hidden(page, 'artifactDigest') } }));
+  assert.equal(w.gh.merges.length, 1, 'no choice means publish');
+  const statusPage = await (await w.call(status)).text();
+  assert.match(statusPage, /GitHub did not allow an automatic merge/);
+  assert.match(statusPage, /open for you to review and merge/);
 });

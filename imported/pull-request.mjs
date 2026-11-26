@@ -207,7 +207,7 @@ export async function proposeImportedPullRequest(receipt, proposal, { githubToke
     'Reviewed main commit: ' + baseSha,
     'Approved artifact digest: ' + receipt.artifactDigest,
     'Changed files: ' + changed.map(file => 'public/' + file.path).join(', '),
-    'Review the diff and merge it yourself. This request does not merge or publish the site.'
+    'The owner approved this exact change. If they chose Approve and publish, it is merged right after this pull request opens. Otherwise review the diff and merge it yourself. Opening this request does not merge or publish the site.'
   ].join('\n\n');
   const pull = await gh(root + '/pulls', {
     method: 'POST',
