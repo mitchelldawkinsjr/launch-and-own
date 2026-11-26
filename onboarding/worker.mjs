@@ -170,7 +170,7 @@ async function gitHubCallback(request,env,current){
 export function cloudflareScopes(env){
   const scopes=String(env.CF_SCOPES).trim().split(/\s+/);
   const forms=env.OPTION_FORMS_ENABLED==='true'?String(env.CF_FORMS_SCOPES||'').trim().split(/\s+/)
-    .filter(scope=>/^[a-z0-9-]+\.(?:read|write)$/.test(scope)):[];
+    .filter(scope=>scope==='workers-scripts.admin'||/^[a-z0-9-]+\.(?:read|write)$/.test(scope)):[];
   return [...new Set([...scopes,...forms])];
 }
 async function cloudflareStart(request,env,current){

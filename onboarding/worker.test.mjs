@@ -800,8 +800,8 @@ test('any other script on the live homepage still fails the launch check',async(
 });
 test('forms scope IDs are requested only while forms are on, and malformed IDs are dropped',async()=>{
  const {cloudflareScopes}=await import('./worker.mjs');
- const env={CF_SCOPES:'account-settings.read page.write',CF_FORMS_SCOPES:'d1.write workers-scripts.write bad_scope page.write'};
+ const env={CF_SCOPES:'account-settings.read page.write',CF_FORMS_SCOPES:'d1.write workers-scripts.admin workers-scripts.write d1.admin bad_scope page.write'};
  assert.deepEqual(cloudflareScopes(env),['account-settings.read','page.write']);
  assert.deepEqual(cloudflareScopes({...env,OPTION_FORMS_ENABLED:'true'}),
-  ['account-settings.read','page.write','d1.write','workers-scripts.write']);
+  ['account-settings.read','page.write','d1.write','workers-scripts.admin','workers-scripts.write']);
 });
