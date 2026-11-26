@@ -56,7 +56,7 @@ test('current sites HTML never invents a live website link', () => {
       sourceTicket: 'sealed-ticket-fixture'
     }]
   }, {escape: s => String(s)});
-  assert.match(html, /Live content not re-checked here/);
+  assert.match(html, /Managed site · open site toolkit for live checks/);
   assert.match(html, /Open on GitHub/);
   assert.match(html, /Open in Cloudflare/);
   assert.match(html, /\/toolkit\/source\?ticket=sealed-ticket-fixture/);
@@ -132,7 +132,8 @@ test('GET /toolkit soft-loads current managed sites without provider writes', as
   const page = await h.request('/toolkit', {cookie: tenant.cookie});
   assert.equal(page.status, 200);
   const html = await page.text();
-  assert.doesNotMatch(html, /Sites we found in your accounts/);
+  assert.match(html, /Recent launches/);
+  assert.doesNotMatch(html, /Sites we found in your accounts|Other sites in your accounts/);
   assert.match(html, /In your accounts now/);
   assert.match(html, /Open on GitHub/);
   assert.match(html, /Open in Cloudflare/);

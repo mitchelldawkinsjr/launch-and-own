@@ -137,10 +137,13 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   assert.match(html, /Last checked <time/);
   assert.match(html, /Stays on this list until <time/);
   assert.match(html, /Approval fingerprint/);
+  assert.match(html, /Recent launches/);
   assert.match(html, /30 days/);
+  assert.match(html, /recorded launch results/);
   assert.match(html, /Public address when checked: <code>https:\/\/esp-willow-studio-site\.pages\.dev\//);
   assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
-  // One card per site: the found GitHub/Cloudflare details sit inside the launch card, not a second list.
+  assert.match(html, /Recent launches/);
+  assert.match(html, /recorded launch results/);
   assert.doesNotMatch(html, /Sites we found in your accounts|Other sites in your accounts/);
   const card = html.slice(html.indexOf('<section class="tk-site">'), html.indexOf('</section>', html.indexOf('<section class="tk-site">')));
   assert.match(card, /In your accounts now/);
@@ -208,7 +211,7 @@ test('toolkit groups each site into Overview, Updates, Services and Settings wit
   assert.match(html, /<legend class="lo-sr">Sections for Willow &lt;b><\/legend>/);
   assert.match(panel('overview'), /Public address when checked[\s\S]*Last checked <time/);
   assert.match(panel('updates'), /href="\/site-update\?id=x">Update this website[\s\S]*Change the copy safely/);
-  assert.match(panel('services'), /href="\/options\?id=x"[\s\S]*Explore your website services/);
+  assert.match(panel('services'), /Review optional requests \(store only\)[\s\S]*Explore your website services/);
   assert.match(panel('settings'), /Approval fingerprint <code>bbbbbbbbbbbb…[\s\S]*What this site includes/);
   assert.doesNotMatch(html, /<script|\bon[a-z]+=/i);
 });
