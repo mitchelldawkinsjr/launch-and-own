@@ -26,22 +26,26 @@ function githubClient(token, fetchFn) {
 }
 
 export async function readCurrentRevision(input) {
-  const allowed = new Set(['owner', 'repo', 'token', 'fetchFn']);
+  // installationRepositoryId: customer-owned assistant (M2). An installation token cannot call /user, so the repo is pinned by id.
+  const allowed = new Set(['owner', 'repo', 'token', 'fetchFn', 'installationRepositoryId']);
   if (!input || typeof input !== 'object' || Object.keys(input).some(key => !allowed.has(key))) {
     throw new ImportedEditError('revision-must-be-read');
   }
-  const { owner, repo, token, fetchFn = fetch } = input;
+  const { owner, repo, token, fetchFn = fetch, installationRepositoryId } = input;
+  const installation = installationRepositoryId !== undefined;
+  if (installation && (!Number.isSafeInteger(installationRepositoryId) || installationRepositoryId < 1)) throw new ImportedEditError('repository-mismatch');
   if (!NAME.test(owner || '') || !NAME.test(repo || '') || !repo.startsWith('esp-')) throw new ImportedEditError('repository-mismatch');
   const gh = githubClient(token, fetchFn);
   const root = '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo);
-  const user = await gh('/user');
+  const user = installation ? null : await gh('/user');
   const repository = await gh(root);
   const slug = repo.slice(4);
-  const owned = Number.isSafeInteger(user?.id) && user.id >= 1
-    && user.login?.toLowerCase() === owner.toLowerCase()
+  const ownerId = installation ? repository?.owner?.id : user?.id;
+  const owned = (installation ? repository?.id === installationRepositoryId : user?.login?.toLowerCase() === owner.toLowerCase())
+    && Number.isSafeInteger(ownerId) && ownerId >= 1
     && Number.isSafeInteger(repository?.id) && repository.id >= 1
     && repository.private === true && repository.default_branch === 'main'
-    && repository.name === repo && repository.owner?.id === user.id
+    && repository.name === repo && repository.owner?.id === ownerId
     && repository.owner?.login?.toLowerCase() === owner.toLowerCase()
     && isManagedRepositoryDescription(repository.description, slug);
   if (!owned) throw new ImportedEditError('repository-mismatch');
@@ -77,7 +81,7 @@ export async function readCurrentRevision(input) {
   files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
   return {
     ownerLogin: owner,
-    githubUserId: user.id,
+    githubUserId: ownerId,
     repositoryId: repository.id,
     repository: owner + '/' + repo,
     commitSha: commitSha.toLowerCase(),

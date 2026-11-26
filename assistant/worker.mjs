@@ -4,6 +4,7 @@ import { accessKeyCache, verifyAccessJwt } from './access.mjs';
 import { DEFAULT_DAILY_NEURONS, usedNeurons } from './budget.mjs';
 import { mintInstallationToken } from './github-app.mjs';
 import { ImportedEditError } from '../imported/errors.mjs';
+import { editRoute } from './edit-flow.mjs';
 
 const HEADERS = {
   'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer',
@@ -61,14 +62,18 @@ export async function handle(request, env, { fetchFn = fetch, now = () => Date.n
   // Owner identity is {provider: 'cloudflare_access', id: sub}; this deployment has exactly one owner.
   if (!claims || claims.sub !== env.OWNER_SUB) return send(403, 'Forbidden');
 
+  const csrf = await csrfToken(env, claims.sub);
+  let form = null;
   if (request.method === 'POST') {
     if (request.headers.get('origin') !== env.ASSISTANT_ORIGIN) return send(403, 'Forbidden');
-    const form = await request.formData().catch(() => null);
-    if (!form || !constantTimeEqual(form.get('csrf'), await csrfToken(env, claims.sub))) return send(403, 'Forbidden');
+    form = await request.formData().catch(() => null);
+    if (!form || !constantTimeEqual(form.get('csrf'), csrf)) return send(403, 'Forbidden');
     if (url.pathname === '/self-check') return asJson(200, await selfCheck(env, fetchFn));
-    return send(404, 'Not found');
-  }
-  if (request.method !== 'GET') return send(405, 'Method not allowed');
+  } else if (request.method !== 'GET') return send(405, 'Method not allowed');
+
+  const edit = await editRoute(request, url, form, env, { sub: claims.sub, csrf, fetchFn, now: now() });
+  if (edit) return edit;
+  if (request.method === 'POST') return send(404, 'Not found');
 
   if (url.pathname === '/status') {
     const limit = Number(env.DAILY_NEURON_BUDGET) || DEFAULT_DAILY_NEURONS;
@@ -76,7 +81,7 @@ export async function handle(request, env, { fetchFn = fetch, now = () => Date.n
       version: env.ASSISTANT_VERSION || 'unknown', upstreamSha: env.UPSTREAM_SHA || 'unknown',
       access: 'ok', github: githubConfig(env) ? 'configured' : 'not_configured',
       ai: { usedToday: env.DB ? await usedNeurons(env.DB, { now }) : null, dailyLimit: limit },
-      csrf: await csrfToken(env, claims.sub)
+      csrf
     });
   }
   return send(404, 'Not found');

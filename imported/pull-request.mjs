@@ -27,6 +27,24 @@ function client(token, fetchFn) {
   };
 }
 
+/** Repository and owner checks. Hosted (default): the GitHub user from /user owns the managed repo.
+ *  installation (customer-owned assistant): an installation token cannot call /user; the receipt's Access owner
+ *  approved, and the repo must be the exact pinned managed repo. Returns the repo and its owner's numeric id. */
+async function verifyTarget(gh, receipt, root, owner, repoName, installation) {
+  const user = installation ? null : await gh('/user');
+  const repo = await gh(root);
+  const slug = repoName.slice(4);
+  const ownerOk = installation
+    ? receipt.owner?.provider === 'cloudflare_access' && typeof receipt.owner.id === 'string' && receipt.owner.id.length > 0
+    : receipt.owner?.provider === 'github' && String(user?.id) === receipt.owner.id && user?.login?.toLowerCase() === owner.toLowerCase();
+  const ownerId = installation ? repo?.owner?.id : user?.id;
+  if (!ownerOk || !Number.isSafeInteger(ownerId) || repo?.id !== receipt.repositoryId || repo?.private !== true || repo?.name !== repoName
+      || repo?.owner?.id !== ownerId || repo?.owner?.login?.toLowerCase() !== owner.toLowerCase() || !isManagedRepositoryDescription(repo?.description, slug)) {
+    throw new ImportedEditError('repository-mismatch');
+  }
+  return { repo, ownerId };
+}
+
 async function changedFiles(baseFiles, nextFiles, approved) {
   if (!Array.isArray(baseFiles) || !Array.isArray(nextFiles) || baseFiles.length !== nextFiles.length) {
     throw new ImportedEditError('file-set-mismatch');
@@ -76,7 +94,7 @@ async function verifyHead(gh, root, headSha, baseSha, baseEntries, changed) {
   }
 }
 
-export async function readImportedPullRequest(receipt, { githubToken, fetchFn = fetch, number, headCommitSha } = {}) {
+export async function readImportedPullRequest(receipt, { githubToken, fetchFn = fetch, number, headCommitSha, installation = false } = {}) {
   if (!Number.isSafeInteger(number) || number < 1 || typeof headCommitSha !== 'string' || !SHA.test(headCommitSha)) {
     throw new ImportedEditError('pull-request-unreadable');
   }
@@ -84,14 +102,7 @@ export async function readImportedPullRequest(receipt, { githubToken, fetchFn = 
   const owner = receipt.ownerLogin;
   const repoName = receipt.repository.slice(owner.length + 1);
   const root = '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repoName);
-  const user = await gh('/user');
-  const repo = await gh(root);
-  const slug = repoName.slice(4);
-  if (receipt.owner?.provider !== 'github' || String(user?.id) !== receipt.owner.id || user?.login?.toLowerCase() !== owner.toLowerCase()
-      || repo?.id !== receipt.repositoryId || repo?.private !== true || repo?.name !== repoName
-      || repo?.owner?.id !== user.id || !isManagedRepositoryDescription(repo?.description, slug)) {
-    throw new ImportedEditError('repository-mismatch');
-  }
+  const { repo } = await verifyTarget(gh, receipt, root, owner, repoName, installation);
   const branchName = 'launch-and-own/edit-' + (await sha256Text(receipt.baseCommitSha + ':' + receipt.artifactDigest)).slice(0, 20);
   const pull = await gh(root + '/pulls/' + number);
   const url = 'https://github.com/' + owner + '/' + repoName + '/pull/' + number;
@@ -111,7 +122,7 @@ export async function readImportedPullRequest(receipt, { githubToken, fetchFn = 
   return { status: 'pr_open', pullRequest: url, live: false, merged: false };
 }
 
-export async function proposeImportedPullRequest(receipt, proposal, { githubToken, fetchFn = fetch, approvalStore } = {}) {
+export async function proposeImportedPullRequest(receipt, proposal, { githubToken, fetchFn = fetch, approvalStore, installation = false } = {}) {
   if (receipt?.explicitlyApproved !== true) throw new ImportedEditError('approval-required');
   if (!approvalStore || typeof approvalStore.claim !== 'function') throw new ImportedEditError('approval-required');
   if (await approvalDigest(receipt) !== receipt.digest) throw new ImportedEditError('approval-digest-mismatch');
@@ -122,16 +133,8 @@ export async function proposeImportedPullRequest(receipt, proposal, { githubToke
   const owner = receipt.ownerLogin;
   const repoName = receipt.repository.slice(owner.length + 1);
   const root = '/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repoName);
-  const user = await gh('/user');
-  const repo = await gh(root);
-  const slug = repoName.slice(4);
-  if (receipt.owner?.provider !== 'github' || String(user?.id) !== receipt.owner.id || user?.login?.toLowerCase() !== owner.toLowerCase()
-      || repo?.id !== receipt.repositoryId || repo?.private !== true || repo?.default_branch !== 'main'
-      || repo?.name !== repoName || repo?.owner?.id !== user.id
-      || repo?.owner?.login?.toLowerCase() !== owner.toLowerCase()
-      || !isManagedRepositoryDescription(repo?.description, slug)) {
-    throw new ImportedEditError('repository-mismatch');
-  }
+  const { repo } = await verifyTarget(gh, receipt, root, owner, repoName, installation);
+  if (repo.default_branch !== 'main') throw new ImportedEditError('repository-mismatch');
   const readMain = async () => {
     const branch = await gh(root + '/branches/main');
     const sha = branch?.commit?.sha;
