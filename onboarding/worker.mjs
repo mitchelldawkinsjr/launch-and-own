@@ -19,6 +19,7 @@ import {LOGO_PNG_BASE64} from './logo.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,hasCurrentOwnerSession,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {createSiteOptionsRoutes} from './post-launch-options.mjs';
 import {executeOwnedStoredOption,FormsConsentRequired,OptionExecutionDisabled} from './execute-option.mjs';
+import {mintOwnerExecutionGrant} from './owner-option-activation.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
@@ -807,21 +808,7 @@ async function logout(request,env,current){
 const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const importedEdits=createImportedEditRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
-async function applyApprovedOption(request,env,current){
-  await limitAttempts(request,env);
-  const data=await formData(request);
-  assertCsrf(request,data,current,baseUrl(env));
-  if(data.getAll('id').length!==1 || data.size!==2)
-    return fail('Open the approved option from your existing toolkit.',400);
-  let result;
-  try {
-    result=await executeOwnedStoredOption(env,current,data.get('id'));
-  }catch(error){
-    if(error instanceof FormsConsentRequired)return formsConsentPage(view,'Setting up your contact form');
-    if(error instanceof OptionExecutionDisabled)
-      return fail('That option has no currently authorized activation grant.',403);
-    throw error;
-  }
+function renderOptionExecutionResult(result){
   if(result.kind==='forms')return view('Contact form setup',
     '<p>Your form service is set up in your own Cloudflare account: spam protection, a private database for messages, and a small Worker that receives them.</p>'+
     '<p>Next, connect your site\'s contact form. You review the exact change and merge it yourself.</p>'+
@@ -837,6 +824,52 @@ async function applyApprovedOption(request,env,current){
   return view('Optional feature activation', '<p>'+escape(label)+'</p>'+
     '<p>No DNS or MX records were changed by this action.</p>'+
     '<p><a href="/toolkit">Back to toolkit</a></p>');
+}
+async function runStoredOptionExecution(env,current,executionId){
+  try {
+    return await executeOwnedStoredOption(env,current,executionId);
+  }catch(error){
+    if(error instanceof OptionExecutionDisabled)
+      throw error;
+    throw error;
+  }
+}
+async function applyApprovedOption(request,env,current){
+  await limitAttempts(request,env);
+  const data=await formData(request);
+  assertCsrf(request,data,current,baseUrl(env));
+  if(data.getAll('id').length!==1 || data.size!==2)
+    return fail('Open the approved option from your existing toolkit.',400);
+  let result;
+  try {
+    result=await runStoredOptionExecution(env,current,data.get('id'));
+  }catch(error){
+    if(error instanceof FormsConsentRequired)return formsConsentPage(view,'Setting up your contact form');
+    if(error instanceof OptionExecutionDisabled)
+      return fail('That option has no currently authorized activation grant.',403);
+    throw error;
+  }
+  return renderOptionExecutionResult(result);
+}
+async function activateOwnerOption(request,env,current){
+  await limitAttempts(request,env);
+  const data=await formData(request);
+  assertCsrf(request,data,current,baseUrl(env));
+  if(data.getAll('approvalId').length!==1 || data.size!==2)
+    return fail('Open this option from your toolkit.',400);
+  await assertHistoryAccess(env,current);
+  const execId=await mintOwnerExecutionGrant(env,current,data.get('approvalId'));
+  if(!execId)
+    return fail('This stored request cannot be activated right now. Reopen your site options.',403);
+  let result;
+  try {
+    result=await runStoredOptionExecution(env,current,execId);
+  }catch(error){
+    if(error instanceof OptionExecutionDisabled)
+      return fail('This stored request cannot be activated right now.',403);
+    throw error;
+  }
+  return renderOptionExecutionResult(result);
 }
 
 export default {
@@ -909,6 +942,7 @@ export default {
         if(url.pathname==='/form-connect-approve')return await importedEdits.connectFormApprove(request,env,current);
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
+        if(url.pathname==='/site-options-activate')return await activateOwnerOption(request,env,current);
         if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);
         // Retired #121 direct-write endpoint: a stored review cannot authorize a provider mutation.
         if(url.pathname==='/site-options-apply')return fail('Reopen site options. A separate operator-approved execution grant is now required.',403);

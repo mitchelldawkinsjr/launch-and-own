@@ -8,7 +8,7 @@ Gap list from the November 2026 toolkit review. Each item maps copy, gating, or 
 | 2 | Toolkit mixed 30-day launch rows with live account discovery with no framing | Toolkit intro plus **Recent launches** section; live reads fold into launch cards (**In your accounts now**) or **Other sites in your accounts**. |
 | 3 | Landing ZIP copy denied editing while hosted routes offer limited imported edit | ZIP compatibility and tests describe limited post-launch edit for compatible static sites, subject to hosted beta acceptance. |
 | 4 | Signed-out nav “Owner toolkit” sounded like a live product surface | Marketing nav label clarifies sign-in is required. |
-| 5 | Options link sounded like instant domain/email/form setup | Services tab links to “Review optional requests (store only)”. |
+| 5 | Options link sounded like instant domain/email/form setup | Services tab links to review stored requests; **domain** and **email** show **Turn on** when `OPTION_OWNER_ACTIVATION_ENABLED` and per-kind flags are on (same execution path as operator grants, `owner-self:<approvalId>` lease). Analytics, previews, SEO, redirects, and forms remain store-only until executors ship. |
 | 6 | Inventory cards read like live health checks | Badge reads “Launch & Own managed site · open site toolkit for live checks”. |
 | 7 | Live `summarizeOwnedToolkitSite` vs history cards disagree on ZIP updates | **Deferred (#39):** history cards use `historyToolkitCapabilities` (imported edit when live ZIP); live site-toolkit deployment view uses edit paths from inventory, not the shared projection. Unify when inventory cards adopt `summarizeOwnedToolkitSite` with an imported-edit flag. See [POST_LAUNCH_TOOLKIT_AUDIT.md](./POST_LAUNCH_TOOLKIT_AUDIT.md). |
 
