@@ -47,12 +47,19 @@ export function setupHandler({ name, origin, repo, port, fetchFn = fetch, writeS
       if (response.status !== 201) return page(502, '<p>GitHub refused the setup code (' + response.status + '). Start the setup again.</p>');
       const app = await response.json();
       if (!Number.isSafeInteger(app?.id) || typeof app.pem !== 'string' || typeof app.slug !== 'string') return page(502, '<p>GitHub returned an unexpected app.</p>');
-      await writeSecret('GH_APP_PRIVATE_KEY', app.pem);
+      try {
+        await writeSecret('GH_APP_PRIVATE_KEY', app.pem);
+      } catch {
+        // The key exists only in GitHub's one-time response; we never keep a copy, so the recovery is a new key.
+        return { ...page(500, '<p>Created <code>' + escape(app.slug) + '</code>, but its private key could not be saved as a Worker secret. ' +
+          'In GitHub, open the app\'s settings, generate a new private key, and run <code>npx wrangler secret put GH_APP_PRIVATE_KEY</code> with it. Then delete the old key.</p>'),
+          result: { appId: app.id, slug: app.slug, secretSaved: false } };
+      }
       const install = 'https://github.com/apps/' + encodeURIComponent(app.slug) + '/installations/new';
       return { ...page(200, '<p>Created <code>' + escape(app.slug) + '</code>. Its private key is stored as a Worker secret.</p>' +
         '<ol><li>Set <code>GH_APP_ID</code> to <code>' + app.id + '</code> in <code>wrangler.jsonc</code>.</li>' +
         '<li><a href="' + install + '" target="_blank" rel="noopener noreferrer">Install it</a> with <strong>Only select repositories</strong> → <code>' + escape(repo) + '</code>. Never on the assistant repository.</li></ol>'),
-        result: { appId: app.id, slug: app.slug } };
+        result: { appId: app.id, slug: app.slug, secretSaved: true } };
     }
     return { status: 404, headers: {}, body: 'Not found' };
   };
@@ -73,7 +80,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(arg('port') || 8790);
   const handler = setupHandler({ name: arg('name'), origin: arg('origin'), repo: arg('repo'), port, writeSecret: wranglerSecretWriter() });
   const server = http.createServer(async (req, res) => {
-    const out = await handler({ method: req.method, url: req.url, host: req.headers.host });
+    const out = await handler({ method: req.method, url: req.url, host: req.headers.host })
+      .catch(() => ({ status: 500, headers: {}, body: 'Setup failed. Start again.' }));
     res.writeHead(out.status, out.headers); res.end(out.body);
     if (out.result) { console.log('GitHub App created:', out.result.slug, 'id', out.result.appId); server.close(); }
   });

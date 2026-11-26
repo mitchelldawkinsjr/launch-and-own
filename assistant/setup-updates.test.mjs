@@ -39,7 +39,7 @@ test('T-BOOT-1..3: the code is exchanged once, the key goes only to the secret w
   assert.equal(calls[0].url, 'https://api.github.com/app-manifests/abcdef123456/conversions');
   assert.equal(calls[0].init.headers.authorization, undefined, 'conversion sends no credentials');
   assert.doesNotMatch(out.body + JSON.stringify(out.result), /SECRETKEYMATERIAL|CLIENTSECRET|abcdef123456/);
-  assert.deepEqual(out.result, { appId: 77, slug: 'willow-assistant' });
+  assert.deepEqual(out.result, { appId: 77, slug: 'willow-assistant', secretSaved: true });
   const replay = await handler({ method: 'GET', url: '/callback?code=abcdef123456&state=' + STATE, host: HOST });
   assert.equal(replay.status, 400);
   assert.equal(calls.length, 1, 'never retried');
@@ -132,7 +132,9 @@ test('orchestrator: security release opens exactly one labelled PR, excludes wor
   const tar = calls.find(c => c[0] === 'tar');
   assert.ok(tar.includes('--exclude=*/.github/workflows/*'));
   assert.equal(calls.filter(c => c[1] === 'pr' && c[2] === 'create').length, 1);
-  assert.ok(calls.find(c => c[2] === 'create').includes('security'));
+  const create = calls.find(c => c[2] === 'create');
+  assert.ok(create.some(a => /\(security\)$/.test(a)), 'label carried in the title');
+  assert.equal(create.includes('--label'), false, 'labels may not exist in a fresh repo');
   assert.equal(await readFile(join(root, 'assistant/UPSTREAM_SHA'), 'utf8'), 'c'.repeat(40) + '\n', 'SHA from attestation, not notes');
   assert.equal(calls.some(c => c.join(' ').includes('pr review') || c.join(' ').includes('pr merge')), false, 'never approves or merges');
   const again = fakeGh({ releaseJson: rel('0.2.0', 'security'), existingPr: true });
@@ -146,4 +148,22 @@ test('orchestrator: a feature release only writes a notice; no branch, no PR', a
   assert.equal((await updateCheck({ root, run, now: NOW, log: () => {}, summary })).action, 'notice');
   assert.match(await readFile(summary, 'utf8'), /0\.2\.0 is available/);
   assert.equal(calls.some(c => c[0] === 'git' || c[2] === 'create'), false);
+});
+
+test('a failed secret write keeps the app id, tells the owner how to recover, and never shows the key', async () => {
+  const handler = setupHandler({ name: 'willow-assistant', origin: 'https://assistant.willow.test', repo: 'owner/willow-site', port: PORT, state: STATE,
+    fetchFn: async () => Response.json({ id: 77, slug: 'willow-assistant', pem: PEM, client_secret: 'CLIENTSECRET' }, { status: 201 }),
+    writeSecret: async () => { throw Error('wrangler failed'); } });
+  const out = await handler({ method: 'GET', url: '/callback?code=abcdef123456&state=' + STATE, host: HOST });
+  assert.equal(out.status, 500);
+  assert.deepEqual(out.result, { appId: 77, slug: 'willow-assistant', secretSaved: false });
+  assert.match(out.body, /generate a new private key/);
+  assert.doesNotMatch(out.body, /SECRETKEYMATERIAL|CLIENTSECRET/);
+});
+
+test('an unreadable advisory feed does not stop a security release PR', async () => {
+  const root = await repoFixture('0.1.0');
+  const base = fakeGh({ releaseJson: rel('0.2.0', 'security') });
+  const run = async (cmd, args) => { if (cmd === 'gh' && args[1]?.includes('security-advisories')) throw Error('403'); return base.run(cmd, args); };
+  assert.equal((await updateCheck({ root, run, now: NOW, log: () => {} })).action, 'pr');
 });

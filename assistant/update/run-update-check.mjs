@@ -25,9 +25,11 @@ export async function updateCheck({ root = ROOT, run = runCommand, now = Date.no
     if (!ok) { log('Skipping ' + tag + ': update could not be verified'); continue; }
     releases.push(ok.info); verified.set(ok.info.version, { ...ok, tarballPath });
   }
-  const advisories = JSON.parse(await run('gh', ['api', 'repos/' + upstream.repository + '/security-advisories?state=published', '--jq',
-    '[.[] | {id: .ghsa_id, ranges: [.vulnerabilities[]?.vulnerable_version_range]}]']))
-    .flatMap(a => a.ranges.map(r => ({ id: a.id, affectedBelow: affectedBelow(r) })).filter(a => a.affectedBelow));
+  // An unreadable advisory feed must not stop the check: security-class releases still open a PR on their own.
+  const advisories = await run('gh', ['api', 'repos/' + upstream.repository + '/security-advisories?state=published', '--jq',
+    '[.[] | {id: .ghsa_id, ranges: [.vulnerabilities[]?.vulnerable_version_range]}]'])
+    .then(out => JSON.parse(out).flatMap(a => a.ranges.map(r => ({ id: a.id, affectedBelow: affectedBelow(r) })).filter(a => a.affectedBelow)))
+    .catch(() => { log('Advisory feed unavailable; continuing without it'); return []; });
   const decision = decideUpdate({ running, releases, advisories, now });
   log(JSON.stringify(decision));
   if (decision.action === 'notice' && summary) await appendFile(summary, 'Assistant update ' + decision.target + ' is available (bug fixes or features). Apply it with scripts/update when you want.\n');
@@ -46,7 +48,8 @@ export async function updateCheck({ root = ROOT, run = runCommand, now = Date.no
   await run('git', ['-c', 'user.name=assistant-update', '-c', 'user.email=assistant-update@users.noreply.github.com', 'commit', '-m', 'Update assistant to ' + decision.target]);
   await run('git', ['push', 'origin', branch]);
   const label = decision.reasons.some(r => r.startsWith('security') || r.startsWith('advisory')) ? 'security' : 'breaking';
-  await run('gh', ['pr', 'create', '--head', branch, '--title', 'Assistant update ' + decision.target + ' (' + label + ')', '--label', label, '--body',
+  // No --label: a fresh customer repo has no "security"/"breaking" labels and gh would fail after the push. The title carries it.
+  await run('gh', ['pr', 'create', '--head', branch, '--title', 'Assistant update ' + decision.target + ' (' + label + ')', '--body',
     'Verified upstream release ' + decision.target + ' (commit ' + target.commitSha + ').\nReasons: ' + decision.reasons.join(', ') +
     '\n\nReview the diff, merge it yourself, then deploy with `npx wrangler deploy`. Checks on this PR wait for your approval.']);
   return decision;
