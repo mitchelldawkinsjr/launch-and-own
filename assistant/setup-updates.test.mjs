@@ -167,3 +167,11 @@ test('an unreadable advisory feed does not stop a security release PR', async ()
   const run = async (cmd, args) => { if (cmd === 'gh' && args[1]?.includes('security-advisories')) throw Error('403'); return base.run(cmd, args); };
   assert.equal((await updateCheck({ root, run, now: NOW, log: () => {} })).action, 'pr');
 });
+
+test('the update workflow pins third-party actions to commit SHAs and requests only contents/pull-requests write', async () => {
+  const yml = await readFile(new URL('./template/.github/workflows/assistant-update.yml', import.meta.url), 'utf8');
+  const uses = [...yml.matchAll(/uses:\s*(\S+)/g)].map(m => m[1]);
+  assert.ok(uses.length > 0);
+  for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u + ' must be SHA-pinned');
+  assert.match(yml, /permissions:\n  contents: write\n  pull-requests: write\n/);
+});
