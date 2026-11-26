@@ -93,8 +93,11 @@ test('owner self-activation turns on domain after a stored request',async t=>{
   const page=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
   assert.match(page,/Turn on custom domain/);
   assert.doesNotMatch(page,/Apply operator-approved domain/);
+  // Post what the button actually carries, as a browser would.
+  const fromButton=page.match(/action="\/site-options-activate"[\s\S]*?name="approvalId" value="([^"]+)"/)?.[1];
+  assert.equal(fromButton,row.id);
   const applied=await post(h,'/site-options-activate',tenant.cookie,{
-    csrf:tenant.csrf,approvalId:row.id
+    csrf:tenant.csrf,approvalId:fromButton
   });
   assert.equal(applied.status,200);
   assert.match(await applied.text(),/custom hostname is attached/);
@@ -435,7 +438,7 @@ test('owner turns on the contact form after the cost/privacy review: gate row fr
   const h=harness();t.after(()=>h.sqlite.close());
   const {tenant,jobId,row,writes,choices}=await storedFormsForOwner(h,t);
   const options=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
-  assert.match(options,/href="\/site-options-forms-turn-on\?approvalId=[^"]+">Turn on contact form</);
+  assert.ok(options.includes('href="/site-options-forms-turn-on?approvalId='+row.id+'">Turn on contact form<'),'the link carries the stored request id');
   // Without the Cloudflare forms permission: consent page, nothing written.
   assert.match(await (await h.request('/site-options-forms-turn-on?approvalId='+row.id,{cookie:tenant.cookie})).text(),/Allow form setup in Cloudflare/);
   const early=await post(h,'/site-options-activate',tenant.cookie,choices);
@@ -517,6 +520,7 @@ test('owner turns on visitor insights: creates the Web Analytics site and sets i
   const {tenant,jobId,row}=await storedAnalyticsForOwner(h,t,state);
   const options=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
   assert.match(options,/Turn on visitor insights/);
+  assert.ok(options.includes('name="approvalId" value="'+row.id+'"'),'the button posts the stored request id');
   const on=await post(h,'/site-options-activate',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id});
   const html=await on.text();
   assert.equal(on.status,200,html);
