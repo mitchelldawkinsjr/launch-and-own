@@ -1,0 +1,4 @@
+{
+  "repository": "<upstream-owner>/<assistant-template-repo>",
+  "signerWorkflow": ".github/workflows/release.yml"
+}
