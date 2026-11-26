@@ -15,6 +15,7 @@ import { buildModelRequest, retrieveSnippets } from '../imported/snippets.mjs';
 import { isolatePreview, previewResponse, scriptFreePreviewHeaders } from '../imported/preview.mjs';
 import { bindApproval, newApprovalId } from '../imported/approval.mjs';
 import { proposeImportedPullRequest, readImportedPullRequest } from '../imported/pull-request.mjs';
+import { verifyPublishedRevision } from '../imported/verify-published.mjs';
 import { d1ApprovalStore } from '../imported/approval-store.mjs';
 import { ImportedEditError } from '../imported/errors.mjs';
 import { MergeRefused, mergeVerifiedPullRequest } from '../pipeline/merge-approved-pr.mjs';
@@ -85,7 +86,10 @@ export function siteConfig(env) {
   const repositoryId = Number(env.WEBSITE_REPO_ID);
   if (!/^[A-Za-z0-9_.-]+$/.test(env.WEBSITE_OWNER || '') || !/^esp-[a-z0-9-]{1,40}$/.test(env.WEBSITE_REPO || '') || !Number.isSafeInteger(repositoryId) || repositoryId < 1
       || !env.GH_APP_ID || !env.GH_INSTALLATION_ID || !env.GH_APP_PRIVATE_KEY) return null;
-  return { owner: env.WEBSITE_OWNER, repo: env.WEBSITE_REPO, repositoryId, appId: env.GH_APP_ID, installationId: env.GH_INSTALLATION_ID, privateKeyPem: env.GH_APP_PRIVATE_KEY };
+  // Optional live check: the owner's own read-only Pages token. Without it the status stops at "Cloudflare publishing".
+  const verify = /^[a-f0-9]{32}$/i.test(env.CF_ACCOUNT_ID || '') && typeof env.PAGES_READ_TOKEN === 'string' && env.PAGES_READ_TOKEN
+    ? { accountId: env.CF_ACCOUNT_ID, projectName: env.WEBSITE_REPO + '-site', publicUrl: 'https://' + env.WEBSITE_REPO + '-site.pages.dev/', token: env.PAGES_READ_TOKEN } : null;
+  return { owner: env.WEBSITE_OWNER, repo: env.WEBSITE_REPO, repositoryId, appId: env.GH_APP_ID, installationId: env.GH_INSTALLATION_ID, privateKeyPem: env.GH_APP_PRIVATE_KEY, verify };
 }
 
 /** Fresh read of the live repo with a one-hour token restricted to the website repo. */
@@ -234,7 +238,8 @@ async function approve(env, site, form, { sub, fetchFn, now }) {
   }
   const status = await sealTicket(env, 'status', sub, { mergeNote,
     receipt: { ownerLogin: receipt.ownerLogin, repository: receipt.repository, owner: receipt.owner, repositoryId: receipt.repositoryId, baseCommitSha: receipt.baseCommitSha, artifactDigest: receipt.artifactDigest },
-    number: proposal.number, headCommitSha: proposal.headCommitSha, summary: ticket.summary, edits: ticket.edits, proposalDigest: ticket.proposalDigest
+    number: proposal.number, headCommitSha: proposal.headCommitSha, summary: ticket.summary, edits: ticket.edits, proposalDigest: ticket.proposalDigest,
+    changed: validated.changed.map(c => ({ path: c.path, sha256: c.afterSha256 }))
   }, now, STATUS_SECONDS);
   return redirect('/pr?ticket=' + encodeURIComponent(status));
 }
@@ -243,10 +248,23 @@ async function prStatus(env, site, url, { sub, fetchFn, now }) {
   const ticket = await openTicket(env, 'status', sub, url.searchParams.get('ticket'), now);
   const { token } = await mintInstallationToken({ ...site, fetchFn, now: () => now });
   const out = await readImportedPullRequest(ticket.receipt, { githubToken: token, fetchFn, number: ticket.number, headCommitSha: ticket.headCommitSha, installation: true });
-  const screen = editReviewMarkup({ proposal: { v: 1, summary: ticket.summary, edits: ticket.edits }, binding: { proposalDigest: ticket.proposalDigest, artifactDigest: ticket.receipt.artifactDigest, baseCommitSha: ticket.receipt.baseCommitSha }, status: out.status === 'failed' ? 'failed' : out.status, now });
+  // Same states as the hosted flow: merged -> Cloudflare publishing -> Live and checked (served bytes match the approved files).
+  let published = null;
+  if (out.status === 'merged' && site.verify && Array.isArray(ticket.changed) && ticket.changed.length) {
+    try {
+      published = await verifyPublishedRevision({ accountId: site.verify.accountId, projectName: site.verify.projectName, cloudflareToken: site.verify.token,
+        expectedCommitSha: out.mergedCommitSha, publicUrl: site.verify.publicUrl, changedFiles: ticket.changed, fetchFn });
+    } catch { published = { live: false, status: 'unchecked' }; }
+  }
+  const state = out.status !== 'merged' || !published ? { status: out.status }
+    : published.live ? { status: 'live' } : published.status === 'deploy_unverified' ? { status: 'merged', code: 'deploy_unverified' } : { status: 'deploying' };
+  const screen = editReviewMarkup({ proposal: { v: 1, summary: ticket.summary, edits: ticket.edits }, binding: { proposalDigest: ticket.proposalDigest, artifactDigest: ticket.receipt.artifactDigest, baseCommitSha: ticket.receipt.baseCommitSha }, status: state.status, code: state.code, now });
   const blocked = ticket.mergeNote === 'stale_base' ? 'Your website changed after you approved, so it was not published automatically. '
     : ticket.mergeNote ? 'GitHub did not allow an automatic merge, so it was not published. ' : '';
-  const next = out.status === 'merged' ? '<p>Published: merged into your website\'s <code>main</code> branch. Cloudflare Pages is publishing it; check your live site in a minute.</p>'
+  const next = state.status === 'live' ? '<p>Live and checked: your live site now serves exactly the approved change.</p>'
+    : published?.status === 'unchecked' ? '<p>Published: merged into your website\'s <code>main</code> branch. The live check could not reach Cloudflare; check your live site yourself or refresh this page.</p>'
+    : published ? '<p>Merged. Cloudflare Pages has not finished publishing the approved change yet. Refresh this page in a minute.</p>'
+    : out.status === 'merged' ? '<p>Published: merged into your website\'s <code>main</code> branch. Cloudflare Pages is publishing it; check your live site in a minute.</p>'
     : out.status === 'pr_open' ? '<p>' + escape(blocked) + 'The pull request is open for you to review and merge in GitHub.</p>' : '';
   return page('Change status', screen + next + '<p><a href="' + escape(out.pullRequest) + '" target="_blank" rel="noopener noreferrer">Open the pull request</a> (opens in a new tab)</p>');
 }

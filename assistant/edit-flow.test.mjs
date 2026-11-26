@@ -287,3 +287,34 @@ test('Approve and publish: a merge GitHub refuses leaves the PR open with an exp
   assert.match(statusPage, /GitHub did not allow an automatic merge/);
   assert.match(statusPage, /open for you to review and merge/);
 });
+
+// Optional live check (owner's own read-only Pages token): merged -> Cloudflare publishing -> Live and checked.
+test('live check: served bytes must match the approved file before the status says Live and checked', async () => {
+  const ACCOUNT = 'c'.repeat(32);
+  const w = await world({ envExtra: { CF_ACCOUNT_ID: ACCOUNT, PAGES_READ_TOKEN: 'pages-read-test' } });
+  const cf = { deployed: null, served: SITE['public/index.html'], calls: [] };
+  const github = w.gh.fetchFn;
+  w.gh.fetchFn = async (url, init = {}) => {
+    const u = new URL(url);
+    if (u.hostname === 'api.cloudflare.com') {
+      cf.calls.push({ path: u.pathname, auth: init.headers.authorization, method: init.method });
+      assert.equal(u.pathname, '/client/v4/accounts/' + ACCOUNT + '/pages/projects/esp-willow-site');
+      return Response.json({ success: true, result: { name: 'esp-willow-site', canonical_deployment: { environment: 'production',
+        latest_stage: { name: 'deploy', status: cf.deployed ? 'success' : 'active' }, deployment_trigger: { metadata: { commit_hash: cf.deployed || '0'.repeat(40) } } } } });
+    }
+    if (u.hostname === 'esp-willow-site.pages.dev') { assert.equal(u.pathname, '/'); return new Response(cf.served, { status: 200 }); }
+    return github(url, init);
+  };
+  const review = w.loc(await w.call('/preview', { method: 'POST', form: { mode: 'typed', kind: 'text', old: 'Saturday: 9 AM-2 PM', replacement: 'Saturday: 10 AM-4 PM' } }));
+  const page = await (await w.call(review)).text();
+  const status = w.loc(await w.call('/approve', { method: 'POST', form: { ticket: w.hidden(page, 'ticket'), approvalId: w.hidden(page, 'approvalId'), proposalDigest: w.hidden(page, 'proposalDigest'), artifactDigest: w.hidden(page, 'artifactDigest'), action: 'publish' } }));
+  assert.match(await (await w.call(status)).text(), /has not finished publishing/, 'deploy still running');
+  cf.deployed = '9'.repeat(40);
+  assert.match(await (await w.call(status)).text(), /does not match yet/, 'old bytes still served');
+  cf.served = SITE['public/index.html'].replace('Saturday: 9 AM-2 PM', 'Saturday: 10 AM-4 PM');
+  const live = await (await w.call(status)).text();
+  assert.match(live, /Live and checked: your live site now serves exactly the approved change/);
+  assert.ok(cf.calls.every(c => c.method === 'GET' && c.auth === 'Bearer pages-read-test'), 'read-only, owner token');
+  delete w.env.PAGES_READ_TOKEN;
+  assert.match(await (await w.call(status)).text(), /Cloudflare Pages is publishing it/, 'no token: no live claim');
+});
