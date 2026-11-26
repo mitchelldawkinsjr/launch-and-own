@@ -70,17 +70,39 @@ function operatorGrant(h,option,uuid=id,overrides={}){
 const providerWrites=h=>h.calls.filter(call=>
   call.method!=='GET' && (/\/domains$|\/email\/routing\/rules$/.test(call.url)));
 
-test('stored approval without separate operator grant cannot write or display activation',async t=>{
+test('stored approval without owner or operator grant cannot execute',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const {tenant,jobId}=await live(h,t);
   await store(h,tenant,jobId,'domain',{hostname:host});
+  h.env.OPTION_OWNER_ACTIVATION_ENABLED='false';
   const html=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
   assert.doesNotMatch(html,/Apply operator-approved domain/);
+  assert.doesNotMatch(html,/Turn on custom domain/);
   const before=providerWrites(h).length;
   assert.equal((await post(h,'/site-options-execute',tenant.cookie,{
     csrf:tenant.csrf,id
   })).status,403);
   assert.equal(providerWrites(h).length,before);
+});
+
+test('owner self-activation turns on domain after a stored request',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId}=await live(h,t);
+  const row=await store(h,tenant,jobId,'domain',{hostname:host});
+  h.env.OPTION_OWNER_ACTIVATION_ENABLED='true';
+  const page=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
+  assert.match(page,/Turn on custom domain/);
+  assert.doesNotMatch(page,/Apply operator-approved domain/);
+  const applied=await post(h,'/site-options-activate',tenant.cookie,{
+    csrf:tenant.csrf,approvalId:row.id
+  });
+  assert.equal(applied.status,200);
+  assert.match(await applied.text(),/custom hostname is attached/);
+  assert.equal(providerWrites(h).length,1);
+  const done=h.sqlite.prepare('SELECT status,operator_grant_id FROM onboarding_option_executions '+
+    'WHERE option_approval_id = ?').get(row.id);
+  assert.equal(done.status,'applied');
+  assert.match(done.operator_grant_id,/^owner-self:/);
 });
 
 test('feature release switch is fail-closed even when an approved execution row exists',async t=>{

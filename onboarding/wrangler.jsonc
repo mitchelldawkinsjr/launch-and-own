@@ -20,6 +20,9 @@
     "CF_CLIENT_ID": "27de4e083c08b48f9a003ade56b9c8ea",
     "ZIP_PREVIEW_DOMAIN": "-zp.360web.cloud",
     "OPTION_EXECUTION_ENABLED": "true",
+    "OPTION_OWNER_ACTIVATION_ENABLED": "true",
+    "OPTION_DOMAIN_ENABLED": "true",
+    "OPTION_EMAIL_ENABLED": "true",
     "OPTION_FORMS_ENABLED": "true",
     "CF_FORMS_SCOPES": "d1.write workers-scripts.admin"
   },

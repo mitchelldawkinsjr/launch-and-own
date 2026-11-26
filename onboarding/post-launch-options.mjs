@@ -16,6 +16,7 @@ import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
 import { createD1OptionExecutionStore, isOptionExecutionConfigured, optionExecutionSchemaReady } from './option-execution-store.mjs';
 import { currentAnalyticsRequestFingerprint, reviewAnalyticsOptions } from './toolkit-analytics-options.mjs';
+import { ownerSelfActivationEnabled } from './owner-option-activation.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
 const ANALYTICS_REVIEW = 'analytics-enablement-review';
@@ -345,10 +346,17 @@ export function createSiteOptionsRoutes({
       ? button('/site-options-execute', label, current.csrf,
           '<input type="hidden" name="id" value="' + escape(activations[kind]) + '">')
       : '';
+    const turnOn = (kind, label, row) => row && !activations[kind] && ownerSelfActivationEnabled(env, kind)
+      ? button('/site-options-activate', label, current.csrf,
+          '<input type="hidden" name="approvalId" value="' + escape(row.id) + '">')
+      : '';
     const domainHost = storedDomainHostname(rows);
     const mailboxDefault = onboardingMailbox(job, current, domainHost);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const notice = '<p>Each request below is saved for review. We set it up after that review, and you approve each change before it happens. Until then your site, domain and email stay exactly as they are.</p>';
+    const notice = '<p>Save each request first. For <strong>custom domain</strong> and <strong>email forwarding</strong>, ' +
+      'you can turn the feature on here after you store it—still bound to the exact hostname or mailbox you approved. ' +
+      'DNS and MX are not changed unless the provider action says so. Analytics, previews, SEO, redirects, and contact forms ' +
+      'remain store-only until their activation paths are released.</p>';
     const stored = (row, label) => row
       ? '<p role="status">Stored ' + label + ' request. Fingerprint <code>' +
         escape(row.approval_digest.slice(0, 12)) + '…</code></p>'
@@ -364,6 +372,7 @@ export function createSiteOptionsRoutes({
         '<input id="opt-hostname" name="hostname" required maxlength="253" ' +
         'placeholder="www.example.com" value="' + escape(domainHost || '') + '">') +
       activate('domain', 'Apply operator-approved domain') +
+      turnOn('domain', 'Turn on custom domain', byKind.domain) +
       '</section>';
     const emailSection =
       '<section><h2>Email forwarding</h2>' +
@@ -379,6 +388,7 @@ export function createSiteOptionsRoutes({
             'placeholder="you@elsewhere.com" value="' + escape(mailboxDefault) + '">')
         : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
       activate('email', 'Apply operator-approved email routing') +
+      turnOn('email', 'Turn on email forwarding', byKind.email) +
       '</section>';
     // Read-only look at the current files so the request names the form it will connect.
     let formNote = '';
