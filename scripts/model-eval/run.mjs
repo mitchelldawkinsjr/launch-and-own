@@ -15,7 +15,9 @@ const text = out => typeof out?.response === 'string' ? out.response
 // Models may wrap the JSON in prose or code fences; score the outermost object.
 const extract = raw => { const a = raw.indexOf('{'), b = raw.lastIndexOf('}'); return a >= 0 && b > a ? raw.slice(a, b + 1) : raw; };
 const report = [];
-for (const model of CANDIDATE_MODELS) {
+// EVAL_MODELS=id1,id2 scores other models without changing the product's CANDIDATE_MODELS list.
+const models = process.env.EVAL_MODELS ? process.env.EVAL_MODELS.split(',').map(id => ({id})) : CANDIDATE_MODELS;
+for (const model of models) {
   const outputs = {};
   let tokens = 0;
   for (const item of EVAL_CASES) {

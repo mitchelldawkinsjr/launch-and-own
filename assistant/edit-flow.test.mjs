@@ -200,13 +200,16 @@ test('AI path (opt-in): budget reserved before the call, proposal validated, the
   const review = w.loc(await w.call('/preview', { method: 'POST', form: { mode: 'ai', request: 'Open Saturdays 10 to 4' } }));
   assert.match(await (await w.call(review)).text(), /Saturday: 10 AM-4 PM/);
   assert.equal(w.aiCalls.length, 1);
-  assert.equal(w.db.prepare('SELECT neurons FROM assistant_usage').get().neurons, 2000);
+  const { AI_REQUEST_NEURONS, DEFAULT_AI_MODEL } = await import('./edit-flow.mjs');
+  assert.equal(w.db.prepare('SELECT neurons FROM assistant_usage').get().neurons, AI_REQUEST_NEURONS);
+  assert.equal(w.aiCalls[0].model, DEFAULT_AI_MODEL);
+  assert.equal(DEFAULT_AI_MODEL, '@cf/openai/gpt-oss-120b');
   assert.equal(JSON.stringify(w.aiCalls[0]).includes('ghs_test'), false, 'no credentials reach the model');
   assert.equal(JSON.stringify(w.aiCalls[0]).includes('kkkkkkkk'), false);
 });
 
 test('T-QUO-1: when the daily budget is used up the model is never called', async () => {
-  const w = await world({ ai: aiProposal(hoursEdit), envExtra: { DAILY_NEURON_BUDGET: '1500' } });
+  const w = await world({ ai: aiProposal(hoursEdit), envExtra: { DAILY_NEURON_BUDGET: '100' } });
   const res = await w.call('/preview', { method: 'POST', form: { mode: 'ai', request: 'Open Saturdays 10 to 4' } });
   assert.match(await res.text(), /AI allowance for the assistant is used up/);
   assert.equal(w.aiCalls.length, 0);

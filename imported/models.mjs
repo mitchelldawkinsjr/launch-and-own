@@ -31,6 +31,22 @@ export const CANDIDATE_MODELS = Object.freeze([
     freeAllocationEligible: true,
     inputUsdPerMillion: 0.2,
     outputUsdPerMillion: 0.3
+  }),
+  // Round 2 (2026-11-26, docs/design/personal-assistant/model-eval-2026-11-26.md): 100% valid and correct in 3 of 3 runs.
+  // Prices are the published Neurons per million tokens at $0.011 per 1,000 Neurons.
+  Object.freeze({
+    id: '@cf/openai/gpt-oss-120b',
+    label: 'GPT-OSS 120B (default)',
+    freeAllocationEligible: true,
+    inputUsdPerMillion: 0.35,
+    outputUsdPerMillion: 0.75
+  }),
+  Object.freeze({
+    id: '@cf/google/gemma-4-26b-a4b-it',
+    label: 'Gemma 4 26B (low-cost fallback)',
+    freeAllocationEligible: true,
+    inputUsdPerMillion: 0.1,
+    outputUsdPerMillion: 0.3
   })
 ]);
 

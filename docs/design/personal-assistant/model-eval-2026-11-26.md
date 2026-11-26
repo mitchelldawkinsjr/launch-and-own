@@ -36,3 +36,21 @@ The clearer rules (now in `buildModelRequest`) spell out the exact keys and say 
 1. **Change the output shape:** the server lists numbered editable regions (visible text, links, contact details, color properties). The model returns region numbers and new values, and the server fills in `find`, `path` and `expectedBlobSha`. This removes the formatting failures seen above, and a model can no longer invent paths.
 2. **Grow the cases to at least 30**, drawn from the real-export fixtures (#169, `fixtures/imported-sites`). Run each model at least 3 times and judge by the **worst** run.
 3. Re-run inside the M2 test account (customer-owned inference) once that account is authorized.
+
+## Round 2: stronger free-tier models (2026-11-26, owner-requested)
+
+**Method:** the same 8 `EVAL_CASES`, the same product prompt (`buildModelRequest` with the clearer rules), and the same scratch Worker under `wrangler dev --remote` in the owner's account. Nothing was deployed, and the scratch config now has `workers_dev: false`. Models were taken from the 2026-11-18 Workers AI pricing page, excluding paid-billing models (Kimi, GLM-5.x, DeepSeek V4) and checking each against the account's live catalog. `qwen3-30b-a3b` is priced but missing from the catalog, so `llama-4-scout` replaced it. Run with `EVAL_MODELS=… node scripts/model-eval/run.mjs`.
+
+| Model | Run 1 valid / correct | Runs 2–3 | Tokens per run | Neurons per M (in / out) |
+| --- | --- | --- | --- | --- |
+| **@cf/openai/gpt-oss-120b** | **100 / 100** | **100 / 100, 100 / 100** | ~7.2k | 31,818 / 68,182 |
+| **@cf/google/gemma-4-26b-a4b-it** | **100 / 100** | **100 / 100, 100 / 100** | ~9.2k | 9,091 / 27,273 |
+| @cf/qwen/qwen2.5-coder-32b-instruct | 87.5 / 87.5 (missed `ambiguous-headline`) | not repeated | ~6.0k | 60,000 / 90,909 |
+| @cf/mistralai/mistral-small-3.1-24b-instruct | 87.5 / 87.5 (missed `ambiguous-headline`) | not repeated | ~6.5k | 31,876 / 50,488 |
+| @cf/meta/llama-4-scout-17b-16e-instruct | 87.5 / 87.5 (missed `ambiguous-headline`) | not repeated | ~5.4k | 24,545 / 77,273 |
+
+All of round 2 used roughly 2,000 Neurons, inside the free 10,000/day.
+
+**Decision:** `@cf/openai/gpt-oss-120b` is the assistant's default (`DEFAULT_AI_MODEL`), and `@cf/google/gemma-4-26b-a4b-it` is the cheaper fallback. The two tie on accuracy. The larger model leaves more margin for edits outside this small set. Cost isn't the deciding factor: about 30 Neurons per edit for gpt-oss-120b (~13 for gemma) means roughly 300 AI edits a day on the free allowance. Both meet #171 item 5's bar (95% valid, 90% correct) on this set.
+
+**Caveat:** 8 cases are few, and the prompt was tuned against these same cases in round 1. Every model edit still passes `validateEdits` and owner approval. Growing the set to ~20 fixture cases (Worker C's drafts on #166) and re-running is the next step before relying on the score alone.

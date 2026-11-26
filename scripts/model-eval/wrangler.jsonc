@@ -1,2 +1,2 @@
 // Manual model accuracy run only: `npx wrangler dev --remote` from this folder. Never deploy this Worker.
-{ "name": "lo-model-eval-scratch", "main": "worker.mjs", "compatibility_date": "2026-11-01", "ai": { "binding": "AI" } }
+{ "name": "lo-model-eval-scratch", "main": "worker.mjs", "compatibility_date": "2026-11-01", "workers_dev": false, "preview_urls": false, "ai": { "binding": "AI" } }
