@@ -1,5 +1,6 @@
 // #89: read operator-approved forms cost/privacy rows for the toolkit consumer gate.
-// No public route inserts into this table. Domain/operator grants are out of band.
+// Rows come from an out-of-band operator grant, or (owner decision 2026-11-26) from the site owner's own explicit
+// cost and privacy confirmation on /site-options-forms-turn-on (storeOwnerFormsCostPrivacy). Operator rows are never overwritten.
 import { hasCurrentOwnerSession } from './launch-jobs.mjs';
 import { verifyStoredFormsCostPrivacyApproval } from '../pipeline/forms-cost-privacy-approval.mjs';
 

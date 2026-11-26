@@ -21,7 +21,8 @@ import {LOGO_PNG_BASE64} from './logo.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,hasCurrentOwnerSession,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {createSiteOptionsRoutes} from './post-launch-options.mjs';
 import {executeOwnedStoredOption,FormsConsentRequired,OptionExecutionDisabled} from './execute-option.mjs';
-import {mintOwnerExecutionGrant} from './owner-option-activation.mjs';
+import {mintOwnerExecutionGrant,OWNER_FORMS_DEFAULTS,ownerSelfActivationEnabled,storeOwnerFormsCostPrivacy} from './owner-option-activation.mjs';
+import {readOwnedStoredOptionApproval} from './stored-option-approvals.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
@@ -886,16 +887,57 @@ async function applyApprovedOption(request,env,current){
   }
   return renderOptionExecutionResult(result);
 }
+const FORMS_TURN_ON_REASON={
+  cost_owner_approval_required:'confirm the cost limits.',privacy_owner_approval_required:'confirm the privacy responsibilities.',
+  retention_days_out_of_range:'choose a retention between 1 and 365 days.',max_submissions_per_day_out_of_range:'choose between 1 and 1,000 messages a day.',
+  max_body_bytes_out_of_range:'choose a message size between 256 bytes and 64 KB.',forms_request_required:'save the contact form request first.',
+  cost_privacy_row_conflict:'an operator already approved different limits for this form.'
+};
+/** Owner forms turn-on review (owner decision 2026-11-26): what is created, what is stored, limits and cost, two explicit confirmations. */
+async function formsTurnOnPage(env,current,approvalId){
+  const reviewed=await readOwnedStoredOptionApproval(env,current,approvalId);
+  if(!reviewed||reviewed.kind!=='forms'||!ownerSelfActivationEnabled(env,'forms'))
+    return fail('Save the contact form request in your site options first.',404);
+  if(current.cloudflare_forms_grant!==1)return formsConsentPage(view,'Turning on your contact form');
+  const d=OWNER_FORMS_DEFAULTS,site=reviewed.currentSite;
+  return view('Turn on your contact form',
+    '<p>This sets up a contact form service in <strong>your own Cloudflare account</strong> for <code>'+escape(site.pagesProjectName)+'</code>.</p>'+
+    '<h2>What gets created</h2><ul><li>A Turnstile spam-protection widget.</li><li>A private D1 database that stores the messages visitors send.</li>'+
+    '<li>A small Worker named <code>'+escape(site.pagesProjectName.replace(/-site$/,''))+'-site-form</code> that receives them, with a daily clean-up.</li></ul>'+
+    '<h2>What it stores</h2><p>What visitors type into your form, such as names, email addresses and messages. That is <strong>personal data</strong>: you are responsible for it, and your site should say how you use it. Launch &amp; Own keeps no copy.</p>'+
+    '<h2>Cost</h2><p>On Cloudflare\'s free plan this fits in the free limits for Workers (100,000 requests a day) and D1. If a daily limit is reached, the form stops until the next day; you are not charged. On a paid plan, Cloudflare bills usage above the included amounts.</p>'+
+    '<form action="/site-options-activate" method="POST"><input type="hidden" name="csrf" value="'+escape(current.csrf)+'">'+
+      '<input type="hidden" name="approvalId" value="'+escape(reviewed.id)+'">'+
+      '<label for="ft-retention">Delete messages after (days)</label><input id="ft-retention" name="retentionDays" type="number" min="1" max="365" required value="'+d.retentionDays+'">'+
+      '<label for="ft-max">Most messages accepted per day</label><input id="ft-max" name="maxSubmissionsPerDay" type="number" min="1" max="1000" required value="'+d.maxSubmissionsPerDay+'">'+
+      '<label for="ft-size">Largest message size (bytes)</label><input id="ft-size" name="maxBodyBytes" type="number" min="256" max="65536" required value="'+d.maxBodyBytes+'">'+
+      '<label><input type="checkbox" name="costApproved" value="true" required> I understand the limits and that any Cloudflare charges are billed to my account.</label>'+
+      '<label><input type="checkbox" name="privacyApproved" value="true" required> I am responsible for the messages visitors send, and they are deleted after the number of days above.</label>'+
+      '<button type="submit">Turn on contact form</button></form>'+
+    '<p><a href="/site-options?id='+encodeURIComponent(site.jobId)+'">Back to optional features</a></p>');
+}
 async function activateOwnerOption(request,env,current){
   await limitAttempts(request,env);
   const data=await formData(request);
   assertCsrf(request,data,current,baseUrl(env));
-  if(data.getAll('approvalId').length!==1 || data.size!==2)
+  // Forms turn-on carries the owner's cost/privacy choices; domain/email carry only the approval ID.
+  const formsTurnOn=data.has('retentionDays');
+  if(data.getAll('approvalId').length!==1 || data.size!==(formsTurnOn?7:2))
     return fail('Open this option from your toolkit.',400);
   try{await assertHistoryAccess(env,current);}catch(error){
     const page=failOptionActivation(error);
     if(page)return page;
     throw error;
+  }
+  if(formsTurnOn){
+    // Nothing is written until the session holds the separate Cloudflare forms permission.
+    if(current.cloudflare_forms_grant!==1)return formsConsentPage(view,'Turning on your contact form');
+    const int=name=>/^\d{1,6}$/.test(data.get(name)||'')?Number(data.get(name)):NaN;
+    const stored=await storeOwnerFormsCostPrivacy(env,current,data.get('approvalId'),{
+      retentionDays:int('retentionDays'),maxSubmissionsPerDay:int('maxSubmissionsPerDay'),maxBodyBytes:int('maxBodyBytes'),
+      costApproved:data.get('costApproved')==='true',privacyApproved:data.get('privacyApproved')==='true'});
+    if(!stored.ok)return fail('The contact form was not turned on: '+escape(FORMS_TURN_ON_REASON[stored.reason]||'please review the choices and try again.')+
+      ' Code: <code>'+escape(stored.reason||'forms_turn_on_failed')+'</code>.',400);
   }
   const execId=await mintOwnerExecutionGrant(env,current,data.get('approvalId'));
   if(!execId)
@@ -945,6 +987,7 @@ export default {
         if(url.pathname==='/toolkit')return await toolkit(env,current,request);
         if(url.pathname==='/toolkit/source')return await toolkitSource(env,current,request);
         if(url.pathname==='/form-messages')return await formMessages(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/site-options-forms-turn-on')return await formsTurnOnPage(env,current,url.searchParams.get('approvalId'));
         if(url.pathname===pagesAccessPath)return await pagesAccessPage(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
         if(url.pathname==='/agent-link')return await showAgentLink(env,current,url.searchParams.get('challenge_id'),{view,fail,button,escape});
