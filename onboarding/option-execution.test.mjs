@@ -547,3 +547,72 @@ test('visitor insights reuse an existing analytics site and leave hand-changed b
   assert.doesNotMatch(await res.text(),/Visitor insights are turned on/);
   assert.deepEqual(changed.writes,[],'a hand-changed project is refused before any write, and never patched');
 });
+
+test('stored SEO and redirect requests get a Turn on link only when site files are enabled',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  Object.assign(h.env,{OPTION_EXECUTION_ENABLED:'true',OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_SITE_FILES_ENABLED:'true'});
+  const {tenant,jobId}=await live(h,t);
+  const row=await store(h,tenant,jobId,'seo',{seoConsent:'true'});
+  const page=async()=>await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
+  assert.match(await page(),new RegExp('href="/site-options-files-turn-on\\?approvalId='+row.id+'">Turn on SEO starter'));
+  h.env.OPTION_SITE_FILES_ENABLED='false';
+  assert.doesNotMatch(await page(),/Turn on SEO starter/);
+  assert.equal((await h.request('/site-options-files-turn-on?approvalId='+row.id,{cookie:tenant.cookie})).status,404);
+  const res=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest:'a'.repeat(64),action:'publish'});
+  assert.equal(res.status,404,'publishing is refused while the flag is off');
+});
+
+test('owner reviews the exact SEO files, then Approve and publish adds only those files and merges',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  Object.assign(h.env,{OPTION_EXECUTION_ENABLED:'true',OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_SITE_FILES_ENABLED:'true'});
+  const {tenant,jobId}=await live(h,t);
+  const row=await store(h,tenant,jobId,'seo',{seoConsent:'true'});
+  const job=h.sqlite.prepare('SELECT * FROM onboarding_launch_jobs WHERE id = ?').get(jobId);
+  const {managedRepositoryDescription}=await import('../pipeline/managed-site-repository.mjs');
+  const {gitBlobSha}=await import('../imported/bytes.mjs');
+  const repo='/repos/'+job.github_login+'/esp-'+job.site_slug, BASE='a'.repeat(40), HEAD='d'.repeat(40);
+  const writes=[];let blobs=[];
+  const real=h.fetchFn;
+  h.fetchFn=globalThis.fetch=async(url,init={})=>{
+    const u=new URL(url),p=u.pathname,m=init.method||'GET',body=init.body?JSON.parse(init.body):undefined;
+    if(u.hostname!=='api.github.com'||!p.startsWith(repo))return real(url,init);
+    const r=p.slice(repo.length),ok=v=>Response.json(v);
+    if(m!=='GET')writes.push(m+' '+r);
+    if(r==='')return ok({id:job.repository_id,private:true,name:'esp-'+job.site_slug,default_branch:'main',
+      owner:{login:job.github_login},description:managedRepositoryDescription(job.site_slug,jobId)});
+    if(r==='/branches/main')return ok({commit:{sha:BASE}});
+    if(r==='/git/commits/'+BASE)return ok({sha:BASE,tree:{sha:'b'.repeat(40)}});
+    if(r.startsWith('/git/trees/'))return ok({truncated:false,tree:[{path:'public/index.html',type:'blob'},{path:'public/menu.html',type:'blob'}]});
+    if(r==='/git/blobs'){const sha=await gitBlobSha(Uint8Array.from(atob(body.content),c=>c.charCodeAt(0)));blobs.push(sha);return ok({sha});}
+    if(r==='/git/trees')return ok({sha:'c'.repeat(40)});
+    if(r==='/git/commits')return ok({sha:HEAD});
+    if(r==='/git/refs')return ok({});
+    if(r==='/commits/'+HEAD)return ok({parents:[{sha:BASE}],files:['public/robots.txt','public/sitemap.xml'].map((filename,i)=>({filename,status:'added',sha:blobs[i]}))});
+    if(r==='/pulls')return ok({number:3,html_url:'https://github.com'+repo+'/pull/3',head:{sha:HEAD}});
+    if(r==='/pulls/3/merge')return ok({merged:true,sha:'9'.repeat(40)});
+    throw new Error('unexpected '+m+' '+r);
+  };
+  const review=await h.request('/site-options-files-turn-on?approvalId='+row.id,{cookie:tenant.cookie});
+  const html=await review.text();
+  assert.equal(review.status,200,html.slice(0,400));
+  assert.match(html,/public\/robots\.txt/);
+  assert.match(html,/&lt;loc&gt;https:\/\/esp-[a-z0-9-]+-site\.pages\.dev\/menu&lt;\/loc&gt;/);
+  assert.deepEqual(writes,[],'reviewing writes nothing');
+  const digest=html.match(/name="digest" value="([a-f0-9]{64})"/)[1];
+  const res=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest,action:'publish'});
+  const done=await res.text();
+  assert.equal(res.status,200,done.slice(0,400));
+  assert.match(done,/Published/);
+  assert.deepEqual(writes,['POST /git/blobs','POST /git/blobs','POST /git/trees','POST /git/commits','POST /git/refs','POST /pulls','PUT /pulls/3/merge']);
+
+  writes.length=0;
+  h.resourceState.pages.source.config.preview_deployment_setting='all';
+  const previews=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest,action:'publish'});
+  assert.equal(previews.status,409);
+  assert.match(await previews.text(),/Turn off automatic preview builds/);
+  assert.deepEqual(writes,[],'with preview builds on, no branch is pushed');
+  h.resourceState.pages.source.config.preview_deployment_setting='none';
+  const stale=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest:'0'.repeat(64),action:'publish'});
+  assert.equal(stale.status,409);
+  assert.deepEqual(writes,[],'a digest that does not match the current files writes nothing');
+});

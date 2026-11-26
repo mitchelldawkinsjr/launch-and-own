@@ -36,6 +36,7 @@ import {createImportedEditRoutes} from './imported-edit-flow.mjs';
 import {readFormService} from './form-service.mjs';
 import {FormMessagesUnavailable,messagesProblem,readFormMessages,renderFormMessages} from './form-messages.mjs';
 import {createSiteUpdateRoutes} from './site-update-flow.mjs';
+import {createSiteFilesRoutes} from './site-files-flow.mjs';
 import {loadToolkitCards,renderToolkitPage} from './post-launch-toolkit.mjs';
 import {providerConnectionCards,providerHelpCss} from './provider-connection-help.mjs';
 import {pageShell} from './ui.mjs';
@@ -809,6 +810,7 @@ async function logout(request,env,current){
   return result;
 }
 const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
+const siteFiles=createSiteFilesRoutes({view,fail,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const importedEdits=createImportedEditRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const OPTION_ACTIVATION_HINT={
@@ -991,6 +993,7 @@ export default {
         if(url.pathname==='/toolkit')return await toolkit(env,current,request);
         if(url.pathname==='/toolkit/source')return await toolkitSource(env,current,request);
         if(url.pathname==='/form-messages')return await formMessages(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/site-options-files-turn-on')return await siteFiles.review(env,current,url.searchParams.get('approvalId'));
         if(url.pathname==='/site-options-forms-turn-on')return await formsTurnOnPage(env,current,url.searchParams.get('approvalId'));
         if(url.pathname===pagesAccessPath)return await pagesAccessPage(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
@@ -1029,6 +1032,7 @@ export default {
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);
         if(url.pathname==='/site-options-approve')return await siteOptions.approve(request,env,current);
         if(url.pathname==='/site-options-activate')return await activateOwnerOption(request,env,current);
+        if(url.pathname==='/site-options-files-publish')return await siteFiles.publish(request,env,current);
         if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);
         // Retired #121 direct-write endpoint: a stored review cannot authorize a provider mutation.
         if(url.pathname==='/site-options-apply')return fail('Reopen site options. A separate operator-approved execution grant is now required.',403);

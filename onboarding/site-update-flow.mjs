@@ -11,7 +11,7 @@ import {seal,unseal} from './crypto.mjs';
 import {renderUpdateStatusBody} from './post-launch-toolkit.mjs';
 import {readToolkitPreviewStatus} from './toolkit-preview.mjs';
 
-class PreviewBuildPolicyUnavailable extends Error {}
+export class PreviewBuildPolicyUnavailable extends Error {}
 
 const SHA=/^[a-f0-9]{40}$/i, DIGEST=/^[a-f0-9]{64}$/i;
 const REVIEW_LIFETIME=15*60,STATUS_LIFETIME=30*24*60*60;
@@ -20,18 +20,18 @@ const htmlPreviewHeaders={
   'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'no-referrer',
   'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 };
-export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now}) {
   // Re-check the live authorization epoch immediately before *each* provider call.
   // Logging out or reselecting an account fences the rest of an in-flight PR attempt.
-  function fencedFetch(env,current) {
+export function ownerFencedFetch(env,current,now) {
     return async(url,options={})=>{
       if(!await hasCurrentOwnerSession(env,current,now()))
         throw Error('Connected account authorization changed during update');
       return await fetch(url,{...options,signal:options.signal??AbortSignal.timeout(8000)});
     };
   }
-  function previewFencedFetch(env,current,job,cloudflareAccessToken) {
-    const fetchFn=fencedFetch(env,current);
+// Used by every flow that pushes a branch: refuses each GitHub write unless the Pages project's preview builds are off.
+export function previewBuildFencedFetch(env,current,job,cloudflareAccessToken,now) {
+    const fetchFn=ownerFencedFetch(env,current,now);
     const repositoryName='esp-'+job.site_slug;
     const previewRequest={
       site:{
@@ -58,6 +58,9 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       return await fetchFn(url,options);
     };
   }
+export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now}) {
+  const fencedFetch=(env,current)=>ownerFencedFetch(env,current,now);
+  const previewFencedFetch=(env,current,job,token)=>previewBuildFencedFetch(env,current,job,token,now);
   const account=input=>({name:input.customer_name,githubOwner:input.github_login,
     accountId:input.cloudflare_account_id,githubUserId:input.github_user_id,
     repositoryId:input.repository_id,forms:false});

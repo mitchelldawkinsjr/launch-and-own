@@ -17,6 +17,7 @@ import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.m
 import { createD1OptionExecutionStore, isOptionExecutionConfigured, optionExecutionSchemaReady } from './option-execution-store.mjs';
 import { currentAnalyticsRequestFingerprint, reviewAnalyticsOptions } from './toolkit-analytics-options.mjs';
 import { ownerSelfActivationEnabled } from './owner-option-activation.mjs';
+import { siteFilesEnabled } from './site-files-flow.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
 const ANALYTICS_REVIEW = 'analytics-enablement-review';
@@ -350,6 +351,9 @@ export function createSiteOptionsRoutes({
       ? button('/site-options-activate', label, current.csrf,
           '<input type="hidden" name="approvalId" value="' + escape(row.id) + '">')
       : '';
+    // SEO and redirects: review the exact new files, then publish (files exist afterwards, so a repeat is refused).
+    const filesTurnOn = (row, label) => row && siteFilesEnabled(env)
+      ? '<p><a class="btn" href="/site-options-files-turn-on?approvalId=' + escape(row.id) + '">' + label + '</a></p>' : '';
     const domainHost = storedDomainHostname(rows);
     const mailboxDefault = onboardingMailbox(job, current, domainHost);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
@@ -454,8 +458,9 @@ export function createSiteOptionsRoutes({
       '</section>';
     const seoSection =
       '<section><h2>SEO starter</h2>' +
-      '<p>Save a request for search basics: canonical links, social previews, robots.txt and a sitemap. Your site files change only after you approve the update.</p>' +
+      '<p>Save a request for search basics: a robots.txt file and a sitemap of your pages. Turning it on only adds those two files after you review them; your pages are not edited.</p>' +
       stored(byKind.seo, 'SEO') +
+      filesTurnOn(byKind.seo, 'Turn on SEO starter') +
       button('/site-options-prepare', 'Review SEO request', current.csrf,
         hidden(job.id, 'seo') +
         '<label><input type="checkbox" name="seoConsent" value="true" required> ' +
@@ -467,6 +472,7 @@ export function createSiteOptionsRoutes({
         ? '<p>Same-host redirects for <code>' + escape(domainHost) +
           '</code>. We set them up after a review and your approval.</p>' +
           stored(byKind.redirects, 'redirect') +
+          filesTurnOn(byKind.redirects, 'Turn on redirects') +
           button('/site-options-prepare', 'Review redirect request', current.csrf,
             hidden(job.id, 'redirects') +
             '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
