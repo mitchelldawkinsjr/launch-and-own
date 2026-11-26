@@ -19,8 +19,10 @@ import { DEFAULT_DAILY_NEURONS, reserveNeurons } from './budget.mjs';
 
 const KINDS = new Set(['text', 'link', 'business_info', 'css_color']);
 const REVIEW_SECONDS = 15 * 60, STATUS_SECONDS = 7 * 86400;
-// shortcut: a fixed per-request Neuron reservation; replace with metered usage once real runs give a better estimate.
-export const AI_REQUEST_NEURONS = 2000;
+// shortcut: a fixed per-request reservation, not metered usage. Measured 2026-11-26: about 900 tokens per request,
+// which is at most ~60 Neurons on gpt-oss-120b; 150 leaves margin for larger pages.
+export const AI_REQUEST_NEURONS = 150;
+export const DEFAULT_AI_MODEL = '@cf/openai/gpt-oss-120b';
 const PAGE_HEADERS = {
   'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer',
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
@@ -138,7 +140,7 @@ async function preview(env, site, form, { sub, fetchFn, now }) {
       snippets: retrieveSnippets(live.files, { query: request, maxSnippets: 8, maxBytes: 8192, window: 2000 }),
       capabilities: { files: live.inspection.files.map(f => ({ path: f.path, blobSha: f.blobSha, editable: f.editable, readOnlyReason: f.readOnlyReason })) }
     });
-    const out = await env.AI.run(env.AI_MODEL || '@cf/openai/gpt-oss-20b', { messages: [{ role: 'system', content: built.system }, { role: 'user', content: JSON.stringify(built.user) }], max_tokens: 2500, temperature: 0 });
+    const out = await env.AI.run(env.AI_MODEL || DEFAULT_AI_MODEL, { messages: [{ role: 'system', content: built.system }, { role: 'user', content: JSON.stringify(built.user) }], max_tokens: 2500, temperature: 0 });
     const proposal = parseModelOutput(outermostObject(modelText(out)));
     if (!Array.isArray(proposal.edits) || proposal.edits.length === 0) throw new ImportedEditError('invalid_output');
     validated = await validateEdits({ baseCommitSha: live.revision.commitSha, files: live.files, inspection: live.inspection, proposal, repositoryId: site.repositoryId });

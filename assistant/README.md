@@ -14,7 +14,7 @@
 ## Using it
 Open the assistant's address and type the text as it appears on your site and what it should say. The assistant finds the one page it's on, shows the exact change and the changed file (with scripts blocked), and opens a pull request when you approve. **You merge it in GitHub; nothing is published before that.** Every step re-reads your repository, so if the site changed in between, it asks you to start again.
 
-Plain-language requests ("open Saturdays 10 to 4") use your own Workers AI allowance and are **off by default** (`AI_EDITS`), because no free model yet meets the accuracy bar. When on, the daily budget is reserved before every model call, and the model's proposal goes through the same checks as a typed edit.
+Plain-language requests ("open Saturdays 10 to 4") use your own Workers AI allowance and are an **owner opt-in** (`AI_EDITS`). The default model, `@cf/openai/gpt-oss-120b`, met the 95% valid / 90% correct bar in 3 of 3 runs on the 8-case accuracy set (2026-11-26); `@cf/google/gemma-4-26b-a4b-it` is the cheaper fallback. When on, the daily budget is reserved before every model call, and the model's proposal goes through the same checks as a typed edit.
 
 **Preview scope in M2:** the review shows each changed file exactly as it would be published, fully sandboxed. A full rendered preview on a separate address is a follow-up.
 

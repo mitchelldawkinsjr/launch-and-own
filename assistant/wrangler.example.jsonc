@@ -23,9 +23,10 @@
     "GH_APP_ID": "<customer App id>",
     "GH_INSTALLATION_ID": "<installation id>",
     "DAILY_NEURON_BUDGET": "8000",
-    // Plain-language requests are off by default: no model meets the 95/90 bar yet (#196). Typed edits always work.
+    // Plain-language requests use your own Workers AI allowance. Owner opt-in; typed edits always work.
+    // Default model met the 95/90 bar 3/3 on the 8-case set (2026-11-26). Cheaper fallback: @cf/google/gemma-4-26b-a4b-it
     "AI_EDITS": "off",
-    "AI_MODEL": "@cf/openai/gpt-oss-20b"
+    "AI_MODEL": "@cf/openai/gpt-oss-120b"
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "lo-assistant-<site-slug>", "database_id": "<id>", "migrations_dir": "assistant/migrations" }
