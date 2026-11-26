@@ -7,6 +7,8 @@ import {
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,verifyCloudflarePagesAccess} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
 import {ProviderRequestError} from '../pipeline/provider-errors.mjs';
+import {ToolkitApprovalExecutionError} from '../pipeline/approved-extension-consumer.mjs';
+import {ExtensionProviderError} from '../pipeline/cloudflare-extension-provider.mjs';
 import {planCustomer} from '../pipeline/plan-customer.mjs';
 import {normalizeSite,renderSite} from '../site/render-site.mjs';
 import {draftSiteFromBrief,aiDraftConfigured} from '../site/draft-site.mjs';
@@ -808,6 +810,38 @@ async function logout(request,env,current){
 const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const importedEdits=createImportedEditRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
+const OPTION_ACTIVATION_HINT={
+  provider_source_sha_changed:'GitHub main has a new commit since this launch was verified. Reopen the launch review and run verify again, or merge the site update you started, then turn this on.',
+  provider_permission_required:'Cloudflare rejected the change. Disconnect and reconnect Cloudflare, allow Pages and account access, then try again.',
+  provider_reauthentication_required:'Your Cloudflare or GitHub session expired. Reconnect both accounts and try again.',
+  provider_operation_failed:'Cloudflare could not attach this hostname (wrong account, zone not on Cloudflare, or hostname already in use). Check the domain in your Cloudflare dashboard.',
+  separate_execution_approval_required:'This turn-on step lost its safety lock. Reopen site options and try Turn on again.',
+  approval_already_claimed_or_changed:'Another turn-on is already in progress or your stored request changed. Refresh site options and try again.',
+  applied_domain_row_required:'Turn on custom domain first and wait until Pages shows it active before email forwarding.',
+  domain_not_active_on_owned_pages:'Custom domain must be active on your Pages project before email forwarding.',
+  email_hostname_mx_not_ready:'Email Routing needs the exact-host MX records Cloudflare documents for this hostname before forwarding can be added.',
+  verified_existing_destination_required:'Forward to a mailbox Cloudflare has already verified in your account.'
+};
+function failOptionActivation(error){
+  if(error instanceof OptionExecutionDisabled)
+    return fail('This stored request cannot be activated right now. Reopen your site options.',403);
+  if(error instanceof FormsConsentRequired)return formsConsentPage(view,'Setting up your contact form');
+  const code=error?.code;
+  if(code&&OPTION_ACTIVATION_HINT[code])
+    return fail(OPTION_ACTIVATION_HINT[code]+' Code: <code>'+escape(code)+'</code>.',400);
+  if(error instanceof ToolkitApprovalExecutionError||error instanceof ExtensionProviderError)
+    return fail('This optional feature could not be turned on. Reconnect your accounts or contact support with code <code>'+
+      escape(code||'activation_denied')+'</code>.',400);
+  if(error instanceof ProviderRequestError)
+    return fail(error.authorizationLost
+      ?'GitHub or Cloudflare authorization expired. Reconnect both accounts and try again.'
+      :'GitHub or Cloudflare is temporarily unavailable. Wait a moment and try again.',error.authorizationLost?401:503);
+  const msg=error?.message||'';
+  if(msg==='Rate limit reached')return fail('Too many attempts. Wait a minute and try again.',429);
+  if(/authorization|reconnect|Account/i.test(msg))
+    return fail('Reconnect GitHub and Cloudflare, then try again.',401);
+  return null;
+}
 function renderOptionExecutionResult(result){
   if(result.kind==='forms')return view('Contact form setup',
     '<p>Your form service is set up in your own Cloudflare account: spam protection, a private database for messages, and a small Worker that receives them.</p>'+
@@ -844,7 +878,8 @@ async function applyApprovedOption(request,env,current){
   try {
     result=await runStoredOptionExecution(env,current,data.get('id'));
   }catch(error){
-    if(error instanceof FormsConsentRequired)return formsConsentPage(view,'Setting up your contact form');
+    const page=failOptionActivation(error);
+    if(page)return page;
     if(error instanceof OptionExecutionDisabled)
       return fail('That option has no currently authorized activation grant.',403);
     throw error;
@@ -857,7 +892,11 @@ async function activateOwnerOption(request,env,current){
   assertCsrf(request,data,current,baseUrl(env));
   if(data.getAll('approvalId').length!==1 || data.size!==2)
     return fail('Open this option from your toolkit.',400);
-  await assertHistoryAccess(env,current);
+  try{await assertHistoryAccess(env,current);}catch(error){
+    const page=failOptionActivation(error);
+    if(page)return page;
+    throw error;
+  }
   const execId=await mintOwnerExecutionGrant(env,current,data.get('approvalId'));
   if(!execId)
     return fail('This stored request cannot be activated right now. Reopen your site options.',403);
@@ -865,8 +904,8 @@ async function activateOwnerOption(request,env,current){
   try {
     result=await runStoredOptionExecution(env,current,execId);
   }catch(error){
-    if(error instanceof OptionExecutionDisabled)
-      return fail('This stored request cannot be activated right now.',403);
+    const page=failOptionActivation(error);
+    if(page)return page;
     throw error;
   }
   return renderOptionExecutionResult(result);

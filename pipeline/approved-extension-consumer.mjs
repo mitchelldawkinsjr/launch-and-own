@@ -206,7 +206,7 @@ async function livePagesAndRepo(provider, site, fence) {
     if (typeof provider.readGithubBranchHead !== 'function')
       deny('provider_source_sha_fence_required');
     const branch = await guarded(fence, () => provider.readGithubBranchHead(site));
-    if (branch?.commit?.sha !== site.expectedCommitSha)
+    if (lower(branch?.commit?.sha) !== lower(site.expectedCommitSha))
       deny('provider_source_sha_changed');
   }
   if (repo?.id !== site.repositoryId || repo?.private !== true ||
