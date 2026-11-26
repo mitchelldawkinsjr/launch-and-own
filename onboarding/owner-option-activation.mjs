@@ -44,7 +44,7 @@ export async function mintOwnerExecutionGrant(env, current, approvalId, time = M
       authorization_epoch, operator_grant_id, approved_at, expires_at, status, updated_at
     )
     SELECT ?, o.id, j.id, j.github_user_id, j.cloudflare_account_id, o.kind,
-      lower(o.approval_digest), ?, j.repository_id, j.pages_project_id, lower(j.expected_commit_sha),
+      o.approval_digest, ?, j.repository_id, j.pages_project_id, j.expected_commit_sha,
       ?, ?, ?, ?, 'approved', ?
     FROM onboarding_option_approvals o
     JOIN onboarding_launch_jobs j ON j.id = o.job_id

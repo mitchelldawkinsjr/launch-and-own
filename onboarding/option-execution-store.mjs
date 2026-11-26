@@ -108,7 +108,7 @@ export function createD1OptionExecutionStore(env, current) {
       repositoryName: 'esp-' + j.site_slug,
       pagesProjectName: 'esp-' + j.site_slug + '-site',
       pagesProjectId: j.pages_project_id,
-      productionBranch: j.production_branch, expectedCommitSha: j.expected_commit_sha
+      productionBranch: j.production_branch, expectedCommitSha: clean(j.expected_commit_sha)
     };
   }
 
