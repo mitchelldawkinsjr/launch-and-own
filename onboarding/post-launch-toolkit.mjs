@@ -78,13 +78,13 @@ export function historyToolkitCapabilities({
   let updates;
   if (uploadedZip && verified)
     updates = cap('available_opt_in', 'imported_edit_ready',
-      'Change one unique text, link, business detail, or existing color. Preview it, approve a pull request, and merge it yourself.');
+      'Change one unique text, link, business detail, or existing color. Preview it and approve to publish, or open a pull request instead and merge it yourself.');
   else if (uploadedZip)
     updates = cap('not_available', 'uploaded_source_has_no_supported_editor',
       'Imported editing appears after this ZIP launch is confirmed live.');
   else if (canEdit && verified)
     updates = cap('available_opt_in', 'editor_eligible',
-      'Change the copy, preview the exact page, approve, merge in GitHub, then we check the live site.');
+      'Change the copy, preview the exact page, and approve to publish (or open a pull request instead). Then we check the live site.');
   else
     updates = cap('not_available', 'update_acceptance_pending',
       verified
@@ -143,7 +143,7 @@ export function websiteUrlForSlug(siteSlug) {
 
 const UPDATE_STEPS = [
   {id: 'approved', title: 'Update approved', hint: 'We saved the exact page you reviewed.'},
-  {id: 'merge', title: 'Publish in GitHub', hint: 'Open the change request and click Merge when you are ready.'},
+  {id: 'merge', title: 'Publish in GitHub', hint: 'This change is waiting as a pull request. Open it and click Merge when you are ready.'},
   {id: 'publishing', title: 'Checking your live site', hint: 'Waiting for the public site to match your approved change.'},
   {id: 'live', title: 'Live', hint: 'The public site matches your approved update.'}
 ];

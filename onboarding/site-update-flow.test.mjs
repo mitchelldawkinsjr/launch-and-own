@@ -44,7 +44,9 @@ test('only a verified live one-page site offers editing; no provider write on op
   const ticket=await reviewedEdit(h,{...tenant,id:unfinished});
   const review=await h.request('/site-update-review?ticket='+ticket,{cookie:tenant.cookie});
   assert.equal(review.status,200);
-  assert.match(await review.text(),/Approve this update/);
+  const reviewHtml=await review.text();
+  assert.match(reviewHtml,/value="publish">Approve and publish</);
+  assert.match(reviewHtml,/value="pr">Open a pull request instead</);
   const exact=await h.request('/site-update-html?ticket='+ticket,{cookie:tenant.cookie});
   assert.equal(exact.status,200);
   assert.match(await exact.text(),/New customer-approved headline/);
@@ -62,7 +64,7 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   const ticket=await reviewedEdit(h,tenant);
   const beforeWrites=updateWrites(h).length;
   const beforeApproval=h.calls.length;
-  const approval=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const approval=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(approval.status,303);
   const approvalCalls=h.calls.slice(beforeApproval);
   const writeIndexes=approvalCalls.flatMap((call,index)=>call.method==='GET'?[]:[index]);
@@ -123,7 +125,7 @@ test('a public, scoped or unknown preview policy blocks the first GitHub write',
   config.pr_comments_enabled=false;
   for(const setting of ['all','custom',undefined]){
    config.preview_deployment_setting=setting;
-   const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+   const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
    assert.equal(r.status,409);
    assert.match(await r.text(),/Confirm automatic preview builds are disabled/);
    assert.equal(updateWrites(h).length,beforeWrites);
@@ -142,7 +144,7 @@ test('a replacement Pages project with preview builds off cannot authorize a Git
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
   h.resourceState.pages.id='replacement-with-the-same-source';
   const beforeWrites=updateWrites(h).length;
-  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(r.status,409);
   assert.match(await r.text(),/Confirm automatic preview builds are disabled/);
   assert.equal(updateWrites(h).length,beforeWrites);
@@ -164,7 +166,7 @@ test('a preview policy change after branch or content staging stops the next wri
      h.resourceState.pages.source.config.preview_deployment_setting=point.setting;
     return response;
    };
-   const paused=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+   const paused=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
    assert.equal(paused.status,409);
    assert.match(await paused.text(),/The update paused before the next GitHub change/);
    assert.match(h.resourceState.updateBranch,/^launch-and-own\/site-/);
@@ -173,7 +175,7 @@ test('a preview policy change after branch or content staging stops the next wri
 
    globalThis.fetch=h.fetchFn;
    h.resourceState.pages.source.config.preview_deployment_setting='none';
-   const retried=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+   const retried=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
    assert.equal(retried.status,303);
    assert.equal(h.calls.filter(x=>x.url.endsWith('/git/refs')).length,1);
    assert.equal(h.resourceState.updateFileWrites,1);
@@ -201,7 +203,7 @@ test('approval reuses freshly renewed GitHub and Cloudflare grants',async()=>{
     assert.equal(options.headers.authorization,'Bearer ghu_rotated_access');
    return h.fetchFn(url,options);
   };
-  const approved=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const approved=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(approved.status,303);
   assert.equal(pagesReads.length,3);
   for(const request of pagesReads)
@@ -240,7 +242,7 @@ test('a changed GitHub main after preview refuses update and creates no feature 
  try{
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
   h.resourceState.headSha='d'.repeat(40);
-  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(r.status,409);
   assert.equal(h.resourceState.updateBranch,null);
   assert.equal(h.resourceState.updatePr,null);
@@ -252,7 +254,7 @@ test('repository replacement between reviewed base and approved PR is rejected',
  try{
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
   h.resourceState.repo.id=999;
-  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(r.status,409);
   assert.equal(h.resourceState.updateBranch,null);
   assert.equal(h.resourceState.updatePr,null);
@@ -265,9 +267,9 @@ test('safe approval replay reuses existing GitHub PR without extra website write
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
-  const first=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const first=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(first.status,303);
-  const second=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const second=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(second.status,303);
   assert.equal(h.resourceState.updateFileWrites,1);
   assert.equal(h.calls.filter(x=>x.url.endsWith('/git/refs')).length,1);
@@ -281,7 +283,7 @@ test('GitHub PR permission rejection never merges or edits main and is actionabl
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
   const mainHtml=h.resourceState.homepageHtml;
   h.resourceState.denyPullRequests=true;
-  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(r.status,409);
   assert.match(await r.text(),/Pull requests: write/);
   assert.equal(h.resourceState.homepageHtml,mainHtml);
@@ -294,7 +296,7 @@ test('expired/changed owner authorization stops approval and update history acce
  try{
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
   h.sqlite.prepare('UPDATE onboarding_sessions SET authorization_epoch=authorization_epoch+1').run();
-  assert.equal((await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket})).status,400);
+  assert.equal((await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'})).status,400);
   assert.equal(h.resourceState.updateBranch,null);
   h.sqlite.prepare('UPDATE onboarding_sessions SET expires_at=0').run();
   assert.equal((await h.request('/site-update?id='+tenant.id,{cookie:tenant.cookie})).status,404);
@@ -318,7 +320,7 @@ test('revocation during a provider response fences subsequent PR writes',async()
  try{
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
   h.resourceState.invalidateSessionOnRepoRead=true;
-  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const r=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   assert.equal(r.status,409);
   assert.equal(h.resourceState.updateBranch,null);
   assert.equal(h.resourceState.updatePr,null);
@@ -331,7 +333,7 @@ test('status receipts require the same verified owner but survive a reconnect',a
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
   const tenant=await liveSite(h),ticket=await reviewedEdit(h,tenant);
-  const approved=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  const approved=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'pr'});
   const statusPath=approved.headers.get('location');
   const sameOwner=await connectTenant(h);
   assert.equal((await h.request(statusPath,{cookie:sameOwner.cookie})).status,200);
@@ -409,4 +411,39 @@ test('once the form service is set up, a created site\'s update preview adds the
     assert.match(preview,/<form class="lo-form" action="https:\/\/esp-willow-studio-site-form\.acct\.workers\.dev\/submit"/);
     assert.match(preview,/data-sitekey="0x4AAAAAAAtestkey"/);
   }finally{globalThis.fetch=originalFetch;h.sqlite.close()}
+});
+
+test('Approve and publish merges exactly the approved update PR once, after the preview-policy check (owner decision 2026-11-26)',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await liveSite(h),before=h.resourceState.homepageHtml;
+  const ticket=await reviewedEdit(h,tenant);
+  const beforeApproval=h.calls.length;
+  const approval=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket,action:'publish'});
+  assert.equal(approval.status,303,await approval.clone().text());
+  assert.equal(h.resourceState.merges.length,1);
+  assert.equal(h.resourceState.merges[0].sha,UPDATE_COMMIT,'exactly the approved head');
+  assert.equal(h.resourceState.merges[0].merge_method,'squash');
+  const approvalCalls=h.calls.slice(beforeApproval);
+  const mergeIndex=approvalCalls.findIndex(call=>call.method==='PUT'&&call.url.endsWith('/pulls/55/merge'));
+  assert.deepEqual(approvalCalls[mergeIndex-1],{method:'GET',url:PROJECT},'preview-policy check precedes the merge, like every write');
+  assert.equal(h.resourceState.homepageHtml,before,'main is never written directly; only the PR merge publishes');
+  const statusHtml=await (await h.request(approval.headers.get('location'),{cookie:tenant.cookie})).text();
+  assert.doesNotMatch(statusHtml,/Open the change to publish/);
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+test('approving with no choice publishes; a refused merge leaves the update PR open with an explanation',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  const tenant=await liveSite(h);
+  const ticket=await reviewedEdit(h,tenant);
+  h.resourceState.denyMerge=true;
+  const approval=await post(h,'/site-update-approve',tenant.cookie,{csrf:tenant.csrf,ticket});
+  assert.equal(approval.status,303);
+  assert.equal(h.resourceState.merges.length,1,'default action publishes');
+  const statusHtml=await (await h.request(approval.headers.get('location'),{cookie:tenant.cookie})).text();
+  assert.match(statusHtml,/GitHub did not allow an automatic merge/);
+  assert.match(statusHtml,/Open the change to publish/);
+ }finally{globalThis.fetch=originalFetch;}
 });

@@ -127,7 +127,8 @@ Rules:
 - **Approval** is a CSRF-protected owner POST carrying `approvalId`, `proposalDigest` and `artifactDigest`. The server recomputes both digests and checks owner, repository ID, expiry, and that current `main` equals `baseCommitSha`. It fails closed with `approval_mismatch`, `expired` or `stale_base`.
 - **Single use.** In the same transaction, before any GitHub write, the server marks `approvalId` consumed under a unique constraint. A second POST with the same `approvalId` fails with `approval_consumed`. A replay therefore cannot produce a second commit.
 - **Idempotency key** is `(repositoryId, baseCommitSha, artifactDigest)`, recorded with the `approvalId` that first claimed it. A different approval for the same key by the **same owner** returns the existing PR and makes no new commit. Any other owner gets `approval_mismatch`.
-- **Re-read the base right before writing.** Check `main` = `baseCommitSha` at approval **and** again immediately before creating the branch ref. Always create the branch from `baseCommitSha`, never from the current head. Branch name: `launch-and-own/edit-<first 20 hex of sha256(baseCommitSha:artifactDigest)>`. One multi-file commit, one PR. On retry, reuse only after `hasApprovedUpdateHead` verifies the head and repository. Never merge.
+- **Re-read the base right before writing.** Check `main` = `baseCommitSha` at approval **and** again immediately before creating the branch ref. Always create the branch from `baseCommitSha`, never from the current head. Branch name: `launch-and-own/edit-<first 20 hex of sha256(baseCommitSha:artifactDigest)>`. One multi-file commit, one PR. On retry, reuse only after `hasApprovedUpdateHead` verifies the head and repository. **Merge only as below.**
+- **Approve and publish** (owner decision, 2026-11-26): unless the owner chose *Open a pull request instead*, the server merges **that exact PR** right after creating it, in the same approved request. It re-verifies the PR with the flow's reader first, requires `main` = `baseCommitSha` at merge time (`stale_base` otherwise), and passes the approved head as GitHub's merge `sha`, so a moved head is refused. Any refusal leaves the PR open with code `merge_blocked`. It never retries, force-merges or merges any other PR (`pipeline/merge-approved-pr.mjs`).
 - Expiry: 15 minutes, matching the existing site-update review lifetime (owner-approved).
 - "Live" requires the merged commit SHA to equal the production deployment's commit, plus a fetch of the live files matching `afterSha256`.
 
@@ -158,6 +159,7 @@ Reason and failure codes (the UI maps each to plain language; codes are stable):
 | `approval_mismatch` | Approval | Digest, owner or repository mismatch |
 | `approval_consumed` | Approval | `approvalId` already used |
 | `expired` | Approval | Preview or approval past `expiresAt` |
+| `merge_blocked` | Publish | GitHub refused the automatic merge (not mergeable, head moved, or a repository rule); the PR stays open for the owner |
 | `credentials_revoked` | Any provider call | GitHub token mint or API returned 401, 403 or 404 on the installation; maps to status `needs_reauthorization` |
 | `quota_exhausted` | Proposal | AI usage guard hit |
 | `deploy_unverified` | Verification | Merged, but the live revision or files do not match yet |
@@ -188,6 +190,8 @@ Fixtures are original or license-clean, contain no personal data, and keep prove
 1. M1 limits: ≤ 10 edits / ≤ 5 files per change.
 2. `css_color` edits in M1: CSS custom properties only.
 3. Approval expiry: 15 minutes.
+
+4. (2026-11-26) **Approve and publish:** approving merges the exact approved change. *Open a pull request instead* keeps the earlier PR-only behaviour. It applies to hosted imported edits, created-site updates and the customer-owned assistant. Contact-form connection is unchanged (PR only).
 
 Approving the contract does not authorize hosted routes, M1.5, inference, live accounts or deployment. Each needs its own owner go-ahead.
 

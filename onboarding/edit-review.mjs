@@ -22,7 +22,8 @@ const CODES={
   expired:'This preview expired. Ask again for a fresh preview.',
   credentials_revoked:'Your GitHub connection was removed or expired. Reconnect to continue.',
   quota_exhausted:'The AI usage limit for today was reached.',
-  deploy_unverified:'Merged, but the live site does not match yet. Check again in a few minutes.'
+  deploy_unverified:'Merged, but the live site does not match yet. Check again in a few minutes.',
+  merge_blocked:'GitHub did not allow an automatic merge, so nothing was published. The pull request is open for you to review and merge.'
 };
 const SHA=/^[a-f0-9]{40}$/i, DIGEST=/^[a-f0-9]{64}$/i, ID=/^[a-f0-9]{32}$/i, CSRF=/^[A-Za-z0-9_-]{16,256}$/;
 const TICKET=/^[A-Za-z0-9_-]{50,6000}$/;
@@ -61,8 +62,11 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
     ?'<form action="'+escape(approve.action)+'" method="POST"><input type="hidden" name="csrf" value="'+escape(approve.csrf)+'">'+
       (ticket?'<input type="hidden" name="ticket" value="'+escape(ticket)+'">':'')+
       '<input type="hidden" name="approvalId" value="'+escape(binding.approvalId)+'"><input type="hidden" name="proposalDigest" value="'+escape(binding.proposalDigest)+'">'+
-      '<input type="hidden" name="artifactDigest" value="'+escape(binding.artifactDigest)+'"><button type="submit">Approve and open a pull request</button></form>'+
-      '<p class="er-note">Approving creates a pull request in your GitHub account. <strong>Nothing goes live until you merge it.</strong> Launch &amp; Own never merges for you. This approval works once and expires in 15 minutes.</p>':'';
+      '<input type="hidden" name="artifactDigest" value="'+escape(binding.artifactDigest)+'">'+
+      // Owner decision 2026-11-26: approving publishes (merges this exact change); a pull request stays available.
+      '<button type="submit" name="action" value="publish">Approve and publish</button> '+
+      '<button type="submit" name="action" value="pr" class="btn-secondary">Open a pull request instead</button></form>'+
+      '<p class="er-note"><strong>Approve and publish</strong> commits exactly this change to your website\'s <code>main</code> branch and merges it, and Cloudflare Pages publishes it. Every other file stays the same. If your site changed since this preview, nothing is published. Want to review it in GitHub first? Choose <strong>Open a pull request instead</strong> and merge it yourself. This approval works once.</p>':'';
   const expires=Number.isSafeInteger(binding.expiresAt)?new Date(binding.expiresAt*1000).toISOString():'';
   return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">Review this change</h2>'+
     '<p class="er-summary">'+escape(proposal.summary||'Proposed change')+'</p>'+problem+timeline+

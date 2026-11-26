@@ -42,7 +42,7 @@ function markImported(h, id) {
 }
 
 function installGit(h, files) {
-  const state = {ref: null, pull: null, posts: []};
+  const state = {ref: null, pull: null, posts: [], merges: []};
   const inner = h.fetchFn;
   const root = '/repos/tester/esp-willow-studio';
   globalThis.fetch = async (url, opts = {}) => {
@@ -111,6 +111,14 @@ function installGit(h, files) {
       };
       return json(state.pull, 201);
     }
+    if (path === root + '/pulls/7/merge' && method === 'PUT' && state.allowMerge) {
+      // "Approve and publish": only the exact approved head; a test can make GitHub refuse.
+      const merge = JSON.parse(opts.body);
+      state.merges.push(merge);
+      if (state.denyMerge || merge.sha !== HEAD) return json({message: 'not mergeable'}, 405);
+      state.pull = {...state.pull, state: 'closed', merged: true, merged_at: '2026-11-26T12:00:00Z', merge_commit_sha: '9'.repeat(40)};
+      return json({merged: true, sha: '9'.repeat(40)});
+    }
     if (path.includes('/merge')) throw new Error('merge attempted');
     return inner(url, opts);
   };
@@ -157,7 +165,8 @@ test('a live imported site can preview and approve one pull request without merg
     const editor = await h.request('/imported-edit?id=' + tenant.id, {cookie: tenant.cookie});
     assert.equal(editor.status, 200);
     const editorHtml = await editor.text();
-    assert.match(editorHtml, /Nothing is merged or published for you/);
+    assert.match(editorHtml, /When you approve, we publish exactly that change/);
+    assert.match(editorHtml, /open a pull request instead/);
     assert.doesNotMatch(editorHtml, /name="path"[^>]*required/);
     assert.match(editorHtml, /index\.html<\/code> \(visible text, link address, business email or phone\)/);
     assert.doesNotMatch(editorHtml, /styles\.css/);
@@ -200,7 +209,8 @@ test('a live imported site can preview and approve one pull request without merg
     const review = await h.request('/imported-edit-review?ticket=' + ticket, {cookie: tenant.cookie});
     assert.equal(review.status, 200);
     const reviewHtml = await review.text();
-    assert.match(reviewHtml, /Approve and open a pull request/);
+    assert.match(reviewHtml, /Approve and publish/);
+    assert.match(reviewHtml, /Open a pull request instead/);
     assert.match(reviewHtml, /Preview ready/);
     assert.match(reviewHtml, /See the exact changed file/);
     assert.doesNotMatch(reviewHtml, /Open the exact preview/);
@@ -257,7 +267,8 @@ test('a live imported site can preview and approve one pull request without merg
     assert.equal(mismatched.status, 400);
     assert.match(await mismatched.text(), /no longer matches/);
     assert.equal(state.posts.length, 0);
-    const approved = await post(h, '/imported-edit-approve', tenant.cookie, {csrf: tenant.csrf, ticket, ...binding});
+    // This test covers the pull-request choice; publishing has its own tests below.
+    const approved = await post(h, '/imported-edit-approve', tenant.cookie, {csrf: tenant.csrf, ticket, ...binding, action: 'pr'});
     assert.equal(approved.status, 303, await approved.text());
     assert.deepEqual(state.posts, ['ref', 'blob', 'tree', 'commit', 'patch', 'pull']);
     const status = await h.request(approved.headers.get('location'), {cookie: tenant.cookie});
@@ -266,15 +277,80 @@ test('a live imported site can preview and approve one pull request without merg
     assert.match(statusHtml, /Pull request open/);
     assert.match(statusHtml, /<a href="https:\/\/github\.com\/tester\/esp-willow-studio\/pull\/7" target="_blank" rel="noopener noreferrer">Open the pull request<\/a> \(opens in a new tab\)/);
     assert.match(statusHtml, /does not publish the site/);
-    assert.doesNotMatch(statusHtml, /Approve and open a pull request/);
+    assert.doesNotMatch(statusHtml, /Approve and publish/);
     assert.doesNotMatch(statusHtml, /published production revision matches/);
     assert.equal(statusHtml.includes('ghu_'), false);
     const writes = state.posts.length;
     h.resourceState.headSha = MOVED;
-    const stale = await post(h, '/imported-edit-approve', tenant.cookie, {csrf: tenant.csrf, ticket, ...binding});
+    const stale = await post(h, '/imported-edit-approve', tenant.cookie, {csrf: tenant.csrf, ticket, ...binding, action: 'pr'});
     assert.equal(stale.status, 400);
     assert.match(await stale.text(), /GitHub main changed/);
     assert.equal(state.posts.length, writes);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+async function approvedImportedEdit(h, {action, denyMerge = false} = {}) {
+  const tenant = await liveSite(h);
+  markImported(h, tenant.id);
+  const html = text('<!doctype html><html><body><h1>Willow Studio</h1></body></html>');
+  const readme = text('# site\n');
+  const [htmlSha, readmeSha] = await Promise.all([gitBlobSha(html), gitBlobSha(readme)]);
+  const files = {nextHtml: text('<!doctype html><html><body><h1>River &amp; Pine</h1></body></html>'), blobs: new Map([[htmlSha, html], [readmeSha, readme]])};
+  files.baseTree = [
+    {path: 'README.md', mode: '100644', type: 'blob', sha: readmeSha},
+    {path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40)},
+    {path: 'public/index.html', mode: '100644', type: 'blob', sha: htmlSha}
+  ];
+  files.headTree = async () => [
+    {path: 'README.md', mode: '100644', type: 'blob', sha: readmeSha},
+    {path: 'public', mode: '040000', type: 'tree', sha: '1'.repeat(40)},
+    {path: 'public/index.html', mode: '100644', type: 'blob', sha: await gitBlobSha(files.nextHtml)}
+  ];
+  const state = installGit(h, files);
+  Object.assign(state, {allowMerge: true, denyMerge});
+  const preview = await post(h, '/imported-edit-preview', tenant.cookie, {
+    csrf: tenant.csrf, id: tenant.id, kind: 'text', path: 'index.html', old: 'Willow Studio', replacement: 'River & Pine'
+  });
+  assert.equal(preview.status, 303, await preview.text());
+  const ticket = new URL('https://onboard.example.com' + preview.headers.get('location')).searchParams.get('ticket');
+  const reviewHtml = await (await h.request('/imported-edit-review?ticket=' + ticket, {cookie: tenant.cookie})).text();
+  const field = name => reviewHtml.match(new RegExp('name="' + name + '" value="([^"]+)"'))[1];
+  const approved = await post(h, '/imported-edit-approve', tenant.cookie, {
+    csrf: tenant.csrf, ticket, approvalId: field('approvalId'), proposalDigest: field('proposalDigest'), artifactDigest: field('artifactDigest'),
+    ...(action ? {action} : {})
+  });
+  assert.equal(approved.status, 303, await approved.clone().text());
+  const statusHtml = await (await h.request(approved.headers.get('location'), {cookie: tenant.cookie})).text();
+  return {state, statusHtml};
+}
+
+test('Approve and publish merges exactly the approved head once (owner decision 2026-11-26)', async () => {
+  const h = harness();
+  globalThis.fetch = h.fetchFn;
+  try {
+    const {state, statusHtml} = await approvedImportedEdit(h, {action: 'publish'});
+    assert.deepEqual(state.posts, ['ref', 'blob', 'tree', 'commit', 'patch', 'pull']);
+    assert.equal(state.merges.length, 1);
+    assert.equal(state.merges[0].sha, HEAD);
+    assert.equal(state.merges[0].merge_method, 'squash');
+    // The timeline lists every step; the current one carries aria-current.
+    assert.match(statusHtml, /aria-current="step">(You merged|Cloudflare publishing|Live and checked)</);
+    assert.doesNotMatch(statusHtml, /aria-current="step">Pull request open</);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('approving with no choice publishes; a merge GitHub refuses leaves the PR open with an explanation', async () => {
+  const h = harness();
+  globalThis.fetch = h.fetchFn;
+  try {
+    const {state, statusHtml} = await approvedImportedEdit(h, {denyMerge: true});
+    assert.equal(state.merges.length, 1, 'default action publishes');
+    assert.match(statusHtml, /aria-current="step">Pull request open</);
+    assert.match(statusHtml, /GitHub did not allow an automatic merge/);
   } finally {
     globalThis.fetch = originalFetch;
   }

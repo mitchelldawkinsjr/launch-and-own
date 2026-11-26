@@ -14,6 +14,7 @@ import { bindApproval, newApprovalId } from '../imported/approval.mjs';
 import { proposeImportedPullRequest, readImportedPullRequest } from '../imported/pull-request.mjs';
 import { d1ApprovalStore } from '../imported/approval-store.mjs';
 import { ImportedEditError } from '../imported/errors.mjs';
+import { MergeRefused, mergeVerifiedPullRequest } from '../pipeline/merge-approved-pr.mjs';
 import { mintInstallationToken } from './github-app.mjs';
 import { DEFAULT_DAILY_NEURONS, reserveNeurons } from './budget.mjs';
 
@@ -111,7 +112,7 @@ const outermostObject = raw => { const a = raw.indexOf('{'), b = raw.lastIndexOf
 function home(env, csrf) {
   const ai = env.AI_EDITS === 'on' && env.AI;
   return page('Change your website',
-    '<p>Every change is previewed first and becomes a pull request in your GitHub account. <strong>Nothing goes live until you merge it.</strong></p>' +
+    '<p>Every change is previewed first. <strong>Nothing goes live until you approve it</strong>. Approving publishes exactly that change, or you can open a pull request instead and merge it yourself.</p>' +
     '<form method="post" action="/preview"><input type="hidden" name="csrf" value="' + escape(csrf) + '"><input type="hidden" name="mode" value="typed">' +
     '<p><label>What kind of change<br><select name="kind"><option value="text">Text</option><option value="link">Link</option><option value="business_info">Email or phone</option><option value="css_color">Color</option></select></label></p>' +
     '<p><label>Current text, exactly as it appears<br><input name="old" maxlength="500" required size="50"></label></p>' +
@@ -195,7 +196,20 @@ async function approve(env, site, form, { sub, fetchFn, now }) {
   });
   const proposal = await proposeImportedPullRequest(receipt, { baseFiles: files, nextFiles: validated.files }, { githubToken: token, fetchFn, approvalStore: d1ApprovalStore(env.DB), installation: true });
   if (proposal.live !== false || proposal.merged !== false) throw new ImportedEditError('pull-request-unreadable');
-  const status = await sealTicket(env, 'status', sub, {
+  // Owner decision 2026-11-26: "Approve and publish" merges this exact PR; "Open a pull request instead" leaves it open.
+  let mergeNote = null;
+  if (form.get('action') !== 'pr') {
+    try {
+      const pull = await readImportedPullRequest(receipt, { githubToken: token, fetchFn, number: proposal.number, headCommitSha: proposal.headCommitSha, installation: true });
+      if (pull.status !== 'pr_open') throw new MergeRefused('merge_blocked');
+      await mergeVerifiedPullRequest({ owner: site.owner, repoName: site.repo, number: proposal.number, headCommitSha: proposal.headCommitSha, baseCommitSha: ticket.baseCommitSha },
+        { githubToken: token, fetchFn });
+    } catch (error) {
+      if (!(error instanceof MergeRefused)) throw error;
+      mergeNote = error.code; // the PR stays open for the owner
+    }
+  }
+  const status = await sealTicket(env, 'status', sub, { mergeNote,
     receipt: { ownerLogin: receipt.ownerLogin, repository: receipt.repository, owner: receipt.owner, repositoryId: receipt.repositoryId, baseCommitSha: receipt.baseCommitSha, artifactDigest: receipt.artifactDigest },
     number: proposal.number, headCommitSha: proposal.headCommitSha, summary: ticket.summary, edits: ticket.edits, proposalDigest: ticket.proposalDigest
   }, now, STATUS_SECONDS);
@@ -207,7 +221,10 @@ async function prStatus(env, site, url, { sub, fetchFn, now }) {
   const { token } = await mintInstallationToken({ ...site, fetchFn, now: () => now });
   const out = await readImportedPullRequest(ticket.receipt, { githubToken: token, fetchFn, number: ticket.number, headCommitSha: ticket.headCommitSha, installation: true });
   const screen = editReviewMarkup({ proposal: { v: 1, summary: ticket.summary, edits: ticket.edits }, binding: { proposalDigest: ticket.proposalDigest, artifactDigest: ticket.receipt.artifactDigest, baseCommitSha: ticket.receipt.baseCommitSha }, status: out.status === 'failed' ? 'failed' : out.status, now });
-  const next = out.status === 'merged' ? '<p>Merged. Cloudflare Pages publishes it from your repository. Check your live site.</p>' : out.status === 'pr_open' ? '<p>Waiting for you to review and merge it in GitHub.</p>' : '';
+  const blocked = ticket.mergeNote === 'stale_base' ? 'Your website changed after you approved, so it was not published automatically. '
+    : ticket.mergeNote ? 'GitHub did not allow an automatic merge, so it was not published. ' : '';
+  const next = out.status === 'merged' ? '<p>Published: merged into your website\'s <code>main</code> branch. Cloudflare Pages is publishing it; check your live site in a minute.</p>'
+    : out.status === 'pr_open' ? '<p>' + escape(blocked) + 'The pull request is open for you to review and merge in GitHub.</p>' : '';
   return page('Change status', screen + next + '<p><a href="' + escape(out.pullRequest) + '" target="_blank" rel="noopener noreferrer">Open the pull request</a> (opens in a new tab)</p>');
 }
 

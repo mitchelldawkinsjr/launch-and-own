@@ -15,8 +15,10 @@ test('previewed change shows before/after, exact preview, and a single-use bound
   assert.match(html,/href="https:\/\/abc\.preview\.example\.test\/" target="_blank" rel="noopener noreferrer"/);
   for(const [k,v] of [['csrf',approve.csrf],['approvalId',binding.approvalId],['proposalDigest',binding.proposalDigest],['artifactDigest',binding.artifactDigest]])
     assert.match(html,new RegExp(`name="${k}" value="${v}"`));
-  assert.match(html,/Nothing goes live until you merge it/);
-  assert.match(html,/never merges for you/);
+  assert.match(html,/<button type="submit" name="action" value="publish">Approve and publish<\/button>/);
+  assert.match(html,/<button type="submit" name="action" value="pr"[^>]*>Open a pull request instead<\/button>/);
+  assert.match(html,/If your site changed since this preview, nothing is published/);
+  assert.doesNotMatch(html,/never merges for you|Nothing goes live until you merge it/);
   assert.match(html,/aria-current="step">Preview ready/);
   const sealed='a'.repeat(50);
   assert.match(editReviewMarkup({...base,ticket:sealed}),new RegExp('name="ticket" value="'+sealed+'"'));
