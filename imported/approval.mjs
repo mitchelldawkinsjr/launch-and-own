@@ -52,8 +52,12 @@ export async function approvalDigest(receipt) {
 
 export async function bindApproval({
   explicitlyApproved, preview, changed, githubUserId, repositoryId, ownerLogin, repository,
-  baseCommitSha, proposalDigest, approvalId, expiresAt
+  baseCommitSha, proposalDigest, approvalId, expiresAt, owner
 }) {
+  // owner: the customer-owned assistant binds its Access identity. Hosted callers omit it and keep the GitHub owner.
+  if (owner !== undefined && (owner?.provider !== 'cloudflare_access' || typeof owner.id !== 'string' || owner.id.length < 1 || owner.id.length > 80)) {
+    throw new ImportedEditError('approval-owner-mismatch');
+  }
   if (explicitlyApproved !== true) throw new ImportedEditError('approval-required');
   if (!preview || preview.credentialsIncluded !== false) throw new ImportedEditError('invalid-preview');
   if (!Number.isSafeInteger(githubUserId) || githubUserId < 1 || preview.githubUserId !== githubUserId) throw new ImportedEditError('approval-owner-mismatch');
@@ -81,7 +85,7 @@ export async function bindApproval({
     approvalId,
     proposalDigest,
     repositoryId,
-    owner: { provider: 'github', id: String(githubUserId) },
+    owner: owner ? { provider: owner.provider, id: owner.id } : { provider: 'github', id: String(githubUserId) },
     baseCommitSha: baseCommitSha.toLowerCase(),
     changed: rows,
     artifactDigest: digest,

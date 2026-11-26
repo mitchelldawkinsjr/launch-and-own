@@ -11,5 +11,12 @@
 6. Open `/status` and run **Self-check**: Access ok, GitHub ok (read-only).
 7. Optional: in the assistant repo only, turn on *Allow GitHub Actions to create and approve pull requests*. The weekly check then opens update PRs for security, breaking-change and end-of-support releases. Otherwise the dashboard tells you about updates.
 
+## Using it
+Open the assistant's address and type the text as it appears on your site and what it should say. The assistant finds the one page it's on, shows the exact change and the changed file (with scripts blocked), and opens a pull request when you approve. **You merge it in GitHub; nothing is published before that.** Every step re-reads your repository, so if the site changed in between, it asks you to start again.
+
+Plain-language requests ("open Saturdays 10 to 4") use your own Workers AI allowance and are **off by default** (`AI_EDITS`), because no free model yet meets the accuracy bar. When on, the daily budget is reserved before every model call, and the model's proposal goes through the same checks as a typed edit.
+
+**Preview scope in M2:** the review shows each changed file exactly as it would be published, fully sandboxed. A full rendered preview on a separate address is a follow-up.
+
 ## Uninstall
 In GitHub, delete the App (that also removes its installation). In Cloudflare, delete the Worker, the `lo-assistant-<site>` D1 database and the Access application. Run `npx wrangler d1 export` first if you want your approval history. The website repo and its pull requests stay as they are. Delete any `launch-and-own/edit-*` branches if you like.

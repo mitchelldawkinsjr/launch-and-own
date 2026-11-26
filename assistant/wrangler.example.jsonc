@@ -17,10 +17,15 @@
     "ACCESS_TEAM_DOMAIN": "<team>.cloudflareaccess.com",
     "ACCESS_AUD": "<Access application AUD tag>",
     "OWNER_SUB": "<owner's Access sub>",
+    "WEBSITE_OWNER": "<GitHub login that owns the website repo>",
+    "WEBSITE_REPO": "esp-<site-slug>",
     "WEBSITE_REPO_ID": "<numeric GitHub repository id>",
     "GH_APP_ID": "<customer App id>",
     "GH_INSTALLATION_ID": "<installation id>",
-    "DAILY_NEURON_BUDGET": "8000"
+    "DAILY_NEURON_BUDGET": "8000",
+    // Plain-language requests are off by default: no model meets the 95/90 bar yet (#196). Typed edits always work.
+    "AI_EDITS": "off",
+    "AI_MODEL": "@cf/openai/gpt-oss-20b"
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "lo-assistant-<site-slug>", "database_id": "<id>", "migrations_dir": "assistant/migrations" }
