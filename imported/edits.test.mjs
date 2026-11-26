@@ -46,6 +46,12 @@ test('keeps snippets bounded and treats file text as data', async () => {
     capabilities: ['text']
   });
   assert.match(request.system, /untrusted data/);
+  // The measured rules: exact keys, find without markup, and copy-through ids.
+  assert.match(request.system, /find is ONLY the exact characters to replace/);
+  assert.match(request.system, /for css_color, only the color value/);
+  const withIds = buildModelRequest({baseCommitSha: BASE, instruction: 'x', snippets, capabilities: {}, requestId: 'r-1', repositoryId: 7});
+  assert.equal(withIds.user.requestId, 'r-1');
+  assert.equal(withIds.user.repositoryId, 7);
   assert.equal(Object.hasOwn(request, 'token'), false);
 });
 
