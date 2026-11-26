@@ -79,7 +79,8 @@ export async function checkRemoteSchema({accountId,token,databaseId,expectedData
     throw Error("Cloudflare did not return onboarding session columns");
   const columns=new Set(columnBody.result[0].results.map(x=>x.name));
   const required=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
-    "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until"];
+    "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until",
+    "cloudflare_forms_grant"];
   const absent=required.filter(x=>!columns.has(x));
   if(absent.length)throw Error("D1 token-rotation migration missing: "+absent.join(", "));
   // A correct physical D1 schema is insufficient when Wrangler's migration

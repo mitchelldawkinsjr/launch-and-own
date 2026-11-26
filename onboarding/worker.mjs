@@ -18,7 +18,7 @@ import {privacyHtml,termsHtml} from './legal-pages.mjs';
 import {LOGO_PNG_BASE64} from './logo.mjs';
 import {approvalSnapshot,approveJob,deleteOwnedLaunch,getOwnedJob,hasCurrentOwnerSession,isLaunchId,listOwnedJobs} from './launch-jobs.mjs';
 import {createSiteOptionsRoutes} from './post-launch-options.mjs';
-import {executeOwnedStoredOption,OptionExecutionDisabled} from './execute-option.mjs';
+import {executeOwnedStoredOption,FormsConsentRequired,OptionExecutionDisabled} from './execute-option.mjs';
 import {launchSchemaReady} from './launch-schema.mjs';
 import {runLaunchJob,runScheduledLaunches} from './run-launch-jobs.mjs';
 import {extractWebsiteZip,MAX_ZIP_BYTES,readBounded,WebsiteZipError} from './website-zip.mjs';
@@ -91,7 +91,7 @@ async function session(request,env){
   const record=await env.DB.prepare(`SELECT id_hash, github_user_id, github_login, github_token_ct,
     github_refresh_token_ct, github_token_expires_at, github_refresh_expires_at, cloudflare_token_ct,
     cloudflare_refresh_token_ct, cloudflare_token_expires_at, cloudflare_refresh_expires_at,
-    cloudflare_account_id, csrf_ct, expires_at, authorization_epoch FROM onboarding_sessions
+    cloudflare_account_id, cloudflare_forms_grant, csrf_ct, expires_at, authorization_epoch FROM onboarding_sessions
     WHERE id_hash=? AND expires_at>?`).bind(hash,now()).first();
   if(!record)return null;
   const csrf=await unseal(env.TOKEN_ENCRYPTION_KEY,record.csrf_ct,'csrf:'+hash);
@@ -110,22 +110,22 @@ async function formData(request){
   if(!bytes)throw Error('Form submission is too large');
   return new URLSearchParams(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
 }
-async function saveFlow(env,{provider,binding,state,codeVerifier}){
+async function saveFlow(env,{provider,binding,state,codeVerifier,purpose='sign_in'}){
   const key=await sha256(state);
   const bindingHash=await sha256(binding);
   const ciphertext=await seal(env.TOKEN_ENCRYPTION_KEY,codeVerifier,'flow:'+key);
-  await env.DB.prepare('INSERT INTO onboarding_flows(state_hash,provider,binding_hash,verifier_ct,expires_at) VALUES(?,?,?,?,?)')
-    .bind(key,provider,bindingHash,ciphertext,now()+600).run();
+  await env.DB.prepare('INSERT INTO onboarding_flows(state_hash,provider,binding_hash,verifier_ct,expires_at,purpose) VALUES(?,?,?,?,?,?)')
+    .bind(key,provider,bindingHash,ciphertext,now()+600,purpose).run();
 }
 async function consumeFlow(env,{provider,binding,state}){
   if(typeof state!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(state)||!binding)throw Error('Missing or expired authorization');
   const key=await sha256(state);
   const bindingHash=await sha256(binding);
   // Single atomic update: another callback cannot reuse the same authorization attempt.
-  const row=await env.DB.prepare('UPDATE onboarding_flows SET consumed_at=? WHERE state_hash=? AND provider=? AND binding_hash=? AND consumed_at IS NULL AND expires_at>? RETURNING verifier_ct')
+  const row=await env.DB.prepare('UPDATE onboarding_flows SET consumed_at=? WHERE state_hash=? AND provider=? AND binding_hash=? AND consumed_at IS NULL AND expires_at>? RETURNING verifier_ct, purpose')
     .bind(now(),key,provider,bindingHash,now()).first();
   if(!row)throw Error('Authorization expired or already used');
-  return await unseal(env.TOKEN_ENCRYPTION_KEY,row.verifier_ct,'flow:'+key);
+  return {verifier:await unseal(env.TOKEN_ENCRYPTION_KEY,row.verifier_ct,'flow:'+key),purpose:row.purpose};
 }
 async function apiGet(url,token){
   const resp=await fetch(url,{headers:{'authorization':'Bearer '+token,'accept':'application/json','x-github-api-version':'2022-11-28','user-agent':'launch-and-own'},redirect:'manual'});
@@ -148,7 +148,7 @@ async function gitHubCallback(request,env,current){
   const url=new URL(request.url);
   if(url.searchParams.has('error'))return fail('GitHub authorization was cancelled. You can try again.');
   const nonce=cookies(request)[COOKIE_LOGIN];
-  const verifier=await consumeFlow(env,{provider:'github',binding:nonce,state:url.searchParams.get('state')});
+  const {verifier}=await consumeFlow(env,{provider:'github',binding:nonce,state:url.searchParams.get('state')});
   const token=await completeGitHubAppOAuth({clientId:env.GH_CLIENT_ID,clientSecret:env.GH_CLIENT_SECRET,redirectUri:baseUrl(env)+'/oauth/github/callback',code:url.searchParams.get('code'),receivedState:url.searchParams.get('state'),expectedState:url.searchParams.get('state'),codeVerifier:verifier});
   const user=await apiGet('https://api.github.com/user',token.access_token);
   if(typeof user.login!=='string'||!Number.isSafeInteger(user.id)||user.id<1)throw Error('Unable to verify the connected GitHub user');
@@ -165,35 +165,46 @@ async function gitHubCallback(request,env,current){
   response.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
   return response;
 }
-// D1 and Workers scope IDs come from the Cloudflare OAuth client registration (Domain), only while forms are on.
-// A malformed ID is dropped rather than sent, so a typo cannot break sign-in for everyone.
-export function cloudflareScopes(env){
-  const scopes=String(env.CF_SCOPES).trim().split(/\s+/);
-  const forms=env.OPTION_FORMS_ENABLED==='true'?String(env.CF_FORMS_SCOPES||'').trim().split(/\s+/)
+// D1 and Workers scope IDs come from the Cloudflare OAuth client registration (Domain).
+// Incremental consent (owner-approved 2026-11-26): they are requested only in the separate forms consent
+// (/connect/cloudflare?purpose=forms), never at sign-in. A malformed ID is dropped rather than sent.
+export function formsScopes(env){
+  return env.OPTION_FORMS_ENABLED==='true'?String(env.CF_FORMS_SCOPES||'').trim().split(/\s+/)
     .filter(scope=>scope==='workers-scripts.admin'||/^[a-z0-9-]+\.(?:read|write)$/.test(scope)):[];
-  return [...new Set([...scopes,...forms])];
+}
+export function cloudflareScopes(env,{forms=false}={}){
+  const scopes=String(env.CF_SCOPES).trim().split(/\s+/);
+  return [...new Set([...scopes,...(forms?formsScopes(env):[])])];
+}
+export function formsScopesGranted(env,scope){
+  // Cloudflare may omit the scope string; then the forms consent request is what was approved.
+  if(typeof scope!=='string'||!scope.trim())return true;
+  const granted=new Set(scope.trim().split(/\s+/));
+  return formsScopes(env).every(s=>granted.has(s));
 }
 async function cloudflareStart(request,env,current){
   await limitAttempts(request,env);
   if(!current)return fail('Connect GitHub before connecting Cloudflare.',401);
-  const origin=baseUrl(env),scopes=cloudflareScopes(env);
+  // ?purpose=forms is the only way forms scopes are requested (owner turning on forms).
+  const purpose=new URL(request.url).searchParams.get('purpose')==='forms'&&formsScopes(env).length?'forms':'sign_in';
+  const origin=baseUrl(env),scopes=cloudflareScopes(env,{forms:purpose==='forms'});
   const {authorizationUrl,session:flow}=beginCloudflareOAuth({clientId:env.CF_CLIENT_ID,redirectUri:origin+'/oauth/cloudflare/callback',scopes});
-  await saveFlow(env,{provider:'cloudflare',binding:current.hash,...flow});
+  await saveFlow(env,{provider:'cloudflare',binding:current.hash,...flow,purpose});
   return redirect(authorizationUrl);
 }
 async function cloudflareCallback(request,env,current){
   if(!current)return fail('Your session expired. Connect GitHub again.',401);
   const url=new URL(request.url);
   if(url.searchParams.has('error'))return fail('Cloudflare authorization was cancelled. You can try again.');
-  const verifier=await consumeFlow(env,{provider:'cloudflare',binding:current.hash,state:url.searchParams.get('state')});
+  const {verifier,purpose}=await consumeFlow(env,{provider:'cloudflare',binding:current.hash,state:url.searchParams.get('state')});
   const token=await completeCloudflareOAuth({clientId:env.CF_CLIENT_ID,clientSecret:env.CF_CLIENT_SECRET,redirectUri:baseUrl(env)+'/oauth/cloudflare/callback',code:url.searchParams.get('code'),receivedState:url.searchParams.get('state'),expectedState:url.searchParams.get('state'),codeVerifier:verifier});
   const encrypted=await encryptGrant({grant:token,provider:'cloudflare',sessionHash:current.hash,encryptionKey:env.TOKEN_ENCRYPTION_KEY});
   const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET cloudflare_token_ct=?, cloudflare_refresh_token_ct=?,
     cloudflare_token_expires_at=?, cloudflare_refresh_expires_at=?, cloudflare_refresh_locked_until=NULL,
-    cloudflare_account_id=NULL, authorization_epoch=authorization_epoch+1
+    cloudflare_account_id=NULL, cloudflare_forms_grant=?, authorization_epoch=authorization_epoch+1
     WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
     .bind(encrypted.accessCipher,encrypted.refreshCipher,encrypted.accessExpiresAt,encrypted.refreshExpiresAt,
-      current.hash,current.authorization_epoch,now()).first();
+      purpose==='forms'&&formsScopesGranted(env,token.scope)?1:0,current.hash,current.authorization_epoch,now()).first();
   if(!updated)throw Error('Cloudflare authorization changed while connecting');
   return redirect('/');
 }
@@ -289,6 +300,12 @@ async function toolkit(env,current,request){
   });
 }
 // Read-only inbox: the owner's own customer D1, read with the owner's grant, never stored here.
+const formsConsentPage=(view,what)=>view('Allow form setup in Cloudflare',
+  '<p>'+what+' needs extra permission in your Cloudflare account: to create your form\'s small Worker and its private messages database, and to read those messages.</p>'+
+  '<p>Launch &amp; Own asks for this only when you use contact forms, not when you sign in. Cloudflare shows the exact permissions before you agree. You can remove them later in your Cloudflare account under <strong>My Profile → Access Management</strong>.</p>'+
+  '<p><a class="btn" href="/connect/cloudflare?purpose=forms">Allow form setup in Cloudflare</a></p>'+
+  '<p>After you allow it, choose your Cloudflare account again, then come back to this step.</p>'+
+  '<p><a href="/toolkit">Back to toolkit</a></p>',403);
 async function formMessages(env,current,id){
   if(!current?.cloudflare_account_id||!isLaunchId(id))return fail('Open a live website you own from your toolkit.',404);
   const job=await getOwnedJob(env,current,id,now());
@@ -298,6 +315,7 @@ async function formMessages(env,current,id){
   const service=await readFormService(env,current,job.id);
   const back='<p><a href="/site-options?id='+encodeURIComponent(job.id)+'">Optional features</a> · <a href="/toolkit">Toolkit</a></p>';
   if(!service)return view('Messages for '+job.customer_name,'<p>'+escape(messagesProblem('form_service_not_ready'))+'</p>'+back);
+  if(current.cloudflare_forms_grant!==1)return formsConsentPage(view,'Reading your messages');
   try{
     const messages=await readFormMessages({accountId:current.cloudflare_account_id,databaseId:service.databaseId,
       cloudflareToken:grants.cloudflareAccessToken});
@@ -799,6 +817,7 @@ async function applyApprovedOption(request,env,current){
   try {
     result=await executeOwnedStoredOption(env,current,data.get('id'));
   }catch(error){
+    if(error instanceof FormsConsentRequired)return formsConsentPage(view,'Setting up your contact form');
     if(error instanceof OptionExecutionDisabled)
       return fail('That option has no currently authorized activation grant.',403);
     throw error;
