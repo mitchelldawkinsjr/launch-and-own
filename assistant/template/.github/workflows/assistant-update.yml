@@ -1,0 +1,26 @@
+# Copied into the customer's PRIVATE assistant repo (ADR-003). Never runs in launch-and-own itself.
+# ADR-004 A2: weekly check; opens a pinned, provenance-checked PR only for security, breaking-change and
+# end-of-support releases. It never approves its own PR, never deploys, and never edits .github/workflows/.
+# Requires the owner to enable "Allow GitHub Actions to create and approve pull requests" for THIS repo only;
+# without it the dashboard notice (option B) is used instead.
+name: assistant-update-check
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Check for a verified update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node assistant/update/run-update-check.mjs
