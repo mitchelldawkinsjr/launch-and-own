@@ -9,6 +9,14 @@ export const STEPS=[
   {id:'approve',label:'Approve',hint:'Your decision'},
   {id:'launch',label:'Go live',hint:'Verified'}
 ];
+// Every website change (created-site update, uploaded-site edit, assistant) shows these same five steps.
+export const CHANGE_STEPS=[
+  {id:'preview',label:'Preview',hint:'Exact change'},
+  {id:'approve',label:'Approve',hint:'Your decision'},
+  {id:'merge',label:'Merge',hint:'Into your files'},
+  {id:'publish',label:'Publish',hint:'Cloudflare'},
+  {id:'live',label:'Live',hint:'Checked'}
+];
 
 export const UI_CSS=`:root{--ink:#14253c;--muted:#52637a;--line:#dbe5ef;--bg:#f6f9fc;--card:#fff;--blue:#2457b8;--blue-deep:#1a4291;
 --blue-soft:#eaf0ff;--green:#176b55;--green-soft:#e0f4ec;--orange:#a74410;--orange-soft:#fff1e7;--warn:#8a5300;--warn-soft:#fff4dc;
@@ -56,9 +64,9 @@ summary{cursor:pointer;font-weight:700;color:var(--blue)}details[open]>summary{m
 .lp-compat .ok strong{color:var(--green)}.lp-compat .limited strong{color:#8a5300}.lp-compat .no strong{color:#9b2c1f}
 @media(max-width:700px){.lp-compat{grid-template-columns:1fr}}
 .ir-type{margin:0 0 12px}.ir-rows{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}.ir-row{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:#fff}.ir-row p{margin:2px 0 0;color:var(--muted);font-size:.92rem}.ir-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;font-weight:800}.ir-row.ok .ir-mark{background:var(--green-soft);color:var(--green)}.ir-row.no .ir-mark{background:var(--warn-soft);color:var(--warn)}.ir-future{margin:12px 0;padding:12px 14px;border-radius:var(--r);background:#fbfcfe;border:1px dashed #c9d5e3}.ir-future p{margin:6px 0 0;color:var(--muted);font-size:.92rem}.ir-files{padding-left:18px}.ir-files li{margin:2px 0}
-.er-summary{font-size:1.1rem;font-weight:650;margin:0 0 12px}.er-changes{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:10px}.er-change{border:1px solid var(--line);border-radius:var(--r);background:#fff;padding:12px}.er-meta{margin-bottom:8px}.er-diff{display:grid;gap:4px}.er-diff p{margin:0;padding:8px 10px;border-radius:8px;font-size:.95rem}.er-old{background:#fdf0ee}.er-old del{color:#8f2a1d}.er-new{background:var(--green-soft)}.er-new ins{color:#0f4d3d;text-decoration:none;font-weight:650}.er-steps{list-style:none;display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px;padding:0}.er-steps li{font-size:.8rem;padding:4px 10px;border-radius:999px;background:#eef3f8;color:var(--muted)}.er-steps li.is-done{background:var(--green-soft);color:var(--green)}.er-steps li.is-active{background:var(--blue);color:#fff;font-weight:700}.er-note{font-size:.92rem;color:var(--muted)}.er-swatch{display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid #0003;margin-right:6px;vertical-align:-2px}.er-facts{padding-left:18px;margin:0}.er-group-label{margin:12px 0 6px;font-size:.8rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}.er-files{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:6px;max-height:min(40vh,360px);overflow:auto}.er-file{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:#fff}.er-file .badge{flex:0 0 auto}.er-file code{overflow-wrap:anywhere}.er-file-links{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px}.er-file-links a{display:inline-block}
+.er-summary{font-size:1.1rem;font-weight:650;margin:0 0 12px}.er-changes{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:10px}.er-change{border:1px solid var(--line);border-radius:var(--r);background:#fff;padding:12px}.er-meta{margin-bottom:8px}.er-diff{display:grid;gap:4px}.er-diff p{margin:0;padding:8px 10px;border-radius:8px;font-size:.95rem}.er-old{background:#fdf0ee}.er-old del{color:#8f2a1d}.er-new{background:var(--green-soft)}.er-new ins{color:#0f4d3d;text-decoration:none;font-weight:650}.er-note{font-size:.92rem;color:var(--muted)}.er-swatch{display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid #0003;margin-right:6px;vertical-align:-2px}.er-facts{padding-left:18px;margin:0}.er-group-label{margin:12px 0 6px;font-size:.8rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}.er-files{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:6px;max-height:min(40vh,360px);overflow:auto}.er-file{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:#fff}.er-file .badge{flex:0 0 auto}.er-file code{overflow-wrap:anywhere}.er-file-links{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px}.er-file-links a{display:inline-block}
 .stepper{margin:0 0 18px;padding:14px 16px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg)}
-.stepper ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;counter-reset:s}
+.stepper ol{list-style:none;margin:0;padding:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px;counter-reset:s}
 .step{display:grid;justify-items:center;text-align:center;gap:2px;font-size:.8rem;color:var(--muted);position:relative}
 .step-dot{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:#f0f4f9;font-weight:750}
 .step:not(:last-child)::after{content:"";position:absolute;top:15px;left:calc(50% + 20px);right:calc(-50% + 20px);height:2px;background:var(--line)}
@@ -78,15 +86,24 @@ const studioLink=`<a class="studio-link" href="${STUDIO_URL}" target="_blank" re
 
 export const brandMark='<span class="brand-mark" aria-hidden="true">L&amp;O</span>';
 
-export function stepperHtml(activeId='connect',{complete=false}={}){
-  const active=Math.max(0,STEPS.findIndex(s=>s.id===activeId));
-  const items=STEPS.map((step,i)=>{
-    const done=complete||i<active;
+/** The one progress display. active: index of the current step, or -1 when the journey stopped (nothing current). */
+export function progressHtml(steps,active,{label='Progress',complete=false,doneText='All steps done'}={}){
+  const items=steps.map((step,i)=>{
+    const done=complete||(active>=0&&i<active);
     const state=done?'is-done':i===active?'is-active':'';
     return `<li class="step ${state}"${!done&&i===active?' aria-current="step"':''}><span class="step-dot" aria-hidden="true">${done?'✓':i+1}</span><span class="step-label">${escape(step.label)}</span><span class="step-hint">${escape(step.hint)}</span><span class="lo-sr">${done?'(done)':''}</span></li>`;
   }).join('');
-  const now=complete?'All steps done: live and verified':`Step ${active+1} of ${STEPS.length}: ${STEPS[active].label}`;
-  return `<nav class="stepper" aria-label="Launch progress"><ol>${items}</ol><p class="stepper-now">${escape(now)}</p></nav>`;
+  const now=complete?doneText:active>=0?`Step ${active+1} of ${steps.length}: ${steps[active].label}`:'';
+  return `<nav class="stepper" aria-label="${escape(label)}"><ol>${items}</ol>${now?`<p class="stepper-now">${escape(now)}</p>`:''}</nav>`;
+}
+
+export function stepperHtml(activeId='connect',{complete=false}={}){
+  return progressHtml(STEPS,Math.max(0,STEPS.findIndex(s=>s.id===activeId)),{label:'Launch progress',complete,doneText:'All steps done: live and verified'});
+}
+
+/** Change progress by step id ('preview'…'live'); 'live' shows every step done. */
+export function changeProgressHtml(stepId){
+  return progressHtml(CHANGE_STEPS,CHANGE_STEPS.findIndex(s=>s.id===stepId),{label:'Change progress',complete:stepId==='live',doneText:'All steps done: live and checked'});
 }
 
 const NAVS={

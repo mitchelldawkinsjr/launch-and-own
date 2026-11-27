@@ -3,6 +3,7 @@ import {hasCurrentOwnerSession, isLaunchId, listOwnedJobs} from './launch-jobs.m
 import {optionsPathForJob} from './post-launch-options.mjs';
 import {serviceExplorerCss, serviceExplorerMarkup} from './service-explorer.mjs';
 import {TOOLKIT_CAPABILITY_STATES} from '../pipeline/toolkit-capabilities.mjs';
+import {changeProgressHtml} from './ui.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
@@ -296,10 +297,9 @@ export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ti
       (isLaunchId(jobId) ? '<p><a href="/site-update?id=' + encodeURIComponent(jobId) + '">Start a fresh edit</a></p>' : '');
   if (ladder.current === 'unavailable') return '<p>Update status is unavailable right now.</p>';
 
-  const steps = ladder.steps.map(step =>
-    '<li' + (step.active ? '><strong>' : '>') + escape(step.title) +
-    (step.active ? '</strong>' : '') + ': ' + escape(step.hint) + '</li>'
-  ).join('');
+  const active = ladder.steps.find(step => step.active);
+  const progress = changeProgressHtml({merge: 'merge', publishing: 'publish', live: 'live'}[ladder.current]) +
+    (active ? '<p><strong>' + escape(active.title) + '.</strong> ' + escape(active.hint) + '</p>' : '');
   const {label, detail} = ladder.primaryAction;
   const mergeCta = ladder.current === 'merge' && pr.pullRequest
     ? '<p><a class="btn-like" href="' + escape(pr.pullRequest) + '" rel="noopener"><strong>' +
@@ -310,7 +310,7 @@ export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ti
   const checking = ladder.current === 'publishing' ? '<p>' + escape(detail) + '</p>' : '';
   const refresh = '<p><a href="/site-update-status?ticket=' + encodeURIComponent(ticketRaw) + '">Refresh status</a></p>';
   const revision = pr.mergedCommitSha ? '<p>Published version: <code>' + escape(pr.mergedCommitSha) + '</code></p>' : '';
-  return '<ol>' + steps + '</ol>' + mergeCta + live + checking + refresh +
+  return progress + mergeCta + live + checking + refresh +
     '<details><summary>Technical details</summary>' + revision + '<p>Exact preview code: <code>' +
     escape(approvedHtmlSha256) + '</code></p></details>' +
     '<p><a href="/toolkit">Website toolkit</a> · <a href="/history">Your launches</a></p>';

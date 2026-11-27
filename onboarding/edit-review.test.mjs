@@ -19,7 +19,7 @@ test('previewed change shows before/after, exact preview, and a single-use bound
   assert.match(html,/<button type="submit" name="action" value="pr"[^>]*>Open a pull request instead<\/button>/);
   assert.match(html,/If your site changed since this preview, nothing is published/);
   assert.doesNotMatch(html,/never merges for you|Nothing goes live until you merge it/);
-  assert.match(html,/aria-current="step">Preview ready/);
+  assert.match(html,/aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Preview</);
   const sealed='a'.repeat(50);
   assert.match(editReviewMarkup({...base,ticket:sealed}),new RegExp('name="ticket" value="'+sealed+'"'));
   assert.throws(()=>editReviewMarkup({...base,ticket:'../secret'}),TypeError);
@@ -44,7 +44,7 @@ test('no approval form after approval, on failure, or with an unsafe action',()=
   assert.match(stale,/role="alert"><strong>Stopped\.<\/strong> Your website files changed since this preview/);
   assert.doesNotMatch(stale,/<form|Open the exact preview|What will change/);
   assert.match(stale,/What was proposed/);
-  assert.match(editReviewMarkup({proposal,binding,status:'live'}),/class="is-done">Live and checked/);
+  assert.match(editReviewMarkup({proposal,binding,status:'live'}),/All steps done: live and checked/);
 });
 
 test('untrusted proposal text and preview URLs are escaped or dropped; bad shapes fail closed',()=>{
