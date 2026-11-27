@@ -59,8 +59,10 @@
       const packed = packImages(window.FileOps.currentHtml());
       if (packed.html.length > 1_500_000) throw new Error('This page is too large to preview in one save.');
       if (status) { status.dataset.state = 'saving'; status.textContent = 'Previewing…'; }
-      // Top-level form POST (not fetch): survives iframe/service-worker edge cases and
-      // follows the 303 to the review page in the parent window.
+      // Clear dirty so the editor's beforeunload "Leave site?" dialog does not
+      // cancel the navigation to the review page.
+      if (window.ES && typeof window.ES.setDirty === 'function') window.ES.setDirty(false);
+      // Top-level form POST: follows the 303 to review in the parent window.
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = savePath;
@@ -109,7 +111,7 @@
     if (save) {
       const label = save.querySelector('span');
       if (label) label.textContent = 'Preview';
-      save.title = 'Preview this page for approval. Nothing is published yet.';
+      save.title = 'Preview for approval. Publishing happens on the next screen when you Approve and publish.';
     }
     const git = document.getElementById('tb-git-diff');
     if (git) git.disabled = false;
