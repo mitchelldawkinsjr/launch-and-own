@@ -2,9 +2,14 @@
 
 **Planned, not released.** This code runs entirely in the customer's own GitHub and Cloudflare accounts. Launch & Own holds no credentials for it and plays no part at runtime. The design is in [`docs/design/personal-assistant/`](../docs/design/personal-assistant/README.md), and the build is tracked in #195. `distribution/release-matrix.json` decides availability.
 
+## Setup paths
+
+1. **Hosted bootstrap (owner / invite beta, no wrangler)** — when Domain enables `OPTION_ASSISTANT_BOOTSTRAP_ENABLED` on onboard: open **Your website toolkit** → **Set up private assistant** for a live site. Consent → Cloudflare `purpose=assistant` grant → create repo/D1/Worker → paste Access → paste GitHub App → open your assistant URL. See ADR-001 amendment. Flag stays off until Domain confirms scopes.
+2. **Customer-run CLI (M2 reference)** — below.
+
 ## Setup (customer-run CLI)
 
-Preferred path — one script that follows [`provisioning-plan.md`](../docs/design/personal-assistant/provisioning-plan.md):
+Reference path — one script that follows [`provisioning-plan.md`](../docs/design/personal-assistant/provisioning-plan.md):
 
 ```bash
 node assistant/setup/provision.mjs \

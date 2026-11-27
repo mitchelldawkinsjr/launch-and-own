@@ -799,7 +799,7 @@ test('any other script on the live homepage still fails the launch check',async(
  }finally{globalThis.fetch=originalFetch}
 });
 test('forms scopes are never requested at sign-in; only the forms consent asks, and malformed IDs are dropped',async()=>{
- const {cloudflareScopes,formsScopesGranted}=await import('./worker.mjs');
+ const {cloudflareScopes,formsScopesGranted,assistantScopesGranted}=await import('./worker.mjs');
  const env={CF_SCOPES:'account-settings.read page.write',CF_FORMS_SCOPES:'d1.write workers-scripts.admin workers-scripts.write d1.admin bad_scope page.write'};
  const on={...env,OPTION_FORMS_ENABLED:'true'};
  assert.deepEqual(cloudflareScopes(env),['account-settings.read','page.write']);
@@ -810,6 +810,10 @@ test('forms scopes are never requested at sign-in; only the forms consent asks, 
  assert.equal(formsScopesGranted(on,'account-settings.read page.write d1.write workers-scripts.admin workers-scripts.write'),true);
  assert.equal(formsScopesGranted(on,'account-settings.read page.write d1.write'),false,'a partial grant is not a forms grant');
  assert.equal(formsScopesGranted(on,undefined),true,'no scope string: the forms request is what was approved');
+ const assistantOn={CF_SCOPES:'account-settings.read',CF_ASSISTANT_SCOPES:'d1.write workers-scripts.admin',OPTION_ASSISTANT_BOOTSTRAP_ENABLED:'true'};
+ assert.deepEqual(cloudflareScopes(assistantOn,{assistant:true}),['account-settings.read','d1.write','workers-scripts.admin']);
+ assert.deepEqual(cloudflareScopes(assistantOn),['account-settings.read'],'sign-in never gets assistant scopes');
+ assert.equal(assistantScopesGranted(assistantOn,'d1.write workers-scripts.admin'),true);
 });
 
 test('incremental consent: sign-in never asks for forms scopes; only the forms consent does, and only it marks the session',async()=>{
@@ -834,5 +838,27 @@ test('incremental consent: sign-in never asks for forms scopes; only the forms c
   h.env.OPTION_FORMS_ENABLED='false';
   const off=await h.request('/connect/cloudflare?purpose=forms',{cookie});
   assert.equal(scopesOf(off).includes('workers-scripts.admin'),false,'forms off: no forms scopes even when asked');
+ }finally{globalThis.fetch=originalFetch}
+});
+
+test('incremental consent: purpose=assistant asks only when bootstrap flag is on',async()=>{
+ const h=harness();globalThis.fetch=h.fetchFn;
+ try{
+  Object.assign(h.env,{OPTION_ASSISTANT_BOOTSTRAP_ENABLED:'true',CF_ASSISTANT_SCOPES:'d1.write workers-scripts.admin ai.write'});
+  const {sessionCookie:cookie}=await bootstrap(h);
+  const scopesOf=res=>new URL(res.headers.get('location')).searchParams.get('scope').split(' ');
+  const grant=()=>h.sqlite.prepare('SELECT cloudflare_assistant_grant AS g FROM onboarding_sessions').get().g;
+  const signIn=await h.request('/connect/cloudflare',{cookie});
+  assert.equal(scopesOf(signIn).includes('workers-scripts.admin'),false,'no assistant scopes at sign-in');
+  await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(signIn.headers.get('location')).searchParams.get('state'),{cookie});
+  assert.equal(grant(),0);
+  const assistant=await h.request('/connect/cloudflare?purpose=assistant',{cookie});
+  assert.ok(scopesOf(assistant).includes('workers-scripts.admin')&&scopesOf(assistant).includes('d1.write'));
+  const done=await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(assistant.headers.get('location')).searchParams.get('state'),{cookie});
+  assert.equal(done.headers.get('location'),'/toolkit');
+  assert.equal(grant(),1);
+  h.env.OPTION_ASSISTANT_BOOTSTRAP_ENABLED='false';
+  const off=await h.request('/connect/cloudflare?purpose=assistant',{cookie});
+  assert.equal(scopesOf(off).includes('workers-scripts.admin'),false);
  }finally{globalThis.fetch=originalFetch}
 });

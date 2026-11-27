@@ -5,6 +5,7 @@ import {ownerSelfActivationEnabled} from './owner-option-activation.mjs';
 import {siteFilesEnabled} from './site-files-flow.mjs';
 import {serviceExplorerCss, serviceExplorerMarkup} from './service-explorer.mjs';
 import {TOOLKIT_CAPABILITY_STATES} from '../pipeline/toolkit-capabilities.mjs';
+import {toolkitAssistantCta} from './assistant-setup.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
 const DIGEST = /^[a-f0-9]{64}$/i;
@@ -210,6 +211,7 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false, e
   return {
     name: job.customer_name,
     slug: job.site_slug,
+    jobId: job.id,
     statusLabel: copy.label,
     statusDetail: copy.detail,
     recordedWebsite: verified ? websiteUrlForSlug(job.site_slug) : null,
@@ -230,11 +232,14 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false, e
 
 export async function loadToolkitCards(env, session, time) {
   const rows = await listOwnedJobs(env, session, time);
-  const cards = rows.map(job => projectToolkitCard(job, {
-    canEdit: Number(job.can_edit) === 1,
-    uploadedZip: Number(job.uploaded_zip) === 1,
-    env
-  })).filter(Boolean);
+  const cards = rows.map(job => {
+    const card = projectToolkitCard(job, {
+      canEdit: Number(job.can_edit) === 1,
+      uploadedZip: Number(job.uploaded_zip) === 1,
+      env
+    });
+    return card ? Object.assign(card, { _env: env }) : null;
+  }).filter(Boolean);
   if (!await hasCurrentOwnerSession(env, session, Math.floor(Date.now() / 1000)))
     throw Error('Account authorization changed');
   return cards;
@@ -362,14 +367,18 @@ function renderCard(card, escape, index = 0, found = '') {
       ['4', 'Wait for rebuild', 'Cloudflare Pages rebuilds the public site after merge.']
     ].map(([n, t, d]) => '<div class="lo-step-card"><span class="n" aria-hidden="true">' + n +
       '</span><h3>' + t + '</h3><p>' + d + '</p></div>').join('') + '</div>';
+  const assistantCta = toolkitAssistantCta({
+    jobId: card.jobId, verified: Boolean(card.verifiedAt), env: card._env, escape
+  });
   const headActions = edit ? '<p class="tk-actions">' + edit + '</p>' : '';
   return '<section class="tk-site"><div class="tk-site-head"><div><h2>' + escape(card.name) +
     ' — Site toolkit</h2><p class="pill">' + escape(card.statusLabel) + '</p></div>' + headActions + '</div>' + tabs +
-    panel('overview', 'Overview', dual + infra) +
+    panel('overview', 'Overview', dual + infra + assistantCta) +
     panel('updates', 'Updates',
       '<div class="tk-block"><h4>How to update this site</h4>' +
       updateSteps + (edit ? '<p class="tk-actions" style="margin-top:14px">' + edit + '</p>' : '') +
       (updatesCap ? '<p>' + escape(updatesCap.detail) + '</p>' : '') +
+      assistantCta +
       '<p><a href="/history">Your launches</a> shows every recorded launch and its result.</p></div>') +
     panel('services', 'Services',
       '<div class="tk-block">' + options + '</div>' +
