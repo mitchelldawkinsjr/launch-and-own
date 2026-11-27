@@ -13,3 +13,6 @@ site-preview/
 visual-walkthrough/
 playwright-report/
 test-results/
+
+# Local assistant provisioning resume files (resource IDs only; never commit).
+assistant/provisioning/state.*.json

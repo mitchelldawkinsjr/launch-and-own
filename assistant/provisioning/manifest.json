@@ -1,0 +1,94 @@
+{
+  "manifestVersion": 1,
+  "assistantVersion": "0.1.0",
+  "upstreamSha": "REPLACE_WITH_PINNED_UPSTREAM_SHA",
+  "siteSlug": "REPLACE_WITH_SITE_SLUG",
+  "runId": null,
+  "resources": [
+    {
+      "id": "assistant-repo",
+      "provider": "github",
+      "kind": "private_repo",
+      "nameTemplate": "{owner}/{siteSlug}-assistant",
+      "createdBy": "customer-script",
+      "cost": "free",
+      "rollback": "delete_if_created_this_run"
+    },
+    {
+      "id": "d1",
+      "provider": "cloudflare",
+      "kind": "d1_database",
+      "nameTemplate": "lo-assistant-{siteSlug}",
+      "createdBy": "wrangler",
+      "cost": "free_tier",
+      "limits": "1 of 10 DBs, 500 MB",
+      "rollback": "delete_if_created_this_run"
+    },
+    {
+      "id": "worker",
+      "provider": "cloudflare",
+      "kind": "worker_script",
+      "nameTemplate": "lo-assistant-{siteSlug}",
+      "createdBy": "wrangler",
+      "cost": "free_tier",
+      "limits": "1 of 100 Workers",
+      "bindings": ["DB", "AI", "ASSETS"],
+      "rollback": "delete_if_created_this_run"
+    },
+    {
+      "id": "preview-worker",
+      "provider": "cloudflare",
+      "kind": "worker_script",
+      "nameTemplate": "lo-assistant-{siteSlug}-preview",
+      "createdBy": "wrangler",
+      "cost": "free_tier",
+      "bindings": ["PREVIEW_READ"],
+      "secrets": [],
+      "rollback": "delete_if_created_this_run",
+      "deferred": true,
+      "note": "Create only when full rendered preview ships; page review uses sandboxed file preview today."
+    },
+    {
+      "id": "secrets",
+      "provider": "cloudflare",
+      "kind": "worker_secrets",
+      "names": ["KEK", "GH_APP_ID", "GH_APP_PRIVATE_KEY", "GH_INSTALLATION_ID"],
+      "createdBy": "wrangler",
+      "cost": "free",
+      "rollback": "deleted_with_worker"
+    },
+    {
+      "id": "access-app",
+      "provider": "cloudflare",
+      "kind": "access_application",
+      "nameTemplate": "Launch & Own Assistant ({siteSlug})",
+      "createdBy": "customer-manual",
+      "cost": "zero_trust_free (seat limit unverified)",
+      "rollback": "manual_checklist"
+    },
+    {
+      "id": "github-app",
+      "provider": "github",
+      "kind": "github_app",
+      "nameTemplate": "{siteSlug}-assistant",
+      "createdBy": "manifest-local-exchange",
+      "permissions": { "contents": "write", "pull_requests": "write", "metadata": "read" },
+      "webhook": false,
+      "cost": "free",
+      "rollback": "manual_checklist"
+    },
+    {
+      "id": "app-install",
+      "provider": "github",
+      "kind": "app_installation",
+      "repos": ["website"],
+      "createdBy": "customer-manual",
+      "rollback": "deleted_with_app"
+    }
+  ],
+  "workersAi": {
+    "dailyNeuronBudget": 8000,
+    "models": ["@cf/openai/gpt-oss-120b", "@cf/google/gemma-4-26b-a4b-it"]
+  },
+  "noCron": true
+}
