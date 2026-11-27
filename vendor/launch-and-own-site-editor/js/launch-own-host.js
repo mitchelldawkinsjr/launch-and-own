@@ -30,6 +30,14 @@
     setTimeout(() => t.remove(), 4000);
   }
 
+  function clearDirty() {
+    if (window.EditorState && typeof window.EditorState.setDirty === 'function') {
+      window.EditorState.setDirty(false);
+    } else if (window.EditorState?.state) {
+      window.EditorState.state.dirty = false;
+    }
+  }
+
   function injectHostBase(html) {
     if (/<base\b/i.test(html)) return html;
     const tag = '<base id="__he_base__" href="' + baseHref + '">';
@@ -52,6 +60,20 @@
     return { html: next, images };
   }
 
+  function errorMessageFromBody(text) {
+    const paragraph = text.match(/<p>([^<]+)<\/p>/i);
+    const title = text.match(/<title>([^|<]+)/i);
+    return (paragraph?.[1] || title?.[1] || '')
+      .replace(/\s+/g, ' ').trim().slice(0, 240)
+      || text.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
+      || 'Preview was refused.';
+  }
+
+  function goToReview(url) {
+    clearDirty();
+    (window.top || window).location.href = url;
+  }
+
   async function previewSave() {
     const status = document.getElementById('save-status');
     try {
@@ -59,38 +81,60 @@
       const packed = packImages(window.FileOps.currentHtml());
       if (packed.html.length > 1_500_000) throw new Error('This page is too large to preview in one save.');
       if (status) { status.dataset.state = 'saving'; status.textContent = 'Previewing…'; }
-      // Clear dirty so the editor's beforeunload "Leave site?" dialog does not
-      // cancel the navigation to the review page. (Global is EditorState, not ES.)
-      if (window.EditorState && typeof window.EditorState.setDirty === 'function') {
-        window.EditorState.setDirty(false);
-      } else if (window.EditorState?.state) {
-        window.EditorState.state.dirty = false;
-      }
-      // Top-level form POST: follows the 303 to review in the parent window.
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = savePath;
-      form.target = '_top';
-      form.enctype = 'multipart/form-data';
-      form.hidden = true;
-      const fields = {
-        csrf, id, page,
-        html: packed.html,
-        images: JSON.stringify(packed.images)
-      };
-      Object.keys(fields).forEach(name => {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = name;
-        input.value = fields[name];
-        form.appendChild(input);
+      clearDirty();
+
+      const response = await fetch(savePath, {
+        method: 'POST',
+        credentials: 'same-origin',
+        redirect: 'manual',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ csrf, id, page, html: packed.html, images: packed.images })
       });
-      document.body.appendChild(form);
-      form.submit();
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) throw new Error('Preview succeeded but no review link was returned.');
+        goToReview(location);
+        return;
+      }
+      if (response.type === 'opaqueredirect') {
+        // Some browsers hide manual redirects; fall back to a top-level form POST.
+        submitPreviewForm(packed);
+        return;
+      }
+      const text = await response.text();
+      throw new Error(errorMessageFromBody(text));
     } catch (error) {
       if (status) { status.dataset.state = 'error'; status.textContent = 'Not previewed'; }
-      toast(error.message || 'Preview failed', 'error');
+      const message = error && error.message === 'Failed to fetch'
+        ? 'Could not reach Preview. Check your connection, hard-refresh, and try again.'
+        : (error.message || 'Preview failed');
+      toast(message, 'error');
     }
+  }
+
+  function submitPreviewForm(packed) {
+    clearDirty();
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = savePath;
+    form.target = '_top';
+    form.enctype = 'multipart/form-data';
+    form.hidden = true;
+    const fields = {
+      csrf, id, page,
+      html: packed.html,
+      images: JSON.stringify(packed.images)
+    };
+    Object.keys(fields).forEach(name => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = fields[name];
+      form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
