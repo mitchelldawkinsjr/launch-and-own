@@ -361,7 +361,7 @@ export function currentSiteDetails(site, escape) {
       '">Open site toolkit</a></p>'
     : '';
   // Version codes are for troubleshooting, not the owner's next step (Tesler's law).
-  return repo + pages + (sha || site.productionCommitSha ? '<details><summary>Technical details</summary>' + sha + observed + '</details>' : observed) + source;
+  return repo + pages + (sha || site.productionCommitSha ? '<details><summary>Current versions</summary>' + sha + observed + '</details>' : observed) + source;
 }
 
 const DEPLOYMENT_COPY = Object.freeze({

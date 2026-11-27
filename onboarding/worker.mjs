@@ -297,8 +297,10 @@ async function toolkit(env,current,request){
   const found=new Map((inventory.status==='unavailable'?[]:inventory.sites||[])
     .filter(site=>site.repositoryName?.startsWith('esp-')).map(site=>[site.repositoryName.slice(4),site]));
   const siteDetails=new Map(cards.filter(card=>found.has(card.slug)).map(card=>[card.slug,currentSiteDetails(found.get(card.slug),escape)]));
+  // A live check (toolkit source page) is offered as an action for sites found in the accounts now.
+  const siteChecks=new Map(cards.filter(card=>found.get(card.slug)?.sourceTicket).map(card=>[card.slug,'/toolkit/source?ticket='+encodeURIComponent(found.get(card.slug).sourceTicket)]));
   return renderToolkitPage(cards,current,{view,escape},{
-    siteDetails,
+    siteDetails,siteChecks,
     currentInventoryHtml:['cloudflare_reauthorization_required','cloudflare_permission_denied'].includes(inventory.code)
       ? '<p>Cloudflare Pages access is unavailable. '+pagesAccessLink+' to verify your sites.</p>'
       : renderCurrentSitesSection(inventory,{escape},{hasCards:cards.length>0,matched:new Set([...siteDetails.keys()].map(slug=>'esp-'+slug))})

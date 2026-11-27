@@ -139,16 +139,17 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   assert.match(html, /Approval fingerprint/);
   assert.match(html, /Recent launches/);
   assert.match(html, /30 days/);
-  assert.match(html, /recorded launch results/);
+  assert.match(html, /Choose what you want to do/);
   assert.match(html, /Public address when checked: <code>https:\/\/esp-willow-studio-site\.pages\.dev\//);
   assert.doesNotMatch(html, /href="https:\/\/esp-willow-studio-site\.pages\.dev/);
   assert.match(html, /Recent launches/);
-  assert.match(html, /recorded launch results/);
+  assert.match(html, /Choose what you want to do/);
   assert.doesNotMatch(html, /Sites we found in your accounts|Other sites in your accounts/);
   const card = html.slice(html.indexOf('<section class="tk-site">'), html.indexOf('</section>', html.indexOf('<section class="tk-site">')));
   assert.match(card, /In your accounts now/);
+  assert.match(card, /class="tk-action" href="\/toolkit\/source\?ticket=[^"]+"><strong>Check it is live/, 'a site found in the accounts offers a live check');
   assert.match(card, /href="https:\/\/github\.com\/tester\/esp-willow-studio"/);
-  assert.match(html, /Update this website/);
+  assert.match(html, /Edit your website/);
   assert.match(html, /Visitor insights/);
   const writesAfter = h.calls.filter(c =>
     c.method === 'POST' || c.method === 'PUT' || c.method === 'PATCH' ||
@@ -162,7 +163,7 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   h.sqlite.prepare("UPDATE onboarding_launch_jobs SET plan_json = json_set(plan_json, '$.zip', json('{}'))").run();
   const zip = await (await toolkit()).text();
   assert.doesNotMatch(zip, /Update this website/);
-  assert.match(zip, /Edit imported website/);
+  assert.match(zip, /Edit your website/);
   assert.match(zip, /Open the visual editor, preview the exact page/i);
   assert.match(zip, /Safe website updates/);
 
@@ -210,8 +211,16 @@ test('toolkit groups each site into Overview, Updates, Services and Settings wit
   assert.equal((html.match(/ checked>/g) || []).length, 2, 'Overview selected per site');
   assert.match(html, /<legend class="lo-sr">Sections for Willow &lt;b><\/legend>/);
   assert.match(panel('overview'), /Public address when checked[\s\S]*Last checked <time/);
-  assert.match(panel('updates'), /href="\/site-update\?id=x">Update this website[\s\S]*Change the copy safely/);
-  assert.match(panel('services'), /Review optional requests \(store only\)[\s\S]*Explore your website services/);
+  assert.match(panel('updates'), /href="\/site-update\?id=x">Edit your website[\s\S]*Change the copy safely/);
+  assert.match(panel('services'), /Add features to this website[\s\S]*Explore your website services/);
+  // Actions first: one primary action per site, then the other things the owner can do.
+  const actions = html.slice(html.indexOf('<ul class="tk-actions">'), html.indexOf('</ul>', html.indexOf('<ul class="tk-actions">')));
+  assert.deepEqual([...actions.matchAll(/<strong>([^<]+)<\/strong>/g)].map(m => m[1]), ['Edit your website', 'Add features', 'Launch history']);
+  assert.equal((actions.match(/is-primary/g) || []).length, 1);
+  assert.ok(html.indexOf('tk-actions') < html.indexOf('tk-tabs'), 'actions come before the detail tabs');
+  const pending = renderToolkitPage([{...card, editPath: null, recordedWebsite: null, continuePath: '/review?id=x', statusDetail: 'Getting ready.'}], {cloudflare_account_id: 'test'},
+    {view: (_t, body) => body, escape: s => String(s)});
+  assert.match(pending, /class="tk-action is-primary" href="\/review\?id=x"><strong>Continue your launch/);
   assert.match(panel('settings'), /Approval fingerprint <code>bbbbbbbbbbbb…[\s\S]*What this site includes/);
   assert.doesNotMatch(html, /<script|\bon[a-z]+=/i);
 });

@@ -45,6 +45,8 @@ p{overflow-wrap:anywhere}code{font-size:.9em;background:#eef3f8;padding:1px 5px;
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:clamp(18px,4vw,34px);box-shadow:var(--shadow)}
 .page-title{font-size:clamp(1.6rem,4vw,2.2rem);line-height:1.15;letter-spacing:-.03em;margin:0 0 16px}
 .card h2{font-size:1.2rem;letter-spacing:-.015em;margin:0 0 8px}
+.card h3{font-size:1.05rem;letter-spacing:-.01em;margin:18px 0 6px}.card h4{font-size:.95rem;margin:16px 0 4px}
+.card h3:first-child,.card h4:first-child{margin-top:0}
 .card>section,.card>form+section{border-top:1px solid var(--line);padding-top:18px;margin-top:22px}
 label{display:block;font-weight:650;margin-bottom:4px}
 input,select,textarea{font:inherit;padding:10px 12px;width:100%;margin-bottom:16px;border:1px solid #a6b3c3;border-radius:8px;background:#fff;color:var(--ink)}
@@ -53,6 +55,9 @@ input[type=radio],input[type=checkbox]{width:auto;margin:0 8px 0 0}textarea{resi
 button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px 18px;font:inherit;font-weight:700;
 background:var(--blue);color:#fff;border:1px solid var(--blue);border-radius:10px;cursor:pointer;text-decoration:none}
 button:hover,.btn:hover{background:var(--blue-deep);color:#fff}
+button:active,.btn:active{transform:translateY(1px)}
+button:disabled,button[aria-disabled=true]{background:#c5cfdc;border-color:#c5cfdc;color:#fff;cursor:not-allowed;transform:none}
+button:focus-visible,.btn:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
 .btn-secondary,button.secondary,form[action="/logout"] button{background:#fff;color:var(--blue);border-color:#b8c7dc}.btn-secondary:hover,button.secondary:hover,form[action="/logout"] button:hover{background:var(--blue-soft);color:var(--blue-deep)}
 form{margin:0 0 10px}small,.muted{color:var(--muted)}
 .pill{display:inline-block;padding:3px 11px;background:var(--green-soft);color:var(--green);border-radius:999px;font-weight:650;font-size:.9rem}

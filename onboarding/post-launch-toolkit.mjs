@@ -26,11 +26,19 @@ const CAP_LABELS = Object.freeze({
 // Per-site sections: CSS-only tabs (native radios + :has()); without :has() every section stays visible.
 const SECTIONS = [['overview', 'Overview'], ['updates', 'Updates'], ['services', 'Services'], ['settings', 'Settings']];
 const toolkitTabsCss = `
-.tk-site{background:var(--card,#fff);border:1px solid var(--line);border-radius:16px;padding:clamp(16px,3vw,26px);margin:0 0 22px;min-width:0}
-.tk-site>h2{margin:0 0 6px}
-.tk-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:14px 0 18px;padding:5px;border:1px solid var(--line);border-radius:14px;min-width:0}
-.tk-tab{position:relative;padding:9px 10px;border-radius:10px;text-align:center;font-weight:750;cursor:pointer;min-width:0}
-.tk-tab:hover{background:#f0f4fa}
+.tk-site{background:var(--card,#fff);border:1px solid var(--line);border-radius:var(--r-lg);padding:clamp(16px,3vw,26px);margin:0 0 22px;min-width:0}
+.tk-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px}.tk-head h2{margin:0}.tk-head .pill{margin:0}
+.tk-url{margin:4px 0 0;color:var(--muted);font-size:.92rem}
+.tk-actions{list-style:none;margin:16px 0 6px;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px}
+.tk-action{display:flex;flex-direction:column;gap:2px;height:100%;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r);background:#fff;color:var(--ink);text-decoration:none;transition:border-color .15s,box-shadow .15s}
+.tk-action strong{color:var(--blue);font-size:1rem}.tk-action span{color:var(--muted);font-size:.88rem;line-height:1.45}
+.tk-action:hover{border-color:var(--blue);box-shadow:var(--shadow);color:var(--ink)}
+.tk-action.is-primary{background:var(--blue);border-color:var(--blue)}.tk-action.is-primary strong,.tk-action.is-primary span{color:#fff}
+.tk-action.is-primary:hover{background:var(--blue-deep);border-color:var(--blue-deep)}
+.tk-details-title{margin:22px 0 0;font-size:.8rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.tk-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:8px 0 18px;padding:5px;border:1px solid var(--line);border-radius:var(--r-lg);min-width:0}
+.tk-tab{position:relative;padding:9px 10px;border-radius:var(--r);text-align:center;font-weight:750;cursor:pointer;min-width:0}
+.tk-tab:hover{background:var(--blue-soft)}
 .tk-radio{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
 .tk-tab:has(.tk-radio:checked){background:var(--blue);color:#fff}
 .tk-tab:has(.tk-radio:focus-visible){outline:3px solid var(--blue);outline-offset:3px}
@@ -200,6 +208,8 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} =
     editPath: editable ? '/site-update?id=' + encodeURIComponent(job.id)
       : zip && verified ? '/imported-edit?id=' + encodeURIComponent(job.id) : null,
     optionsPath: optionsPathForJob(job.id, status),
+    // Unfinished launches continue on their review page, which shows the next launch step.
+    continuePath: status !== 'live' ? '/review?id=' + encodeURIComponent(job.id) : null,
     capabilities: historyToolkitCapabilities({
       verified, canEdit: editable, uploadedZip: zip
     })
@@ -217,35 +227,33 @@ export async function loadToolkitCards(env, session, time) {
   return cards;
 }
 
-const TOOLKIT_INTRO = 'This page combines <strong>recorded launch results</strong> (about 30 days) with <strong>live account reads</strong> when Pages access works. ' +
-  'Matched sites show live GitHub and Cloudflare links inside their launch card. Optional service requests are stored for review only—they are not applied here.';
+const TOOLKIT_INTRO = 'Choose what you want to do with each website. Your files stay in your GitHub account and your site runs in your Cloudflare account.';
 
-export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = '', siteDetails = new Map()} = {}) {
+export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = '', siteDetails = new Map(), siteChecks = new Map()} = {}) {
   if (!current?.cloudflare_account_id)
     return view('Your website toolkit',
       '<p>Connect GitHub and choose your Cloudflare account to open toolkit and launch history.</p>' +
       '<p class="muted">Until then, finish setup on the home page—nothing here configures domain, email, or forms.</p>' +
       '<p><a href="/">Back to setup</a></p>');
   const launches = cards.length
-    ? cards.map((card, i) => renderCard(card, escape, i, siteDetails.get(card.slug))).join('')
+    ? cards.map((card, i) => renderCard(card, escape, i, siteDetails.get(card.slug), siteChecks.get(card.slug))).join('')
     : '<p>No websites in your recent launches. Create or upload a site from setup, then return after approval.</p>';
   const launchesSection = '<section aria-labelledby="tk-recent-title"><h2 id="tk-recent-title">Recent launches</h2>' +
-    '<p class="muted">Rows stay for 30 days after your first approval. Status, address, and fingerprints come from ' +
-    'what we recorded when the launch was checked—not a live provider poll. When the site is still in your accounts, ' +
-    'live links appear under <strong>In your accounts now</strong> on that card.</p>' + launches + '</section>';
+    '<p class="muted">Sites you launched in the last 30 days. Status comes from our last check.</p>' + launches + '</section>';
   return view('Your website toolkit',
     '<style>' + serviceExplorerCss + toolkitTabsCss + '</style><p>' + TOOLKIT_INTRO + '</p>' +
+    '<p><a class="btn btn-secondary" href="/">Launch another website</a></p>' +
     launchesSection + currentInventoryHtml +
     '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p>');
 }
 
-function renderCard(card, escape, index = 0, found = '') {
+function renderCard(card, escape, index = 0, found = '', checkPath = null) {
   const time = iso => '<time datetime="' + escape(iso) + '">' + escape(iso.slice(0, 10)) +
     ' ' + escape(iso.slice(11, 16)) + ' UTC</time>';
   const website = card.recordedWebsite
     ? '<p>Public address when checked: <code>' + escape(card.recordedWebsite) + '</code></p>' : '';
   const verification = card.verifiedAt
-    ? '<p>Last checked ' + time(card.verifiedAt) + '</p><details><summary>Technical details</summary><p>Checked version: <code>' +
+    ? '<p>Last checked ' + time(card.verifiedAt) + '</p><details><summary>Approved version</summary><p>Checked version: <code>' +
       escape(card.verifiedCommitSha) + '</code></p></details>' : '';
   const expires = card.expiresAt ? '<p>Stays on this list until ' + time(card.expiresAt) + '</p>' : '';
   const digest = card.approvalFingerprint
@@ -254,12 +262,12 @@ function renderCard(card, escape, index = 0, found = '') {
     ? '<p>Last result code <code>' + escape(card.errorCode) + '</code></p>' : '';
   const edit = card.editPath
     ? '<p><a href="' + escape(card.editPath) + '">' +
-      (card.editPath.startsWith('/imported-edit') ? 'Edit imported website' : 'Update this website') +
+      'Edit your website' +
       '</a></p>' : '';
   const options = card.optionsPath
-    ? '<p><a href="' + escape(card.optionsPath) + '">Review optional requests (store only)</a></p>' +
-      '<p class="muted">Domain, email, forms, analytics, previews, SEO, and redirects are saved for review. ' +
-      'They are not applied from this page.</p>' : '';
+    ? '<p><a href="' + escape(card.optionsPath) + '">Add features to this website</a></p>' +
+      '<p class="muted">Contact form, visitor insights, custom domain, email, SEO and redirects. You review each one, ' +
+      'and nothing is turned on until you approve it.</p>' : '';
   const caps = Object.entries(card.capabilities || {}).map(([id, item]) => {
     const label = CAP_LABELS[id] || id;
     const state = STATE_LABELS[item.state] || item.state;
@@ -271,7 +279,22 @@ function renderCard(card, escape, index = 0, found = '') {
     SECTIONS.map(([id, label], i) => '<label class="tk-tab"><input class="tk-radio" type="radio" name="tk-site-' + index +
       '" value="' + id + '" aria-label="' + label + '"' + (i ? '' : ' checked') + '><span aria-hidden="true">' + label + '</span></label>').join('') + '</fieldset>';
   const panel = (id, label, html) => '<div class="tk-panel tk-p-' + id + '"><h3>' + label + '</h3>' + html + '</div>';
-  return '<section class="tk-site"><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' + tabs +
+  // The things an owner can do, first (one primary action), before any detail.
+  // No link to the recorded pages.dev address: it is what we saw at launch, not proof the site is still the owner's.
+  const action = (href, title, text, {primary = false} = {}) => '<li><a class="tk-action' + (primary ? ' is-primary' : '') +
+    '" href="' + escape(href) + '"><strong>' + escape(title) +
+    '</strong><span>' + escape(text) + '</span></a></li>';
+  const actions = [
+    card.continuePath && action(card.continuePath, 'Continue your launch', card.statusDetail, {primary: true}),
+    card.editPath && action(card.editPath, 'Edit your website', 'Change text, links or details. You preview it before anything goes live.', {primary: true}),
+    checkPath && action(checkPath, 'Check it is live', 'Compare your live homepage with the files in GitHub now.'),
+    card.optionsPath && action(card.optionsPath, 'Add features', 'Contact form, visitor insights, custom domain, email, SEO and redirects.'),
+    action('/history', 'Launch history', 'Every launch and its result.')
+  ].filter(Boolean).join('');
+  return '<section class="tk-site"><div class="tk-head"><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p></div>' +
+    (card.recordedWebsite ? '<p class="tk-url">' + escape(card.recordedWebsite.replace(/^https:\/\//, '').replace(/\/$/, '')) + '</p>' : '') +
+    '<h3 class="lo-sr">What you can do</h3><ul class="tk-actions">' + actions + '</ul>' +
+    '<p class="tk-details-title">Site details</p>' + tabs +
     panel('overview', 'Overview', '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + error +
       (found ? '<h4>In your accounts now</h4>' + found : '')) +
     panel('updates', 'Updates', edit + (updatesCap ? '<p>' + escape(updatesCap.detail) + '</p>' : '') +
