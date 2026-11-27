@@ -960,8 +960,10 @@ async function activateOwnerOption(request,env,current){
 }
 
 // form-action 'self' so Preview can POST to /imported-edit-visual-preview (was 'none', which silently blocked saves).
-// frame-src allows the sandboxed Preview viewer to fall back to the owner's pages.dev site.
-const SITE_EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-src 'self' https://*.pages.dev; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
+// style/img/font https: so the edit canvas srcdoc can paint the owner's page (it inherits this CSP).
+// Scripts stay locked to the editor; the canvas iframe has no allow-scripts.
+// frame-src includes pages.dev for the Preview (eye) viewer and common embeds.
+const SITE_EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-src 'self' https://*.pages.dev https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
 
 async function siteEditorAsset(request, env, url) {
   if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') return fail('The page editor is unavailable.', 404);

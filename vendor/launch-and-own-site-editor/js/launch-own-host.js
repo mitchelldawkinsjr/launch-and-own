@@ -186,9 +186,10 @@
     if (!frame || !canvas) return null;
     scriptView = document.createElement('iframe');
     scriptView.id = 'lo-script-view';
-    scriptView.title = 'Page preview with scripts';
-    // No allow-same-origin: scripts run, but cannot read the Launch & Own session.
-    scriptView.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-modals');
+    scriptView.title = 'Live site preview with scripts';
+    // pages.dev is a different origin than Launch & Own, so allow-same-origin is safe here:
+    // scripts get a real site origin, but still cannot read the editor session.
+    scriptView.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals');
     scriptView.setAttribute('referrerpolicy', 'no-referrer');
     scriptView.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff;z-index:6';
     frame.appendChild(scriptView);
@@ -199,21 +200,18 @@
     const view = ensureScriptView();
     const canvas = document.getElementById('canvas');
     if (!view || !canvas || scriptViewBusy) return;
+    // srcdoc/blob inherit the editor CSP and blank the page. Load the known
+    // pages.dev origin instead so fonts, images, and scripts use the site's own policy.
+    if (!liveSiteUrl) {
+      toast('Live scripted preview needs your pages.dev site. Use the external-link control after publish.', 'error');
+      return;
+    }
     scriptViewBusy = true;
     try {
       view.hidden = false;
       canvas.style.visibility = 'hidden';
-      const html = await buildScriptedPreviewHtml();
-      view.removeAttribute('src');
-      view.srcdoc = html;
-    } catch (error) {
-      if (liveSiteUrl) {
-        view.removeAttribute('srcdoc');
-        view.src = liveSiteUrl;
-      } else {
-        toast(error.message || 'Could not build scripted preview.', 'error');
-        hideScriptedPreview();
-      }
+      view.removeAttribute('srcdoc');
+      view.src = liveSiteUrl;
     } finally {
       scriptViewBusy = false;
     }
@@ -223,8 +221,8 @@
     const canvas = document.getElementById('canvas');
     if (scriptView) {
       scriptView.hidden = true;
-      scriptView.removeAttribute('src');
-      scriptView.srcdoc = '';
+      scriptView.removeAttribute('srcdoc');
+      scriptView.src = 'about:blank';
     }
     if (canvas) canvas.style.visibility = '';
   }
