@@ -60,8 +60,12 @@
       if (packed.html.length > 1_500_000) throw new Error('This page is too large to preview in one save.');
       if (status) { status.dataset.state = 'saving'; status.textContent = 'Previewing…'; }
       // Clear dirty so the editor's beforeunload "Leave site?" dialog does not
-      // cancel the navigation to the review page.
-      if (window.ES && typeof window.ES.setDirty === 'function') window.ES.setDirty(false);
+      // cancel the navigation to the review page. (Global is EditorState, not ES.)
+      if (window.EditorState && typeof window.EditorState.setDirty === 'function') {
+        window.EditorState.setDirty(false);
+      } else if (window.EditorState?.state) {
+        window.EditorState.state.dirty = false;
+      }
       // Top-level form POST: follows the 303 to review in the parent window.
       const form = document.createElement('form');
       form.method = 'POST';
