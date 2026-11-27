@@ -17,8 +17,10 @@
   const dir = page.includes('/') ? page.slice(0, page.lastIndexOf('/') + 1) : '';
   const baseHref = location.origin + mirrorBase + dir.split('/').filter(Boolean).map(encodeURIComponent).join('/') + (dir ? '/' : '');
 
+  // Keep local-folder tools hidden. Leave tb-external-preview visible so owners can
+  // open a blob tab where the page's own scripts run (they cannot run in the canvas).
   const HIDE = [
-    'tb-open', 'tb-open-folder', 'tb-import', 'tb-refresh', 'tb-diff', 'tb-export', 'tb-external-preview',
+    'tb-open', 'tb-open-folder', 'tb-import', 'tb-refresh', 'tb-diff', 'tb-export',
     'empty-open-local', 'empty-open-folder', 'empty-import', 'empty-new', 'site-open-folder'
   ];
 
@@ -210,6 +212,21 @@
     }
     const git = document.getElementById('tb-git-diff');
     if (git) git.disabled = false;
+    const external = document.getElementById('tb-external-preview');
+    if (external) {
+      external.hidden = false;
+      external.title = 'Open this page in a new tab with its scripts running. The editor canvas keeps scripts off to protect your session.';
+      external.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const html = injectHostBase(window.FileOps.currentHtml());
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, '_blank', 'noopener,noreferrer');
+        if (win) try { win.opener = null; } catch (_) {}
+        setTimeout(() => URL.revokeObjectURL(url), 15_000);
+      }, true);
+    }
 
     const originalInject = window.Site.injectBase.bind(window.Site);
     window.Site.injectBase = html => injectHostBase(originalInject(html));
