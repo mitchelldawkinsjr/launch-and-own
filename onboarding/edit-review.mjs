@@ -1,7 +1,7 @@
 /** Review screen for a proposed edit to an imported site: changes, exact preview, single-use approval, status.
  * Renders contract §2 (proposal), §3 (binding) and §4 (status/codes) from docs/contracts/IMPORTED_SITE_CONTRACTS.md.
  * The hosted review route renders this. The server still verifies the sealed ticket and the recomputed digests. */
-import {escape} from './ui.mjs';
+import {changeProgressHtml,escape} from './ui.mjs';
 
 const KINDS={text:'Text',link:'Link',business_info:'Business details',css_color:'Color',page_snapshot:'Visual page'};
 const STEPS=[['previewed','Preview ready'],['approved','You approved'],['pr_open','Pull request open'],['merged','You merged'],['deploying','Cloudflare publishing'],['live','Live and checked']];
@@ -67,10 +67,9 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
     :('<h3>'+(live?'What will change':'What was proposed')+' ('+proposal.edits.length+')</h3><ul class="er-changes">'+proposal.edits.map(change).join('')+'</ul>');
   const preview=previewHref
     ?'<p><a class="btn btn-secondary" href="'+escape(previewHref)+'" target="_blank" rel="noopener noreferrer">Open the exact preview</a></p><p class="er-note">Opens a private preview of exactly these files. Your live site is unchanged.</p>':'';
-  const at=STEPS.findIndex(([s])=>s===status);
-  const timeline='<ol class="er-steps" aria-label="Change progress">'+STEPS.map(([s,label],i)=>{
-    const state=at<0?'':i<at||status==='live'?'is-done':i===at?'is-active':'';
-    return '<li class="'+state+'"'+(state==='is-active'?' aria-current="step"':'')+'>'+label+'</li>';}).join('')+'</ol>';
+  // Same five steps as every other website change (ui.mjs CHANGE_STEPS); a stopped change shows no current step.
+  const STEP_FOR={previewed:'preview',approved:'approve',pr_open:'merge',merged:'publish',deploying:'publish',live:'live'};
+  const timeline=changeProgressHtml(STEP_FOR[status]);
   const problem=own(TERMINAL,status)||why!=null
     ?'<p role="alert"><strong>'+(own(TERMINAL,status)?TERMINAL[status]:'Needs attention')+'.</strong> '+(why!=null?CODES[why]:'Something went wrong. Nothing was published.')+'</p>':'';
   if(ticket!=null&&!TICKET.test(ticket))throw new TypeError('Unknown edit review shape');
@@ -85,7 +84,7 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
       '<button type="submit" name="action" value="pr" class="btn-secondary">Open a pull request instead</button></form>'+
       '<p class="er-note"><strong>Approve and publish</strong> commits exactly this change to your website\'s <code>main</code> branch and merges it, and Cloudflare Pages publishes it. Every other file stays the same. If your site changed since this preview, nothing is published. Want to review it in GitHub first? Choose <strong>Open a pull request instead</strong> and merge it yourself. This approval works once.</p>':'';
   const expires=Number.isSafeInteger(binding.expiresAt)?new Date(binding.expiresAt*1000).toISOString():'';
-  return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">Review this change</h2>'+
+  return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">'+(status==='previewed'?'Review this change':'Your change')+'</h2>'+
     '<p class="er-summary">'+escape(proposal.summary||'Proposed change')+'</p>'+problem+timeline+
     changesBlock+
     '<p class="muted">Every other file stays exactly the same.</p>'+preview+form+

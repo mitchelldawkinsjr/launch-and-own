@@ -46,7 +46,7 @@ test('only a verified live one-page site offers editing; no provider write on op
   assert.equal(review.status,200);
   const reviewHtml=await review.text();
   assert.match(reviewHtml,/value="publish">Approve and publish</);
-  assert.match(reviewHtml,/value="pr">Open a pull request instead</);
+  assert.match(reviewHtml,/value="pr" class="btn-secondary">Open a pull request instead</);
   const exact=await h.request('/site-update-html?ticket='+ticket,{cookie:tenant.cookie});
   assert.equal(exact.status,200);
   assert.match(await exact.text(),/New customer-approved headline/);
@@ -81,7 +81,7 @@ test('separate approved edit creates only a feature branch and PR; customer merg
   assert.equal(status.status,200);
   let statusHtml=await status.text();
   assert.match(statusHtml,/Open the change to publish/);
-  assert.match(statusHtml,/Publish in GitHub/);
+  assert.match(statusHtml,/Merged in GitHub/);
   h.resourceState.updatePr.head.sha='2'.repeat(40);
   status=await h.request(statusPath,{cookie:tenant.cookie});
   assert.equal(status.status,200);

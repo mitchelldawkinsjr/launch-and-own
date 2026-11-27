@@ -15,7 +15,7 @@ test('static site can publish, and editing stays labelled planned',()=>{
   assert.match(html,/review and approve it/);
   assert.match(html,/Beta · after launch/);
   assert.match(html,/After launch you can update text, links, business details and colors in 2 files from your toolkit/);
-  assert.match(html,/you merge the change yourself/);
+  assert.match(html,/nothing changes until you approve it/);
   assert.doesNotMatch(html,/<(?:script|form|img)\b|\bon[a-z]+=/i);
 });
 

@@ -374,7 +374,7 @@ export function createSiteOptionsRoutes({
         hidden(job.id, 'domain') +
         '<label for="opt-hostname">Hostname</label>' +
         '<input id="opt-hostname" name="hostname" required maxlength="253" ' +
-        'placeholder="www.example.com" value="' + escape(domainHost || '') + '">') +
+        'placeholder="www.example.com" value="' + escape(domainHost || '') + '">', {secondary: true}) +
       activate('domain', 'Apply operator-approved domain') +
       turnOn('domain', 'Turn on custom domain', byKind.domain) +
       '</section>';
@@ -389,7 +389,7 @@ export function createSiteOptionsRoutes({
             '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
             '<label for="opt-mailbox">Existing mailbox</label>' +
             '<input id="opt-mailbox" name="mailbox" type="email" required maxlength="254" ' +
-            'placeholder="you@elsewhere.com" value="' + escape(mailboxDefault) + '">')
+            'placeholder="you@elsewhere.com" value="' + escape(mailboxDefault) + '">', {secondary: true})
         : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
       activate('email', 'Apply operator-approved email routing') +
       turnOn('email', 'Turn on email forwarding', byKind.email) +
@@ -420,7 +420,7 @@ export function createSiteOptionsRoutes({
         '<label for="opt-owner-email">Owner email for the form plan</label>' +
         '<input id="opt-owner-email" name="ownerEmail" type="email" required maxlength="254">' +
         '<label><input type="checkbox" name="formsConsent" value="true" required> ' +
-        'Save this request for review. The form starts saving messages once it is set up and you approve it.</label>') +
+        'Save this request for review. The form starts saving messages once it is set up and you approve it.</label>', {secondary: true}) +
       '</section>';
     const analyticsRequest = byKind.analytics?.status === 'stored'
       ? await currentAnalyticsRequestFingerprint(env, current, job, now())
@@ -433,7 +433,7 @@ export function createSiteOptionsRoutes({
       button('/site-options-prepare', 'Review visitor insights request', current.csrf,
         hidden(job.id, 'analytics') +
         '<label><input type="checkbox" name="analyticsConsent" value="true" required> ' +
-        'Save this request for review. Visitor insights start after you approve the change.</label>') +
+        'Save this request for review. Visitor insights start after you approve the change.</label>', {secondary: true}) +
       (analyticsRequest
         ? '<p>Review Web Analytics separately. Enabling it can add a browser beacon on the next deployment.</p>' +
           button('/site-options-prepare', 'Review Web Analytics enablement', current.csrf,
@@ -442,7 +442,7 @@ export function createSiteOptionsRoutes({
             '<input type="hidden" name="analyticsRequest" value="' + escape(analyticsRequest) + '">' +
             '<label><input type="checkbox" name="privacyBeaconConsent" value="true" required> ' +
             'I have reviewed my privacy notice and understand the next deployment may add a beacon ' +
-            'that collects visitor and performance data.</label>')
+            'that collects visitor and performance data.</label>', {secondary: true})
         : '') +
       '</section>';
     const previewSection =
@@ -454,7 +454,7 @@ export function createSiteOptionsRoutes({
         '<label><input type="checkbox" name="previewConsent" value="true" required> ' +
         'Save this request for review. Previews start after setup and your approval.</label>' +
         '<label><input type="checkbox" name="acknowledgePublicPreviews" value="true" required> ' +
-        'I understand draft preview links can be public until Access protects them.</label>') +
+        'I understand draft preview links can be public until Access protects them.</label>', {secondary: true}) +
       '</section>';
     const seoSection =
       '<section><h2>SEO starter</h2>' +
@@ -464,7 +464,7 @@ export function createSiteOptionsRoutes({
       button('/site-options-prepare', 'Review SEO request', current.csrf,
         hidden(job.id, 'seo') +
         '<label><input type="checkbox" name="seoConsent" value="true" required> ' +
-        'Save this request for review.</label>') +
+        'Save this request for review.</label>', {secondary: true}) +
       '</section>';
     const redirectsSection =
       '<section><h2>Redirects</h2>' +
@@ -486,7 +486,7 @@ export function createSiteOptionsRoutes({
             '<label for="opt-path-to">Optional path to</label>' +
             '<input id="opt-path-to" name="pathTo" maxlength="200" placeholder="/new">' +
             '<label><input type="checkbox" name="redirectConsent" value="true" required> ' +
-            'Save these redirects for review.</label>')
+            'Save these redirects for review.</label>', {secondary: true})
         : '<p>Save a custom domain request first. Redirects need that hostname.</p>') +
       '</section>';
     if (!await hasCurrentOwnerSession(env, current, now()))

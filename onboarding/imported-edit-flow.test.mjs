@@ -213,7 +213,7 @@ test('a live imported site can preview and approve one pull request without merg
     const reviewHtml = await review.text();
     assert.match(reviewHtml, /Approve and publish/);
     assert.match(reviewHtml, /Open a pull request instead/);
-    assert.match(reviewHtml, /Preview ready/);
+    assert.match(reviewHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Preview</);
     assert.match(reviewHtml, /See the exact changed file/);
     assert.doesNotMatch(reviewHtml, /Open the exact preview/);
     assert.equal(reviewHtml.includes('ghu_'), false);
@@ -276,7 +276,7 @@ test('a live imported site can preview and approve one pull request without merg
     const status = await h.request(approved.headers.get('location'), {cookie: tenant.cookie});
     const statusHtml = await status.text();
     assert.equal(status.status, 200);
-    assert.match(statusHtml, /Pull request open/);
+    assert.match(statusHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Merge</);
     assert.match(statusHtml, /<a href="https:\/\/github\.com\/tester\/esp-willow-studio\/pull\/7" target="_blank" rel="noopener noreferrer">Open the pull request<\/a> \(opens in a new tab\)/);
     assert.match(statusHtml, /does not publish the site/);
     assert.doesNotMatch(statusHtml, /Approve and publish/);
@@ -338,8 +338,8 @@ test('Approve and publish merges exactly the approved head once (owner decision 
     assert.equal(state.merges[0].sha, HEAD);
     assert.equal(state.merges[0].merge_method, 'squash');
     // The timeline lists every step; the current one carries aria-current.
-    assert.match(statusHtml, /aria-current="step">(You merged|Cloudflare publishing|Live and checked)</);
-    assert.doesNotMatch(statusHtml, /aria-current="step">Pull request open</);
+    assert.match(statusHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Publish<|All steps done/);
+    assert.doesNotMatch(statusHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Merge</);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -351,7 +351,7 @@ test('approving with no choice publishes; a merge GitHub refuses leaves the PR o
   try {
     const {state, statusHtml} = await approvedImportedEdit(h, {denyMerge: true});
     assert.equal(state.merges.length, 1, 'default action publishes');
-    assert.match(statusHtml, /aria-current="step">Pull request open</);
+    assert.match(statusHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Merge</);
     assert.match(statusHtml, /GitHub did not allow an automatic merge/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -557,8 +557,8 @@ test('a visual save accept opens the pull request and merges it', async () => {
     assert.equal(state.merges[0].sha, HEAD);
     assert.equal(state.merges[0].merge_method, 'squash');
     const statusHtml = await (await h.request(approved.headers.get('location'), {cookie: tenant.cookie})).text();
-    assert.match(statusHtml, /aria-current="step">You merged/);
-    assert.doesNotMatch(statusHtml, /aria-current="step">Pull request open/);
+    assert.match(statusHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Publish</);
+    assert.doesNotMatch(statusHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Merge</);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -637,7 +637,7 @@ test('a visual save with a new image opens a pull request only after approval', 
     const orphanReview = await (await h.request(orphan.headers.get('location'), {cookie: tenant.cookie})).text();
     assert.doesNotMatch(orphanReview, /New image|images\/lo-1\.png/);
     const statusHtml = await (await h.request(approved.headers.get('location'), {cookie: tenant.cookie})).text();
-    assert.match(statusHtml, /Pull request open/);
+    assert.match(statusHtml, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Merge</);
   } finally {
     globalThis.fetch = originalFetch;
   }

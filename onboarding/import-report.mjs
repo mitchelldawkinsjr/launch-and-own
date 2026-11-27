@@ -47,7 +47,7 @@ export function importReportMarkup(inventory){
     '</ul>'+
     (reasons.length?'<details><summary>What we found</summary><ul>'+reasons.map(r=>'<li>'+r+'</li>').join('')+'</ul></details>':'')+
     (!publishes?'':'<div class="ir-future"><span class="badge">Beta · after launch</span><p>'+
-    (kinds.length?'After launch you can update '+(kinds.length>1?kinds.slice(0,-1).join(', ')+' and '+kinds.at(-1):kinds[0])+' in '+editable.length+' '+(editable.length===1?'file':'files')+' from your toolkit. You see a preview, and you merge the change yourself.':'No files in this upload are suitable for simple toolkit updates.')+
+    (kinds.length?'After launch you can update '+(kinds.length>1?kinds.slice(0,-1).join(', ')+' and '+kinds.at(-1):kinds[0])+' in '+editable.length+' '+(editable.length===1?'file':'files')+' from your toolkit. You see a preview first, and nothing changes until you approve it.':'No files in this upload are suitable for simple toolkit updates.')+
     ' You can also edit your site with your own AI coding tool.</p></div>')+
     '<details><summary>Files in this upload ('+inventory.files.length+')</summary><ul class="ir-files">'+files+'</ul></details></section>';
 }

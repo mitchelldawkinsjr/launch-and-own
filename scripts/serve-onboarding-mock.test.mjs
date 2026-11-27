@@ -83,9 +83,9 @@ test('editor fixture serves the site editor and a visual save reaches review', {
     assert.equal(approved.res.statusCode, 303, approved.body);
     const status = await send(port, approved.res.headers.location, {headers: {cookie}});
     assert.equal(status.res.statusCode, 200, status.body);
-    assert.match(status.body, /aria-current="step">You merged/);
+    assert.match(status.body, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Publish</);
     assert.match(status.body, /https:\/\/github.com\/tester\/esp-willow-studio\/pull\/7/);
-    assert.doesNotMatch(status.body, /aria-current="step">Pull request open/);
+    assert.doesNotMatch(status.body, /aria-current="step"><span class="step-dot" aria-hidden="true">\d<\/span><span class="step-label">Merge</);
   } finally { server.close(); }
 });
 

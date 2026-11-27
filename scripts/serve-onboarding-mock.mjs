@@ -14,7 +14,8 @@ const EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com http
 function memoryBucket() {
   const data = new Map();
   return {
-    async put(key, bytes) { data.set(key, Buffer.from(bytes)); },
+    async put(key, bytes) { data.set(key, Buffer.from(bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes) ? bytes : await new Response(bytes).arrayBuffer())); },
+    async delete(key) { data.delete(key); },
     async get(key, options) {
       const object = data.get(key);
       if (!object) return null;
@@ -182,7 +183,7 @@ export async function startMockServer({repo = fileURLToPath(new URL('..', import
   const h = harness();
   globalThis.fetch = h.fetchFn;
   // Same fake ZIP configuration the Worker tests use; enables the ZIP-first landing copy and upload form.
-  if (zip && !editorFixture) Object.assign(h.env, {ZIP_ARTIFACTS: {put() {}, get() { return null; }, delete() {}},
+  if (zip && !editorFixture) Object.assign(h.env, {ZIP_ARTIFACTS: memoryBucket(),
     ZIP_PREVIEW_DOMAIN: 'preview.example.test', ZIP_PREVIEW_KEY: 'cd'.repeat(32)});
   const editorSession = editorFixture ? await seedImportedEditor(h, repo) : null;
   if (editorFixture) Object.assign(h.env, {

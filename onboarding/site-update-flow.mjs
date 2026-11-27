@@ -184,7 +184,7 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       '<form action="/site-update-approve" method="POST"><input type="hidden" name="csrf" value="'+escape(current.csrf)+'">'+
         '<input type="hidden" name="ticket" value="'+escape(raw)+'">'+
         '<button type="submit" name="action" value="publish">Approve and publish</button> '+
-        '<button type="submit" name="action" value="pr">Open a pull request instead</button></form>'+
+        '<button type="submit" name="action" value="pr" class="btn-secondary">Open a pull request instead</button></form>'+
       '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p>');
   }
   async function html(env,current,raw) {
@@ -255,7 +255,7 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     const blocked=pr.status==='awaiting-customer-merge'&&receipt.mergeNote
       ?'<p>'+(receipt.mergeNote==='stale_base'?'Your website changed after you approved, so it was not published automatically.'
         :'GitHub did not allow an automatic merge, so it was not published.')+' Merge the pull request yourself when you are ready.</p>':'';
-    return view('Update status',
+    return view('Website change status',
       '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+blocked+
       renderUpdateStatusBody({
         pr, verifyResult: result, approvedHtmlSha256: receipt.approvedHtmlSha256,

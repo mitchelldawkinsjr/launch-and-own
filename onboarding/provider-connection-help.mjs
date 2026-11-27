@@ -17,27 +17,27 @@ function icon(name) {
 export const providerHelpCss = [
   '.provider-guides{margin-top:1.25rem}',
   '.provider-guides h2{font-size:1.2rem;margin:0 0 .35rem}',
-  '.provider-intro{color:#455771;margin:.25rem 0 1rem}',
+  '.provider-intro{color:var(--muted);margin:.25rem 0 1rem}',
   '.provider-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:1rem}',
   '.provider-tile{border:1px solid #dce4ef;border-radius:14px;padding:1rem;background:#fff;min-width:0}',
   '.provider-tile details{margin:0;border:0;padding:0;background:transparent}',
   '.provider-tile summary{display:flex;align-items:center;gap:.75rem;list-style:none;cursor:pointer;min-height:52px;border-radius:7px}',
   '.provider-tile summary::-webkit-details-marker{display:none}',
-  '.provider-tile summary:focus-visible{outline:3px solid #174ca5;outline-offset:3px}',
+  '.provider-tile summary:focus-visible{outline:3px solid var(--blue);outline-offset:3px}',
   '.provider-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:48px;height:48px;border-radius:12px}',
   '.provider-icon-gh{background:#eef2f7;color:#202936}',
   '.provider-icon-cf{background:#fff1e5;color:#f38020}',
   '.provider-name{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.35}',
   '.provider-name strong{font-size:1.1rem}',
-  '.provider-name small{color:#455771;font-size:.83rem}',
-  '.provider-why{font-size:.8rem;color:#174ca5;font-weight:650;white-space:nowrap}',
-  '.provider-tile details[open] .provider-why{color:#455771}',
+  '.provider-name small{color:var(--muted);font-size:.83rem}',
+  '.provider-why{font-size:.8rem;color:var(--blue);font-weight:650;white-space:nowrap}',
+  '.provider-tile details[open] .provider-why{color:var(--muted)}',
   '.provider-tile ul{margin:.8rem 0 .6rem;padding-left:1.25rem}',
   '.provider-tile li{margin-bottom:.45rem}',
   '.provider-status{font-size:.9rem;color:#344963;margin:.8rem 0 .55rem}',
-  '.provider-tile a.provider-connect{display:inline-block;padding:.55rem .85rem;border-radius:8px;background:#174ca5;color:white;text-decoration:none;font-weight:650}',
-  '.provider-tile a.provider-connect:focus-visible{outline:3px solid #174ca5;outline-offset:3px}',
-  '.provider-future{font-size:.9rem;color:#455771}'
+  '.provider-tile a.provider-connect{display:inline-block;padding:.55rem .85rem;border-radius:8px;background:var(--blue);color:white;text-decoration:none;font-weight:650}',
+  '.provider-tile a.provider-connect:focus-visible{outline:3px solid var(--blue);outline-offset:3px}',
+  '.provider-future{font-size:.9rem;color:var(--muted)}'
 ].join('');
 function providerCard({key,name,summary,bullets,status,href,action,state}) {
   const items=bullets.map(text=>'<li>'+escape(text)+'</li>').join('');
