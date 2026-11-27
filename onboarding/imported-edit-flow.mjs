@@ -300,7 +300,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       siteSlug:item.job.site_slug,
       meta:'Repository: esp-'+item.job.site_slug,
       notes:'<p>When you approve, we publish exactly that change. You can choose to open a pull request instead and merge it yourself.</p>'+
-        '<p class="muted">Turn on Preview (eye icon) to run this page’s JavaScript in a sandboxed viewer — menus, carousels, and other features. Editing keeps scripts off so your Launch &amp; Own session stays separate.</p>'
+        '<p class="muted">Turn on Preview (eye icon) to view your live pages.dev site with JavaScript on — menus, carousels, and other features. Editing keeps scripts off so your Launch &amp; Own session stays separate.</p>'
     })+'<p><a href="/history">Back to your launches</a></p>';
     return view('Edit imported website',body,200,editorHeaders,{wide:true,css:VISUAL_EDITOR_CSS,omitTitle:true});
   }
