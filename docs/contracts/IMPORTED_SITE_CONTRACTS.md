@@ -103,6 +103,36 @@ All checks must pass, otherwise reject the whole proposal with a §4 code. There
 
 All digests use **RFC 8785 JSON Canonicalization Scheme (JCS)** over UTF-8, then SHA-256 as lowercase hex. Before canonicalizing a proposal, sort `edits` by `(path, span start offset in the original file)`. Two proposals that make the same changes in a different array order therefore produce the same `proposalDigest`.
 
+### 2.3 Page snapshot (visual editor)
+
+The hosted visual editor and the customer-owned assistant may propose a **page snapshot** instead of a span edit. The model never emits this shape; only the owner’s Preview action does. Digests use a distinct `kind` so a snapshot cannot be approved as a span edit.
+
+```jsonc
+{
+  "v": 1,
+  "kind": "page_snapshot",
+  "requestId": "<uuid>",
+  "repositoryId": 123456789,
+  "baseCommitSha": "<40 hex>",
+  "summary": "Visual editor preview",
+  // Display rows for the review screen (not the apply engine):
+  "edits": [
+    { "kind": "page_snapshot", "path": "public/index.html", "find": "Current page", "replace": "Updated in the visual editor" },
+    { "kind": "page_snapshot", "path": "public/images/lo-1.png", "find": "New file", "replace": "New image" }
+  ]
+}
+```
+
+Validation (`validatePageSnapshot`):
+1. Site classification is `static` or `static_multipage` only.
+2. Next tree may change existing editable HTML files and add images under `images/` (`png` / `jpeg` / `gif` / `webp`, magic bytes checked). No SVG. No new non-image paths.
+3. HTML must not introduce `script`, event handlers, `javascript:` URLs, `srcdoc`, or `data:` URLs.
+4. Unchanged files stay byte-identical. At least one HTML or image change. Caps: ≤ 5 HTML changes, ≤ 8 new images. `changed` rows for new images use `added: true` (no `beforeBlobSha`).
+5. When re-validating at review, each HTML row’s `beforeBlobSha` must still match the current Git blob (`stale_base` otherwise).
+6. `proposalDigest` / `artifactDigest` use JCS + SHA-256 over the snapshot shape and sorted next-tree bytes, distinct from §2.1 span digests.
+
+Approval binding §3 still applies. New image rows in `changed` are `{ path, added: true, afterSha256 }`. The pull-request writer may add blobs that did not exist on `main`; every other file stays identical.
+
 ## 3. Preview and approval binding (WS3 → WS6)
 
 ```jsonc
@@ -113,7 +143,10 @@ All digests use **RFC 8785 JSON Canonicalization Scheme (JCS)** over UTF-8, then
   "repositoryId": 123456789,
   "owner": { "provider": "github" | "cloudflare_access", "id": "<string>" },
   "baseCommitSha": "<40 hex>",
-  "changed": [ { "path": "public/index.html", "beforeBlobSha": "<40 hex>", "afterSha256": "<64 hex>" } ],
+  "changed": [
+    { "path": "public/index.html", "beforeBlobSha": "<40 hex>", "afterSha256": "<64 hex>" },
+    { "path": "public/images/lo-1.png", "added": true, "afterSha256": "<64 hex>" }  // visual editor new images only
+  ],
   "artifactDigest": "<64 hex>",          // manifestDigest of the full proposed public/ tree
   "previewUrl": "<isolated preview origin, ticketed, expires with session>",
   "expiresAt": 1764000000

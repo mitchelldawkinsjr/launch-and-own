@@ -46,6 +46,7 @@ async function verifyTarget(gh, receipt, root, owner, repoName, installation) {
 }
 
 async function changedFiles(baseFiles, nextFiles, approved) {
+  if (Array.isArray(approved) && approved.some(row => row?.added === true)) return addedChangedFiles(baseFiles, nextFiles, approved);
   if (!Array.isArray(baseFiles) || !Array.isArray(nextFiles) || baseFiles.length !== nextFiles.length) {
     throw new ImportedEditError('file-set-mismatch');
   }
@@ -67,7 +68,93 @@ async function changedFiles(baseFiles, nextFiles, approved) {
   return changed;
 }
 
+async function addedChangedFiles(baseFiles, nextFiles, approved) {
+  if (!Array.isArray(baseFiles) || !Array.isArray(nextFiles)) throw new ImportedEditError('file-set-mismatch');
+  const baseBy = new Map(baseFiles.map(file => [file.path, file]));
+  const nextBy = new Map(nextFiles.map(file => [file.path, file]));
+  if (baseBy.size !== baseFiles.length || nextBy.size !== nextFiles.length) throw new ImportedEditError('file-set-mismatch');
+  for (const file of baseFiles) if (!nextBy.has(file.path)) throw new ImportedEditError('file-set-mismatch');
+  const changed = [];
+  for (const row of approved) {
+    const relative = row.path.slice('public/'.length);
+    const after = nextBy.get(relative);
+    if (!after || await sha256Bytes(after.bytes) !== row.afterSha256) throw new ImportedEditError('approval-digest-mismatch');
+    if (row.added === true) {
+      if (baseBy.has(relative)) throw new ImportedEditError('file-set-mismatch');
+      changed.push({ path: relative, added: true, after: after.bytes });
+    } else {
+      const before = baseBy.get(relative);
+      if (!before || await gitBlobSha(before.bytes) !== row.beforeBlobSha) throw new ImportedEditError('approval-digest-mismatch');
+      changed.push({ path: relative, before: before.bytes, after: after.bytes });
+    }
+  }
+  changed.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  if (changed.length !== approved.length) throw new ImportedEditError('approval-digest-mismatch');
+  for (const file of baseFiles) {
+    if (!changed.some(item => item.path === file.path) && !sameBytes(file.bytes, nextBy.get(file.path).bytes)) {
+      throw new ImportedEditError('unrelated_change');
+    }
+  }
+  for (const file of nextFiles) {
+    if (!baseBy.has(file.path) && !changed.some(item => item.added && item.path === file.path)) {
+      throw new ImportedEditError('unrelated_change');
+    }
+  }
+  return changed;
+}
+
+async function verifyHeadWithAdditions(gh, root, headSha, baseSha, baseEntries, changed) {
+  const commit = await gh(root + '/commits/' + headSha);
+  const treeSha = commit?.commit?.tree?.sha;
+  if (commit?.sha !== headSha || !Array.isArray(commit.parents) || commit.parents.length !== 1 || commit.parents[0]?.sha !== baseSha
+      || typeof treeSha !== 'string' || !SHA.test(treeSha)) throw new ImportedEditError('commit-mismatch');
+  const headTree = await gh(root + '/git/trees/' + treeSha + '?recursive=1');
+  if (headTree?.truncated !== false || !Array.isArray(headTree.tree)) throw new ImportedEditError('commit-mismatch');
+  const headByPath = new Map(headTree.tree.map(entry => [entry.path, entry]));
+  const addedPaths = new Set(changed.filter(file => file.added).map(file => 'public/' + file.path));
+  const extraDirs = new Set();
+  for (const path of addedPaths) {
+    const parts = path.split('/');
+    for (let index = 1; index < parts.length; index += 1) {
+      const dir = parts.slice(0, index).join('/');
+      if (!baseEntries.has(dir)) extraDirs.add(dir);
+    }
+  }
+  for (const [path, after] of headByPath) {
+    if (baseEntries.has(path)) continue;
+    if (addedPaths.has(path)) {
+      if (after.type !== 'blob' || after.mode !== '100644') throw new ImportedEditError('unrelated_change');
+      continue;
+    }
+    if (extraDirs.has(path) && after.type === 'tree') continue;
+    throw new ImportedEditError('unrelated_change');
+  }
+  for (const path of addedPaths) if (!headByPath.has(path)) throw new ImportedEditError('commit-mismatch');
+  const changedByPath = new Map(changed.map(file => ['public/' + file.path, file]));
+  for (const [path, before] of baseEntries) {
+    const after = headByPath.get(path);
+    if (!after || after.type !== before.type || after.mode !== before.mode) throw new ImportedEditError('unrelated_change');
+    const edit = changedByPath.get(path);
+    if (before.type !== 'blob') continue;
+    const expected = edit ? await gitBlobSha(edit.after) : String(before.sha || '').toLowerCase();
+    if (String(after.sha || '').toLowerCase() !== expected) throw new ImportedEditError(edit ? 'commit-mismatch' : 'unrelated_change');
+  }
+  for (const path of addedPaths) {
+    const edit = changedByPath.get(path);
+    if (String(headByPath.get(path).sha || '').toLowerCase() !== await gitBlobSha(edit.after)) throw new ImportedEditError('commit-mismatch');
+  }
+  if (!Array.isArray(commit.files) || commit.files.length !== changed.length) throw new ImportedEditError('unrelated_change');
+  for (const file of commit.files) {
+    const edit = changed.find(item => 'public/' + item.path === file.filename);
+    const status = edit?.added ? 'added' : 'modified';
+    if (!edit || file.status !== status || String(file.sha || '').toLowerCase() !== await gitBlobSha(edit.after)) {
+      throw new ImportedEditError('unrelated_change');
+    }
+  }
+}
+
 async function verifyHead(gh, root, headSha, baseSha, baseEntries, changed) {
+  if (changed.some(file => file.added)) return verifyHeadWithAdditions(gh, root, headSha, baseSha, baseEntries, changed);
   const commit = await gh(root + '/commits/' + headSha);
   const treeSha = commit?.commit?.tree?.sha;
   if (commit?.sha !== headSha || !Array.isArray(commit.parents) || commit.parents.length !== 1 || commit.parents[0]?.sha !== baseSha
@@ -150,6 +237,7 @@ export async function proposeImportedPullRequest(receipt, proposal, { githubToke
   if (tree?.truncated !== false || !Array.isArray(tree.tree)) throw new ImportedEditError('tree-unreadable');
   const baseEntries = new Map(tree.tree.map(entry => [entry.path, entry]));
   for (const file of changed) {
+    if (file.added) continue;
     const entry = baseEntries.get('public/' + file.path);
     if (!entry || entry.type !== 'blob' || entry.mode !== '100644') throw new ImportedEditError('base-content-mismatch');
     const blob = await gh(root + '/git/blobs/' + entry.sha);

@@ -14,12 +14,15 @@ export function newApprovalId() {
 }
 
 function normalizeChanged(changed) {
-  if (!Array.isArray(changed) || changed.length === 0 || changed.length > 5) throw new ImportedEditError('approval-digest-mismatch');
+  // Span edits stay at most 5 files. A visual snapshot may also add a few images.
+  if (!Array.isArray(changed) || changed.length === 0 || changed.length > 8) throw new ImportedEditError('approval-digest-mismatch');
   const rows = changed.map(row => {
     if (!row || typeof row.path !== 'string' || !row.path.startsWith('public/') || row.path.includes('..')
-        || !SHA.test(row.beforeBlobSha || '') || !DIGEST.test(row.afterSha256 || '')) {
+        || !DIGEST.test(row.afterSha256 || '')) {
       throw new ImportedEditError('approval-digest-mismatch');
     }
+    if (row.added === true) return { path: row.path, added: true, afterSha256: row.afterSha256 };
+    if (!SHA.test(row.beforeBlobSha || '')) throw new ImportedEditError('approval-digest-mismatch');
     return { path: row.path, beforeBlobSha: row.beforeBlobSha.toLowerCase(), afterSha256: row.afterSha256 };
   });
   rows.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);

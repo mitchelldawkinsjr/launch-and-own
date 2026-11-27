@@ -1,6 +1,6 @@
 import { encodeUtf8, gitBlobSha, jcs, sha256Bytes, sha256Text, utf8 } from './bytes.mjs';
 import { ImportedEditError } from './errors.mjs';
-import { isColor, isRefusedPath, maskCss, MAX_FILE_BYTES, missingLocalPaths, resolvesInsideSite, structuralPath, styleInnerRanges } from './intelligence.mjs';
+import { isColor, isRefusedPath, maskCss, MAX_FILE_BYTES, MAX_FILES, MAX_SITE_BYTES, missingLocalPaths, resolvesInsideSite, structuralPath, styleInnerRanges } from './intelligence.mjs';
 import { artifactDigest } from './preview.mjs';
 
 const SHA = /^[a-f0-9]{40}$/i;
@@ -355,6 +355,109 @@ export async function validateEdits({ baseCommitSha, files, inspection, proposal
     changed,
     proposalDigest: await sha256Text(jcs(canonical)),
     artifactDigest: await artifactDigest(nextFiles)
+  };
+}
+
+const IMAGE_PATH = /^images\/[a-z0-9][a-z0-9._-]{0,64}\.(png|jpe?g|gif|webp)$/;
+const UUID_SNAPSHOT = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function imageMagic(bytes, ext) {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 12) return false;
+  if (ext === 'png') return bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if (ext === 'jpg' || ext === 'jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (ext === 'gif') return bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38;
+  if (ext === 'webp') return bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
+    && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+  return false;
+}
+
+function unsafePageHtml(html) {
+  return /<script\b/i.test(html) || /\son[a-z0-9_-]+\s*=/i.test(html) || /javascript\s*:/i.test(html)
+    || /\bsrcdoc\s*=/i.test(html) || /data\s*:/i.test(html);
+}
+
+/** Whole-page visual save. Existing editable HTML may be replaced. New files must be images under images/. */
+export async function validatePageSnapshot({ baseCommitSha, files, inspection, repositoryId, requestId, summary, nextFiles, expectedBlobs }) {
+  if (typeof baseCommitSha !== 'string' || !SHA.test(baseCommitSha)) throw new ImportedEditError('stale_base');
+  if (!UUID_SNAPSHOT.test(requestId || '') || typeof summary !== 'string' || summary.length < 1 || summary.length > 200) {
+    throw new ImportedEditError('invalid_output');
+  }
+  if (!Number.isSafeInteger(repositoryId) || repositoryId < 1) throw new ImportedEditError('stale_base');
+  if (!inspection || (inspection.classification !== 'static' && inspection.classification !== 'static_multipage')) {
+    throw new ImportedEditError(inspection?.classification === 'compiled_bundle' ? 'compiled_bundle' : inspection?.classification === 'unsupported' ? 'unsupported' : 'source_project');
+  }
+  if (!Array.isArray(files) || !Array.isArray(nextFiles) || nextFiles.length < files.length || nextFiles.length > MAX_FILES) {
+    throw new ImportedEditError('invalid_output');
+  }
+  const editableHtml = new Set(inspection.files
+    .filter(file => Array.isArray(file.editable) && file.editable.includes('text'))
+    .map(file => file.path.startsWith('public/') ? file.path.slice('public/'.length) : file.path));
+  const base = new Map(files.map(file => [file.path, file.bytes]));
+  const seen = new Set();
+  let total = 0;
+  const ordered = [];
+  for (const file of nextFiles) {
+    if (!file || typeof file.path !== 'string' || seen.has(file.path) || !structuralPath(file.path) || isRefusedPath(file.path)) {
+      throw new ImportedEditError('kind_not_allowed');
+    }
+    if (!(file.bytes instanceof Uint8Array) || file.bytes.byteLength > MAX_FILE_BYTES) throw new ImportedEditError('limit_exceeded');
+    seen.add(file.path);
+    total += file.bytes.byteLength;
+    ordered.push(file);
+  }
+  if (total > MAX_SITE_BYTES) throw new ImportedEditError('limit_exceeded');
+  for (const file of files) {
+    if (!seen.has(file.path)) throw new ImportedEditError('unrelated_change');
+  }
+  ordered.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  const changed = [];
+  const digestRows = [];
+  let htmlChanges = 0;
+  let imageChanges = 0;
+  for (const file of ordered) {
+    const before = base.get(file.path);
+    if (before && before.length === file.bytes.length && before.every((byte, index) => byte === file.bytes[index])) continue;
+    if (before) {
+      if (!editableHtml.has(file.path) || !/\.html?$/i.test(file.path)) throw new ImportedEditError('kind_not_allowed');
+      const html = utf8(file.bytes);
+      if (!/<html[\s>]/i.test(html) || !/<\/html>/i.test(html) || unsafePageHtml(html)) throw new ImportedEditError('context_not_allowed');
+      htmlChanges += 1;
+      const beforeBlobSha = await gitBlobSha(before);
+      const expectedBlob = expectedBlobs?.get?.('public/' + file.path);
+      if (expectedBlobs && expectedBlob !== beforeBlobSha) throw new ImportedEditError('stale_base');
+      const afterSha256 = await sha256Bytes(file.bytes);
+      changed.push({ path: 'public/' + file.path, beforeBlobSha, afterSha256 });
+      digestRows.push({ path: 'public/' + file.path, expectedBlobSha: beforeBlobSha, afterSha256, added: false });
+    } else {
+      const match = IMAGE_PATH.exec(file.path);
+      if (!match || !imageMagic(file.bytes, match[1] === 'jpg' ? 'jpg' : match[1])) throw new ImportedEditError('kind_not_allowed');
+      imageChanges += 1;
+      const afterSha256 = await sha256Bytes(file.bytes);
+      changed.push({ path: 'public/' + file.path, added: true, afterSha256 });
+      digestRows.push({ path: 'public/' + file.path, expectedBlobSha: null, afterSha256, added: true });
+    }
+  }
+  if (htmlChanges + imageChanges < 1) throw new ImportedEditError('no_match');
+  if (htmlChanges > 5 || imageChanges > 8) throw new ImportedEditError('limit_exceeded');
+  if (missingLocalPaths(ordered).some(path => !new Set(missingLocalPaths(files)).has(path))) {
+    throw new ImportedEditError('missing_local_dependency');
+  }
+  changed.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  digestRows.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
+  const canonical = {
+    v: 1,
+    kind: 'page_snapshot',
+    requestId,
+    repositoryId,
+    baseCommitSha: baseCommitSha.toLowerCase(),
+    summary,
+    files: digestRows
+  };
+  return {
+    files: ordered.map(file => ({ path: file.path, bytes: file.bytes })),
+    changed,
+    proposalDigest: await sha256Text(jcs(canonical)),
+    artifactDigest: await artifactDigest(ordered)
   };
 }
 
