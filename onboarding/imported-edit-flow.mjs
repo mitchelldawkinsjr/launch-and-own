@@ -298,7 +298,8 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       jobId:id,page,pages,iframeSrc,previewView,liveSiteSrc,targets,picked,csrf:current.csrf,
       previewAction:'/imported-edit-preview',editorPath:'/imported-edit',aiBlock,
       meta:'Repository: esp-'+item.job.site_slug,
-      notes:'<p>When you approve, we publish exactly that change. You can choose to open a pull request instead and merge it yourself.</p>'
+      notes:'<p>When you approve, we publish exactly that change. You can choose to open a pull request instead and merge it yourself.</p>'+
+        '<p class="muted">Scripts stay off in the editor so your Launch &amp; Own session stays safe. Use the open-in-new-tab control (external-link icon) to see menus, carousels, and other features that need JavaScript.</p>'
     })+'<p><a href="/history">Back to your launches</a></p>';
     return view('Edit imported website',body,200,editorHeaders,{wide:true,css:VISUAL_EDITOR_CSS,omitTitle:true});
   }
