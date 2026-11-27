@@ -78,13 +78,13 @@ export function historyToolkitCapabilities({
   let updates;
   if (uploadedZip && verified)
     updates = cap('available_opt_in', 'imported_edit_ready',
-      'Change one unique text, link, business detail, or existing color. Preview it and approve to publish, or open a pull request instead and merge it yourself.');
+      'Open the visual editor, preview the exact page, and approve to publish, or open a pull request instead and merge it yourself.');
   else if (uploadedZip)
     updates = cap('not_available', 'uploaded_source_has_no_supported_editor',
       'Imported editing appears after this ZIP launch is confirmed live.');
   else if (canEdit && verified)
     updates = cap('available_opt_in', 'editor_eligible',
-      'Change the copy, preview the exact page, and approve to publish (or open a pull request instead). Then we check the live site.');
+      'Open the visual editor, preview the exact page, and approve to publish (or open a pull request instead). Then we check the live site.');
   else
     updates = cap('not_available', 'update_acceptance_pending',
       verified

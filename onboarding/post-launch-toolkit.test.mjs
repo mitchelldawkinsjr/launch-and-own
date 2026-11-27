@@ -163,7 +163,7 @@ test('GET /toolkit fences retained history, uses a bounded display query and mak
   const zip = await (await toolkit()).text();
   assert.doesNotMatch(zip, /Update this website/);
   assert.match(zip, /Edit imported website/);
-  assert.match(zip, /unique text, link, business detail, or existing color/i);
+  assert.match(zip, /Open the visual editor, preview the exact page/i);
   assert.match(zip, /Safe website updates/);
 
   h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_account_id = ?').run('a'.repeat(32));
