@@ -1,6 +1,8 @@
 /** Owner-scoped launch history and update status views (#87). */
 import {hasCurrentOwnerSession, isLaunchId, listOwnedJobs} from './launch-jobs.mjs';
 import {optionsPathForJob} from './post-launch-options.mjs';
+import {ownerSelfActivationEnabled} from './owner-option-activation.mjs';
+import {siteFilesEnabled} from './site-files-flow.mjs';
 import {serviceExplorerCss, serviceExplorerMarkup} from './service-explorer.mjs';
 import {TOOLKIT_CAPABILITY_STATES} from '../pipeline/toolkit-capabilities.mjs';
 
@@ -56,9 +58,10 @@ function cap(state, reason, detail) {
 /**
  * History-retained labels using #84 states. Live provider evidence stays with
  * summarizeOwnedToolkitSite once #39 owned-site reads exist.
+ * Optional-feature states follow the same OPTION_* owner Turn on flags as /site-options.
  */
 export function historyToolkitCapabilities({
-  verified = false, canEdit = false, uploadedZip = false
+  verified = false, canEdit = false, uploadedZip = false, env = null
 } = {}) {
   const hosting = verified
     ? cap('included_verified', 'verified_launch_job',
@@ -90,23 +93,43 @@ export function historyToolkitCapabilities({
       verified
         ? 'This site is not eligible for the simple editor yet.'
         : 'Updates unlock after the site is confirmed live.');
+  const domainOn = verified && ownerSelfActivationEnabled(env, 'domain');
+  const emailOn = verified && ownerSelfActivationEnabled(env, 'email');
+  const formsOn = verified && ownerSelfActivationEnabled(env, 'forms');
+  const analyticsOn = verified && ownerSelfActivationEnabled(env, 'analytics');
+  const filesOn = verified && !!env && siteFilesEnabled(env);
   return Object.freeze({
     static_hosting: hosting,
     https,
     deployment_health: health,
     website_updates: updates,
-    web_analytics: cap('manual_setup', 'review_provider_settings',
-      'On for sites launched with visitor insights, which is the default. To see them in Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
+    web_analytics: analyticsOn
+      ? cap('available_opt_in', 'owner_analytics_activation_ready',
+        'On by default for new launches. Open Optional features to turn them on if this site needs them, or open Metrics in your Cloudflare Pages project to view them.')
+      : cap('manual_setup', 'review_provider_settings',
+        'On for sites launched with visitor insights, which is the default. To see them in Cloudflare, open your Pages project, then Metrics, then Web Analytics.'),
     pr_previews: cap('blocked_permission_or_plan', 'preview_access_and_approval_required',
       'Pages PR previews need verified private access and separate approval. Use the exact Launch & Own review to inspect updates.'),
-    custom_domains: cap('manual_setup', 'verified_domain_setup_required',
-      'Add your own domain name in your Cloudflare Pages project when you are ready.'),
-    email_routing: cap('not_available', 'owned_custom_domain_needed',
-      'Needs a domain name and inbox you control.'),
-    seo_bundle: cap('not_available', 'separate_reviewed_artifact_needed',
-      'Extra search-listing setup is a separate reviewed update.'),
-    contact_forms: cap('not_available', 'verified_server_form_integration_needed',
-      'Contact forms need a separate approved setup.'),
+    custom_domains: domainOn
+      ? cap('available_opt_in', 'owner_domain_activation_ready',
+        'Open Optional features, save your hostname, then Turn on custom domain.')
+      : cap('manual_setup', 'verified_domain_setup_required',
+        'Add your own domain name in your Cloudflare Pages project when you are ready.'),
+    email_routing: emailOn
+      ? cap('available_opt_in', 'owner_email_activation_ready',
+        'Save a custom domain request first, then open Optional features to Turn on email forwarding.')
+      : cap('not_available', 'owned_custom_domain_needed',
+        'Needs a domain name and inbox you control.'),
+    seo_bundle: filesOn
+      ? cap('available_opt_in', 'owner_seo_files_ready',
+        'Open Optional features, save an SEO request, then Turn on SEO starter.')
+      : cap('not_available', 'separate_reviewed_artifact_needed',
+        'Extra search-listing setup is a separate reviewed update.'),
+    contact_forms: formsOn
+      ? cap('available_opt_in', 'owner_forms_activation_ready',
+        'Open Optional features, review the form plan, then Turn on contact form.')
+      : cap('not_available', 'verified_server_form_integration_needed',
+        'Contact forms need a separate approved setup.'),
     advanced_services: cap('not_available', 'separate_usage_and_approval_review_needed',
       'Extra Cloudflare services need a reviewed plan first.')
   });
@@ -171,7 +194,7 @@ function timestamp(seconds) {
   return Number.isFinite(time.valueOf()) ? time.toISOString() : null;
 }
 
-export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} = {}) {
+export function projectToolkitCard(job, {canEdit = false, uploadedZip = false, env = null} = {}) {
   if (!job || !isLaunchId(job.id)) return null;
   const status = job.display_status || job.status;
   const time = timestamp(job.updated_at);
@@ -200,7 +223,7 @@ export function projectToolkitCard(job, {canEdit = false, uploadedZip = false} =
       : zip && verified ? '/imported-edit?id=' + encodeURIComponent(job.id) : null,
     optionsPath: optionsPathForJob(job.id, status),
     capabilities: historyToolkitCapabilities({
-      verified, canEdit: editable, uploadedZip: zip
+      verified, canEdit: editable, uploadedZip: zip, env
     })
   };
 }
@@ -209,7 +232,8 @@ export async function loadToolkitCards(env, session, time) {
   const rows = await listOwnedJobs(env, session, time);
   const cards = rows.map(job => projectToolkitCard(job, {
     canEdit: Number(job.can_edit) === 1,
-    uploadedZip: Number(job.uploaded_zip) === 1
+    uploadedZip: Number(job.uploaded_zip) === 1,
+    env
   })).filter(Boolean);
   if (!await hasCurrentOwnerSession(env, session, Math.floor(Date.now() / 1000)))
     throw Error('Account authorization changed');
@@ -217,7 +241,7 @@ export async function loadToolkitCards(env, session, time) {
 }
 
 const TOOLKIT_INTRO = 'This page combines <strong>recorded launch results</strong> (about 30 days) with <strong>live account reads</strong> when Pages access works. ' +
-  'Matched sites show live GitHub and Cloudflare links inside their launch card. Optional service requests are stored for review only—they are not applied here.';
+  'Matched sites show live GitHub and Cloudflare links inside their launch card. Open <strong>Optional features</strong> to save a request, then Turn on domain, email, forms, analytics, or SEO/redirects when those controls are available.';
 
 export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = '', siteDetails = new Map()} = {}) {
   if (!current?.cloudflare_account_id)

@@ -66,6 +66,7 @@ test('the toolkit displays exact launch evidence only for complete successful re
   assert.equal(live.approvalFingerprint, record.approval_digest);
   assert.equal(live.capabilities.website_updates.state, 'available_opt_in');
   assert.equal(live.capabilities.static_hosting.state, 'included_verified');
+  assert.equal(live.capabilities.contact_forms.state, 'not_available');
   assert.equal(projectToolkitCard({...record, display_status: 'live', updated_at: null},
     {canEdit: true}).editPath, null);
   assert.equal(projectToolkitCard(record, {canEdit: true}).optionsPath, null);
@@ -82,6 +83,31 @@ test('history capabilities offer imported editing only after a live ZIP launch',
   });
   assert.equal(waiting.website_updates.state, 'not_available');
   assert.equal(waiting.website_updates.reason, 'uploaded_source_has_no_supported_editor');
+});
+
+test('live toolkit marks optional features available when owner Turn on flags are set', () => {
+  const env = {
+    OPTION_EXECUTION_ENABLED: 'true',
+    OPTION_OWNER_ACTIVATION_ENABLED: 'true',
+    OPTION_DOMAIN_ENABLED: 'true',
+    OPTION_EMAIL_ENABLED: 'true',
+    OPTION_FORMS_ENABLED: 'true',
+    OPTION_ANALYTICS_ENABLED: 'true',
+    OPTION_SITE_FILES_ENABLED: 'true',
+    DB: {}
+  };
+  const caps = historyToolkitCapabilities({
+    verified: true, canEdit: true, uploadedZip: true, env
+  });
+  assert.equal(caps.custom_domains.state, 'available_opt_in');
+  assert.equal(caps.email_routing.state, 'available_opt_in');
+  assert.equal(caps.contact_forms.state, 'available_opt_in');
+  assert.equal(caps.web_analytics.state, 'available_opt_in');
+  assert.equal(caps.seo_bundle.state, 'available_opt_in');
+  assert.match(caps.contact_forms.detail, /Optional features/);
+  const off = historyToolkitCapabilities({verified: true, env: {OPTION_EXECUTION_ENABLED: 'false'}});
+  assert.equal(off.contact_forms.state, 'not_available');
+  assert.equal(off.custom_domains.state, 'manual_setup');
 });
 
 test('update status HTML leads with Open the change to publish for open PRs', () => {
