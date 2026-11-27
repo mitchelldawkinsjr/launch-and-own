@@ -4,6 +4,8 @@
   const REPO = 'mitchelldawkinsjr/launch-and-own-site-editor';
 
   async function init() {
+    // Hosted Launch & Own does not ship version.json with the editor assets.
+    if (new URLSearchParams(location.search).get('id') && new URLSearchParams(location.search).get('page')) return;
     try {
       const res = await fetch('version.json', { cache: 'no-store' });
       if (!res.ok) return; // local dev or build-info missing — chip stays hidden

@@ -56,6 +56,34 @@
     return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, match => match + tag) : tag + html;
   }
 
+  // Edit canvas has no allow-scripts. Hold page scripts/handlers so doc.write
+  // does not spam the console; restore them before Preview/save serialization.
+  function holdScriptsForCanvas(html) {
+    return String(html)
+      .replace(/<script\b([^>]*)>/gi, (_, attrs) => {
+        let next = attrs;
+        if (/\btype\s*=/i.test(next)) {
+          next = next.replace(/\btype\s*=\s*(["'][^"']*["']|[^\s>]+)/i, 'type="text/lo-held"');
+        } else {
+          next += ' type="text/lo-held"';
+        }
+        if (!/\bdata-lo-script\s*=/i.test(next)) next += ' data-lo-script="1"';
+        return '<script' + next + '>';
+      })
+      .replace(/\s(on[a-z]+)\s*=\s*(["'])/gi, ' data-lo-$1=$2');
+  }
+
+  function releaseScriptsFromHtml(html) {
+    return String(html)
+      .replace(/<script\b([^>]*)>/gi, (full, attrs) => {
+        if (!/\bdata-lo-script\s*=/i.test(attrs)) return full;
+        let next = attrs.replace(/\s*data-lo-script\s*=\s*(["']?)1\1/i, '');
+        next = next.replace(/\s*\btype\s*=\s*(["']?)text\/lo-held\1/i, '');
+        return '<script' + next + '>';
+      })
+      .replace(/\sdata-lo-(on[a-z]+)\s*=\s*(["'])/gi, ' $1=$2');
+  }
+
   function isMirrorUrl(url) {
     try {
       const parsed = new URL(url, baseHref);
@@ -423,6 +451,10 @@
 
     const originalInject = window.Site.injectBase.bind(window.Site);
     window.Site.injectBase = html => injectHostBase(originalInject(html));
+    const originalLoadHtml = window.Canvas.loadHtml.bind(window.Canvas);
+    window.Canvas.loadHtml = html => originalLoadHtml(holdScriptsForCanvas(html));
+    const originalCurrentHtml = window.FileOps.currentHtml.bind(window.FileOps);
+    window.FileOps.currentHtml = () => releaseScriptsFromHtml(originalCurrentHtml());
     window.FileOps.save = previewSave;
     const originalSetPreview = window.Canvas.setPreview.bind(window.Canvas);
     window.Canvas.setPreview = (on) => {
@@ -447,6 +479,8 @@
     document.getElementById('editor').hidden = false;
     await window.ModeSwitch.loadIntoInitialMode(html);
     await showGithubProject();
+    // Gallery/menus need the live site's JS — open pages.dev Preview once loaded.
+    if (liveSiteUrl) document.getElementById('tb-preview')?.click();
   });
 
   function fileButton(path, current) {
