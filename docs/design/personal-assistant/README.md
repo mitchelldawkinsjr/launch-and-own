@@ -14,6 +14,8 @@ Author: Claude Code · Claude Opus 5.5 (`claude-opus-5-5`), 2026-11-24. Reviewer
 | [Provisioning plan](provisioning-plan.md) | Resource manifest, consent and cost screen, resume and rollback, free-tier limits with sources |
 | [M1 security checks](m1-security-checks.md) | 21 adversarial unit-level checks for the WS1–3 implementation, using fixtures and mocks only |
 | [M2 test plan](m2-test-plan.md) | Denied access, changed base SHA, revoked credentials, quota, failed deploy, retries, cleanup, Launch & Own offline |
+| [M2 pilot runbook](m2-pilot-runbook.md) | Disposable-account preconditions, dry-run, live sequence after owner authorization |
+| [M3 guided-path spike](m3-guided-path-spike.md) | Deploy Button + SHA pin, guided Access, A2 evaluation; Domain gates |
 
 ## Recommendations in one table
 
