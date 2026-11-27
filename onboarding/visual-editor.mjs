@@ -83,17 +83,19 @@ export function assistantPromptMarkup({ csrf, action, id } = {}) {
 }
 
 export function visualEditorMarkup({
-  jobId, page, pages, iframeSrc, previewView = 'mirror', liveSiteSrc, targets, picked, csrf, previewAction, editorPath, aiBlock = '', notes = '', meta = ''
+  jobId, page, pages, iframeSrc, previewView = 'mirror', liveSiteSrc, targets, picked, csrf, previewAction, editorPath, aiBlock = '', notes = '', meta = '', siteSlug = ''
 } = {}) {
   if (!pages?.length || !Array.isArray(targets) || typeof jobId !== 'string' || typeof page !== 'string' || typeof iframeSrc !== 'string') {
     throw new TypeError('visual editor shape');
   }
   if (previewView !== 'mirror' && previewView !== 'live') throw new TypeError('visual editor shape');
   if (previewView === 'live' && typeof liveSiteSrc !== 'string') throw new TypeError('visual editor shape');
+  if (siteSlug && (typeof siteSlug !== 'string' || !/^[a-z0-9-]{1,40}$/.test(siteSlug))) throw new TypeError('visual editor shape');
   const editorBase = editorPath.split('?')[0] || editorPath;
   const mirror = editorPath.startsWith('/imported-edit') ? 'hosted' : 'assistant';
   const visualSrc = '/site-editor/index.html?id=' + encodeURIComponent(jobId) + '&page=' + encodeURIComponent(page)
     + (mirror === 'assistant' ? '&mirror=assistant' : '')
+    + (siteSlug ? '&slug=' + encodeURIComponent(siteSlug) : '')
     + '#csrf=' + encodeURIComponent(csrf);
 
   const pageOptions = pages.map(p =>

@@ -177,6 +177,12 @@ test('preview carries no credentials and approval is bound to the owner, repo, b
   const response = previewResponse(preview, '/index.html');
   assert.equal(response.status, 200);
   assert.match(response.headers['content-security-policy'], /script-src 'none'/);
+  const scriptFile = previewResponse({
+    credentialsIncluded: false,
+    files: [...preview.files, { path: 'app.js', bytes: new TextEncoder().encode('console.log(1)') }]
+  }, '/app.js');
+  assert.equal(scriptFile.status, 200);
+  assert.match(scriptFile.headers['content-type'], /javascript/);
   assert.equal(response.headers.authorization, undefined);
   assert.equal(response.headers['set-cookie'], undefined);
   assert.equal(previewResponse(preview, '/../README.md').status, 404);
