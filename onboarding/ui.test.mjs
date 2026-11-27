@@ -60,14 +60,25 @@ test('ZIP-first copy follows only the strict verified flag and states compatibil
   assert.doesNotMatch(on,/<p>[^<]*<div/,'block content must not sit inside <p>');
 });
 
-test('Maintain tab reuses #164 unchanged and marks the customer-owned assistant as planned',()=>{
+test('Maintain tab leads with the toolkit editor, reuses #164 journey, and keeps the assistant planned',()=>{
   const html=exploreMarkup();
-  assert.ok(html.includes(aiUpdateJourneyMarkup()));
+  const maintain=html.slice(html.indexOf('lo-p-maintain'),html.indexOf('lo-p-grow'));
+  assert.match(maintain,/Built-in visual HTML editor/);
+  assert.match(maintain,/Available · hosted beta/);
+  assert.match(maintain,/lo-ve-shot/);
+  assert.match(maintain,/Visual<\/span><span class="off">Source/);
+  assert.ok(maintain.includes(aiUpdateJourneyMarkup()));
+  // Editor first, then #164 AI journey, then other paths / planned assistant (journey is not buried at the bottom).
+  assert.ok(maintain.indexOf('lo-editor')<maintain.indexOf(aiUpdateJourneyMarkup()));
+  assert.ok(maintain.indexOf(aiUpdateJourneyMarkup())<maintain.indexOf('Your own AI coding tool'));
+  assert.ok(maintain.indexOf(aiUpdateJourneyMarkup())<maintain.indexOf('How the planned assistant would work'));
+  assert.doesNotMatch(maintain,/<img\b|<iframe\b/i);
   assert.match(html,/Planned · not released<\/span><h3>Your own website assistant/);
   assert.match(html,/Available with your own tools/);
   assert.doesNotMatch(html,/assistant is (?:available|live|released)/i);
   assert.ok(html.indexOf('lo-p-launch')<html.indexOf('lo-p-maintain')&&html.indexOf('lo-p-maintain')<html.indexOf('lo-p-grow'));
   assert.match(html,/Hosted beta\./);
+  assert.match(html,/aria-label="Maintain: Visual HTML editor"/);
 });
 
 test('Maintain explains how the planned assistant would work, matching the approved contract and design (#165, #170)',()=>{
