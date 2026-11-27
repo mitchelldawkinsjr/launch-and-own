@@ -623,6 +623,19 @@ test('a visual save with a new image opens a pull request only after approval', 
     const written = [...files.blobs.values()];
     assert.ok(written.some(bytes => bytes.length === png.length && bytes.every((byte, index) => byte === png[index])));
     assert.ok(written.some(bytes => new TextDecoder().decode(bytes).includes('Harbor Lane')));
+    // Removed images must not be added: HTML without the src, but images[] still sent.
+    const orphan = await h.request('/imported-edit-visual-preview', {
+      method: 'POST', cookie: tenant.cookie,
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        csrf: tenant.csrf, id: tenant.id, page: 'index.html',
+        html: '<!doctype html><html><body><h1>Harbor Lane</h1></body></html>',
+        images: [{path: 'images/lo-1.png', base64: base64Encode(png)}]
+      })
+    });
+    assert.equal(orphan.status, 303, await orphan.text());
+    const orphanReview = await (await h.request(orphan.headers.get('location'), {cookie: tenant.cookie})).text();
+    assert.doesNotMatch(orphanReview, /New image|images\/lo-1\.png/);
     const statusHtml = await (await h.request(approved.headers.get('location'), {cookie: tenant.cookie})).text();
     assert.match(statusHtml, /Pull request open/);
   } finally {

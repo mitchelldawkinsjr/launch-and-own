@@ -77,6 +77,13 @@ const REASON={
   missing_local_dependency:'A page points at a file the upload does not contain.'
 };
 
+function htmlIncludesAsset(html,path){
+  if(typeof html!=='string'||typeof path!=='string'||!path)return false;
+  // Require a real attribute/url reference so a removed image cannot ride along in the images[].
+  const escaped=path.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  return new RegExp('(?:\\bsrc\\s*=\\s*["\']|url\\(\\s*["\']?)'+escaped,'i').test(html);
+}
+
 export function createImportedEditRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now}){
   function fencedFetch(env,current){
     return async(url,options={})=>{
@@ -388,8 +395,11 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       const inspection=await inspectSite(files);
       const next=files.map(file=>({path:file.path,bytes:file.path===page?encodeUtf8(html):file.bytes}));
       if(!next.some(file=>file.path===page))throw new ImportedEditError('kind_not_allowed');
-      for(const image of images){
-        if(!image||typeof image.path!=='string'||typeof image.base64!=='string'||image.base64.length>2_800_000)
+      // Only keep uploaded images the page HTML still references (add-then-remove must not open a PR file).
+      const referenced=images.filter(image=>image&&typeof image.path==='string'&&htmlIncludesAsset(html,image.path));
+      for(const image of referenced){
+        if(typeof image.base64!=='string'||image.base64.length>2_800_000)throw new ImportedEditError('kind_not_allowed');
+        if(!/^images\/[a-z0-9][a-z0-9._-]{0,64}\.(png|jpe?g|gif|webp)$/i.test(image.path))
           throw new ImportedEditError('kind_not_allowed');
         let bytes;
         try{bytes=base64Decode(image.base64);}catch{throw new ImportedEditError('kind_not_allowed');}
