@@ -2,6 +2,13 @@
   "$schema": "https://json.schemastore.org/wrangler.json",
   "name": "launch-and-own-onboarding-beta",
   "main": "worker.mjs",
+  "assets": {
+    "directory": "../vendor/launch-and-own-site-editor",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
   "compatibility_date": "2026-11-21",
   "workers_dev": false,
   "preview_urls": false,

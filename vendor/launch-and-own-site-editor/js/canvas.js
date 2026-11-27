@@ -1,0 +1,807 @@
+// Canvas: iframe management, selection, hover, drag-drop inside the canvas
+window.Canvas = (function() {
+  const ES = window.EditorState;
+  let iframe, overlay, selBox, selLabel, selToolbar, hoverBox, dropIndicator;
+  let canvasFrame;
+  let isPreview = false;
+  let dragData = null; // { type: 'block'|'move', payload, ghostEl? }
+  let iframeMutationObserver = null; // disconnected before re-attach on doc-replaced
+  let loadSeq = 0;                   // guards against overlapping loadHtml calls
+  const wiredBodies = new WeakSet(); // a body gets its listeners exactly once
+  let internalNativeDrag = false;    // a native drag that started inside the canvas
+
+  // Inject styles into the iframe so editor selection works
+  const IFRAME_STYLES = `
+    [data-he-editing] { outline: 2px solid #6c8cff !important; outline-offset: -2px !important; }
+    html { cursor: default; }
+    body { min-height: 100vh; }
+  `;
+
+  function init() {
+    iframe = document.getElementById('canvas');
+    overlay = document.getElementById('selection-overlay');
+    selBox = document.getElementById('sel-box');
+    selLabel = document.getElementById('sel-label');
+    selToolbar = document.getElementById('sel-toolbar');
+    hoverBox = document.getElementById('hover-box');
+    dropIndicator = document.getElementById('drop-indicator');
+    canvasFrame = document.querySelector('.canvas-frame');
+
+    // Selection toolbar buttons
+    selToolbar.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      handleToolbarAction(action);
+    });
+
+    // Canvas resize observer to keep overlay aligned
+    const ro = new ResizeObserver(() => updateOverlay());
+    ro.observe(canvasFrame);
+
+    // Listen to selection / doc state
+    ES.on((evt, payload) => {
+      if (evt === 'selection-changed') updateOverlay();
+      if (evt === 'doc-replaced' || evt === 'doc-changed') {
+        // After doc replacement we need to re-wire events
+        wireIframeEvents();
+        updateOverlay();
+      }
+    });
+
+    // Window resize / scroll
+    window.addEventListener('resize', updateOverlay);
+
+    // Listen for drops on canvas wrap from external block drags
+    const canvasWrap = document.querySelector('.canvas-wrap');
+    canvasWrap.addEventListener('dragover', (e) => {
+      if (!dragData && !isExternalDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      updateDropTarget(e.clientX, e.clientY, !dragData);
+    });
+    canvasWrap.addEventListener('drop', (e) => {
+      if (!dragData && isExternalDrag(e)) {
+        // Files or a URL dropped in the margin around the page: treat it
+        // like a canvas drop at the last indicated spot.
+        e.preventDefault();
+        e.stopPropagation();
+        externalDrop(e);
+        return;
+      }
+      if (!dragData) return;
+      e.preventDefault();
+      handleDrop(e.clientX, e.clientY);
+    });
+    canvasWrap.addEventListener('dragleave', (e) => {
+      // Use the relatedTarget heuristic — only hide when leaving the
+      // wrap entirely, not when crossing between descendant elements
+      if (!canvasWrap.contains(e.relatedTarget)) hideDropIndicator();
+    });
+    // Safety net: if a drag is aborted anywhere (Esc, drop outside the
+    // window, etc.), clear the indicator and any stale drag state.
+    document.addEventListener('dragend', () => {
+      hideDropIndicator();
+      lastDropTarget = null;
+    }, true);
+  }
+
+  function setDragData(d) { dragData = d; }
+  function clearDragData() { dragData = null; hideDropIndicator(); }
+  function getDragData() { return dragData; }
+
+  // Load HTML into the canvas. The frame is navigated exactly once, to a
+  // blank srcdoc; after that every load writes into the same frame window
+  // with document.open/write, which is also how undo restores snapshots.
+  //   - The site-folder responder (Site.attachResponder) is installed on
+  //     that window before any content is written, so the page's first CSS
+  //     and image requests get answered.
+  //   - Re-navigating the frame on every load pushed a session-history
+  //     entry each time, and the browser Back button then blanked the canvas.
+  let frameReady = false;
+  function loadHtml(html) {
+    if (!html || !html.trim()) {
+      html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Untitled</title></head><body></body></html>';
+    }
+    if (window.Site) html = window.Site.injectBase(html);
+    const seq = ++loadSeq;
+    const write = () => {
+      if (seq !== loadSeq) return;
+      if (window.Site) window.Site.attachResponder(iframe.contentWindow);
+      const doc = iframe.contentDocument;
+      doc.open();
+      doc.write(html);
+      doc.close();
+      injectEditorStyles(doc);
+      ES.setDoc(doc); // emits doc-changed, which wires the iframe events
+      if (window.Site) window.Site.checkFrame(iframe.contentWindow);
+    };
+    if (frameReady && iframe.contentDocument) { write(); return; }
+    iframe.onload = () => {
+      iframe.onload = null;
+      frameReady = true;
+      write();
+    };
+    iframe.srcdoc = '<!DOCTYPE html><html><head></head><body></body></html>';
+  }
+
+  function injectEditorStyles(doc) {
+    const style = doc.createElement('style');
+    style.id = '__he_styles__';
+    style.textContent = IFRAME_STYLES;
+    doc.head.appendChild(style);
+  }
+
+  function wireIframeEvents() {
+    const doc = ES.state.doc;
+    if (!doc) return;
+    // Re-inject styles if they were lost (e.g., after undo via doc.write)
+    if (!doc.getElementById('__he_styles__') && doc.head) injectEditorStyles(doc);
+    const body = doc.body;
+    if (!body) return;
+    // doc-changed and doc-replaced can both fire for the same document; wire
+    // each body once so handlers (drops, paste) never run twice.
+    if (wiredBodies.has(body)) return;
+    wiredBodies.add(body);
+
+    // Click to select. Also intercepts ALL link clicks defensively, in both
+    // edit and preview mode, so the iframe content can't escape to the
+    // parent frame (e.g. via <base target="_top"> in the source).
+    body.addEventListener('click', (e) => {
+      const link = e.target && e.target.closest && e.target.closest('a');
+      if (link) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isPreview) handlePreviewLinkClick(link);
+        else ES.select(link);
+        return;
+      }
+      if (isPreview) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const target = e.target;
+      if (target && target.nodeType === 1 && target !== doc.documentElement && target !== body.parentNode) {
+        ES.select(target);
+      }
+    }, true);
+
+    // Also catch any other navigation attempts (form submit, etc.)
+    body.addEventListener('submit', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+
+    // Double click to edit text. If the target is already in an editable
+    // context, let the browser handle native word-selection — don't intercept.
+    body.addEventListener('dblclick', (e) => {
+      if (isPreview) return;
+      const target = e.target;
+      if (!target || target.nodeType !== 1) return;
+      if (target.isContentEditable) return; // already editing — native word-select handles it
+      e.preventDefault();
+      e.stopPropagation();
+      if (target.tagName === 'IMG' && window.Assets) { ES.select(target); window.Assets.replaceImage(target); return; }
+      enterTextEdit(target, e);
+    }, true);
+
+    // Hover highlight.
+    // - Skip if same target as last move (no need to redraw)
+    // - Skip body/html (would paint a giant box over everything)
+    // - Skip elements >70% of the viewport (huge sections feel like the
+    //   box is "following the mouse" as it crosses padding)
+    // - Always hide the drop indicator when not in a drag (defensive
+    //   against a stuck indicator from an aborted drag)
+    let lastHoverTarget = null;
+    body.addEventListener('mousemove', (e) => {
+      if (isPreview) return;
+      if (!dragData && !dropIndicator.hidden) hideDropIndicator();
+      if (dragData) return;
+      const target = e.target;
+      if (target === lastHoverTarget) return;
+      lastHoverTarget = target;
+      if (target && target.nodeType === 1
+          && target !== ES.state.selected
+          && target !== doc.body
+          && target !== doc.documentElement
+          && !isOversized(target)) {
+        showHoverBox(target);
+      } else {
+        hideHoverBox();
+      }
+    });
+    body.addEventListener('mouseleave', () => { hideHoverBox(); lastHoverTarget = null; });
+
+    // Internal drag-drop: drag elements to reorder
+    body.addEventListener('mousedown', (e) => {
+      if (isPreview) return;
+      if (!e.altKey && !e.shiftKey) return; // require modifier to start drag inside canvas
+    });
+
+    // Escape inside the iframe should also exit preview. Iframe keydowns
+    // don't bubble up to the parent document, so the global handler in
+    // keyboard.js never fires when focus is inside the canvas.
+    doc.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && window.__heExitPreview) {
+        if (window.__heExitPreview()) e.preventDefault();
+      }
+    }, true);
+
+    // Scroll: re-sync the selection overlay, and CLEAR the hover box
+    // (otherwise it sits stale at the old position while the underlying
+    // element has scrolled out from under it — looks like the box is
+    // "moving" while the mouse is still).
+    doc.addEventListener('scroll', () => {
+      updateOverlay();
+      hideHoverBox();
+      lastHoverTarget = null;
+    }, true);
+
+    // dragover/drop inside iframe: blocks from the sidebar, plus image files
+    // from Finder/Explorer and image URLs dragged from other tabs.
+    doc.addEventListener('dragstart', () => { internalNativeDrag = true; }, true);
+    doc.addEventListener('dragend', () => { internalNativeDrag = false; }, true);
+    doc.addEventListener('dragover', (e) => {
+      if (!dragData && !isExternalDrag(e)) return;
+      e.preventDefault();
+      if (!dragData) e.dataTransfer.dropEffect = 'copy';
+      const rect = iframe.getBoundingClientRect();
+      updateDropTarget(rect.left + e.clientX, rect.top + e.clientY, !dragData);
+    });
+    doc.addEventListener('drop', (e) => {
+      if (!dragData && isExternalDrag(e)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = iframe.getBoundingClientRect();
+        updateDropTarget(rect.left + e.clientX, rect.top + e.clientY, true);
+        externalDrop(e);
+        return;
+      }
+      if (!dragData) return;
+      e.preventDefault();
+      const rect = iframe.getBoundingClientRect();
+      handleDrop(rect.left + e.clientX, rect.top + e.clientY);
+    });
+    doc.addEventListener('dragleave', (e) => {
+      if (!e.relatedTarget && !dragData) hideDropIndicator();
+    });
+
+    // Paste an image (screenshot, copied file) straight onto the page.
+    doc.addEventListener('paste', (e) => { if (window.Assets) window.Assets.handlePaste(e); });
+
+    // Track any DOM mutations for autosave (excluding our editor-style
+    // injections). The observer can fire many times per frame for big
+    // changes (drops, undo restoring a tree, large style edits); coalesce
+    // the overlay/autosave work into a single rAF callback per frame.
+    // Disconnect any prior observer before installing a fresh one.
+    // wireIframeEvents fires on every doc-replaced (undo via doc.write
+    // reinstalls listeners). Without this, observers from prior
+    // documents stayed alive watching detached trees — slow leak.
+    if (iframeMutationObserver) {
+      try { iframeMutationObserver.disconnect(); } catch (_) {}
+    }
+    let moPending = false;
+    iframeMutationObserver = new MutationObserver((mutations) => {
+      const meaningful = mutations.some(m =>
+        !(m.target && m.target.id === '__he_styles__')
+      );
+      if (!meaningful || moPending) return;
+      moPending = true;
+      requestAnimationFrame(() => {
+        moPending = false;
+        ES.scheduleAutosave();
+        updateOverlay();
+      });
+    });
+    iframeMutationObserver.observe(doc.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+  }
+
+  function handlePreviewLinkClick(link) {
+    const href = link.getAttribute('href') || '';
+    if (!href) return;
+    if (href.startsWith('#')) {
+      // In-document anchor — scroll within the iframe
+      const doc = ES.state.doc;
+      const target = doc.getElementById(href.slice(1)) || doc.querySelector(`a[name="${href.slice(1)}"]`);
+      if (target && typeof target.scrollIntoView === 'function') {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
+    if (/^(https?:)?\/\//i.test(href) || href.startsWith('mailto:') || href.startsWith('tel:')) {
+      // External — open in a new tab so the editor isn't replaced
+      window.open(href, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    // Relative URLs: in a site folder, a link to another page in the folder
+    // opens that page in the editor. Otherwise ignored (there's nothing to
+    // resolve them against).
+    if (window.Site && window.Site.active()) {
+      const path = window.Site.resolveFromPage(href.split('#')[0].split('?')[0]);
+      const pages = window.Site.listPages();
+      const target = path && (pages.includes(path) ? path
+        : pages.find(p => p === path.replace(/\/?$/, '/index.html').replace(/^\//, '')));
+      if (target) window.Site.openPage(target);
+    }
+  }
+
+  function enterTextEdit(el, mouseEvent) {
+    if (!hasTextContentOnly(el)) {
+      ES.select(el);
+      return;
+    }
+    el.setAttribute('contenteditable', 'true');
+    el.dataset.heEditing = 'true';
+    el.focus();
+    const onBlur = () => {
+      el.removeAttribute('contenteditable');
+      delete el.dataset.heEditing;
+      ES.snapshot('edit text');
+      el.removeEventListener('blur', onBlur);
+    };
+    el.addEventListener('blur', onBlur);
+
+    const doc = el.ownerDocument;
+    const win = doc.defaultView;
+    const sel = win.getSelection();
+    sel.removeAllRanges();
+
+    // Try to place the caret at the click point and expand to the surrounding
+    // word (mimics native double-click-to-select behavior).
+    let placedAtClick = false;
+    if (mouseEvent) {
+      const x = mouseEvent.clientX, y = mouseEvent.clientY;
+      let range = null;
+      if (typeof doc.caretRangeFromPoint === 'function') {
+        range = doc.caretRangeFromPoint(x, y);
+      } else if (typeof doc.caretPositionFromPoint === 'function') {
+        const pos = doc.caretPositionFromPoint(x, y);
+        if (pos) {
+          range = doc.createRange();
+          range.setStart(pos.offsetNode, pos.offset);
+          range.collapse(true);
+        }
+      }
+      if (range && el.contains(range.startContainer)) {
+        sel.addRange(range);
+        try {
+          sel.modify('move', 'backward', 'word');
+          sel.modify('extend', 'forward', 'word');
+        } catch (_) { /* Firefox/Safari may not support modify; caret stays where it is */ }
+        placedAtClick = true;
+      }
+    }
+    if (!placedAtClick) {
+      const range = doc.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.addRange(range);
+    }
+  }
+
+  // An element is text-editable if it has no element children, OR if all of
+  // its element children are inline (a, strong, em, span, br, code, …).
+  // This is the practical definition of "the user can type into this": a
+  // <p>Hello <strong>world</strong>!</p> should still enter edit mode.
+  const INLINE_TAGS = new Set([
+    'a','abbr','b','bdi','bdo','br','cite','code','data','dfn','em','i',
+    'img','input','kbd','label','mark','q','s','samp','small','span',
+    'strong','sub','sup','time','u','var','wbr'
+  ]);
+  // Tags that themselves are not meaningful text-edit surfaces even if
+  // empty (containers/structural). Click selects them; never enter
+  // contenteditable on them.
+  const NON_EDITABLE_TAGS = new Set([
+    'html','head','body','script','style','meta','link','title','base',
+    'iframe','video','audio','canvas','svg','source','track'
+  ]);
+  function hasTextContentOnly(el) {
+    if (!el) return false;
+    const tag = el.tagName && el.tagName.toLowerCase();
+    if (NON_EDITABLE_TAGS.has(tag)) return false;
+    for (const child of el.children) {
+      const childTag = child.tagName.toLowerCase();
+      if (!INLINE_TAGS.has(childTag)) return false;
+    }
+    return true;
+  }
+
+  function showHoverBox(el) {
+    const rect = relRect(el);
+    if (!rect) { hideHoverBox(); return; }
+    hoverBox.hidden = false;
+    Object.assign(hoverBox.style, {
+      left: rect.left + 'px',
+      top: rect.top + 'px',
+      width: rect.width + 'px',
+      height: rect.height + 'px',
+    });
+  }
+  function hideHoverBox() { hoverBox.hidden = true; }
+
+  function isOversized(el) {
+    const r = el.getBoundingClientRect();
+    const view = el.ownerDocument.defaultView;
+    const area = r.width * r.height;
+    const vw = view.innerWidth, vh = view.innerHeight;
+    return area > (vw * vh * 0.7);
+  }
+
+  function relRect(el) {
+    if (!el || !el.getBoundingClientRect) return null;
+    const r = el.getBoundingClientRect();          // iframe-local
+    const ifr = iframe.getBoundingClientRect();    // iframe in parent
+    const cf = canvasFrame.getBoundingClientRect();// canvas-frame in parent
+    return {
+      left: (ifr.left - cf.left) + r.left,
+      top: (ifr.top - cf.top) + r.top,
+      width: r.width,
+      height: r.height,
+    };
+  }
+
+  function updateOverlay() {
+    const sel = ES.state.selected;
+    if (!sel || isPreview) {
+      overlay.hidden = true;
+      return;
+    }
+    overlay.hidden = false;
+    const rect = relRect(sel);
+    if (!rect) {
+      overlay.hidden = true;
+      return;
+    }
+    Object.assign(selBox.style, {
+      left: rect.left + 'px',
+      top: rect.top + 'px',
+      width: rect.width + 'px',
+      height: rect.height + 'px',
+    });
+    const label = describe(sel);
+    selLabel.textContent = label;
+    selLabel.style.left = rect.left + 'px';
+    selLabel.style.top = (rect.top - 22) + 'px';
+    if (rect.top - 22 < 0) {
+      selLabel.style.top = rect.top + 'px';
+    }
+
+    // Context class — adds table/list helper buttons to the toolbar
+    const ctx = selectionContext(sel);
+    selToolbar.classList.toggle('ctx-table', ctx === 'table');
+    selToolbar.classList.toggle('ctx-list', ctx === 'list');
+
+    // Toolbar above selection (or below if near top); clamp horizontally
+    requestAnimationFrame(() => {
+      const tbRect = selToolbar.getBoundingClientRect();
+      const tbW = tbRect.width || 200;
+      const tbH = tbRect.height || 32;
+      const frameRect = canvasFrame.getBoundingClientRect();
+      const tbTop = rect.top - tbH - 8;
+      const useBelow = tbTop < 0;
+      const left = Math.max(4, Math.min(rect.left + rect.width - tbW, frameRect.width - tbW - 4));
+      selToolbar.style.left = left + 'px';
+      selToolbar.style.top = (useBelow ? rect.top + rect.height + 6 : tbTop) + 'px';
+    });
+  }
+
+  function describe(el) {
+    let s = el.tagName.toLowerCase();
+    if (el.id) s += '#' + el.id;
+    if (el.classList && el.classList.length) s += '.' + Array.from(el.classList).slice(0, 2).join('.');
+    return s;
+  }
+
+  function handleToolbarAction(action) {
+    const sel = ES.state.selected;
+    if (!sel) return;
+    if (action === 'delete') deleteSelected();
+    else if (action === 'duplicate') duplicateSelected();
+    else if (action === 'parent') {
+      if (sel.parentElement && sel.parentElement !== ES.state.doc.documentElement) ES.select(sel.parentElement);
+    }
+    else if (action === 'move-up') moveSelected(-1);
+    else if (action === 'move-down') moveSelected(1);
+    else if (action === 'row-before') tableAddRow(sel, false);
+    else if (action === 'row-after')  tableAddRow(sel, true);
+    else if (action === 'col-before') tableAddCol(sel, false);
+    else if (action === 'col-after')  tableAddCol(sel, true);
+    else if (action === 'row-delete') tableDeleteRow(sel);
+    else if (action === 'col-delete') tableDeleteCol(sel);
+    else if (action === 'li-before')  listAddItem(sel, false);
+    else if (action === 'li-after')   listAddItem(sel, true);
+  }
+
+  // ---- Table helpers ----
+  function findRow(el) { return el && el.closest && el.closest('tr'); }
+  function findTable(el) { return el && el.closest && el.closest('table'); }
+  function cellIndex(td) {
+    // td.cellIndex exists for table cells; fall back to childIndex
+    if (typeof td.cellIndex === 'number' && td.cellIndex >= 0) return td.cellIndex;
+    return Array.prototype.indexOf.call(td.parentElement.children, td);
+  }
+  function tableAddRow(el, after) {
+    const tr = findRow(el) || (findTable(el) && findTable(el).querySelector('tr'));
+    if (!tr) return;
+    const newRow = tr.cloneNode(true);
+    Array.from(newRow.children).forEach(c => { c.textContent = ''; });
+    if (after) tr.parentNode.insertBefore(newRow, tr.nextSibling);
+    else tr.parentNode.insertBefore(newRow, tr);
+    ES.snapshot('add row');
+    ES.select(newRow.children[0] || newRow);
+  }
+  function tableAddCol(el, after) {
+    const table = findTable(el);
+    if (!table) return;
+    let idx = 0;
+    if (el.tagName === 'TD' || el.tagName === 'TH') idx = cellIndex(el);
+    const rows = table.querySelectorAll('tr');
+    rows.forEach(row => {
+      const ref = row.children[idx];
+      if (!ref) {
+        const cell = ES.state.doc.createElement(row.parentElement && row.parentElement.tagName === 'THEAD' ? 'th' : 'td');
+        row.appendChild(cell);
+        return;
+      }
+      const cell = ref.cloneNode(false);
+      cell.textContent = '';
+      if (after) row.insertBefore(cell, ref.nextSibling);
+      else row.insertBefore(cell, ref);
+    });
+    ES.snapshot('add column');
+  }
+  function tableDeleteRow(el) {
+    const tr = findRow(el);
+    if (!tr) return;
+    const next = tr.nextElementSibling || tr.previousElementSibling;
+    tr.remove();
+    ES.snapshot('delete row');
+    if (next && next.children[0]) ES.select(next.children[0]);
+    else ES.deselect();
+  }
+  function tableDeleteCol(el) {
+    const table = findTable(el);
+    if (!table || (el.tagName !== 'TD' && el.tagName !== 'TH')) return;
+    const idx = cellIndex(el);
+    table.querySelectorAll('tr').forEach(row => {
+      if (row.children[idx]) row.children[idx].remove();
+    });
+    ES.snapshot('delete column');
+    ES.deselect();
+  }
+
+  // ---- List helpers ----
+  function listAddItem(el, after) {
+    const li = el.closest && el.closest('li');
+    if (!li) return;
+    const newLi = li.cloneNode(true);
+    newLi.textContent = 'Item';
+    if (after) li.parentNode.insertBefore(newLi, li.nextSibling);
+    else li.parentNode.insertBefore(newLi, li);
+    ES.snapshot('add list item');
+    ES.select(newLi);
+  }
+
+  function selectionContext(el) {
+    if (!el || !el.matches) return null;
+    // Only show structural helpers when the selection IS a table/list
+    // element — not for arbitrary descendants (e.g. a <p> inside a <td>),
+    // which is too noisy and triggers on layout-tables.
+    if (el.matches('table, thead, tbody, tfoot, tr, td, th, caption, colgroup, col')) return 'table';
+    if (el.matches('ul, ol, li')) return 'list';
+    return null;
+  }
+
+  function deleteSelected() {
+    const sel = ES.state.selected;
+    if (!sel || !sel.parentElement) return;
+    if (sel === ES.state.doc.body || sel === ES.state.doc.documentElement) return;
+    const next = sel.nextElementSibling || sel.previousElementSibling || sel.parentElement;
+    sel.remove();
+    ES.snapshot('delete');
+    if (next) ES.select(next);
+    else ES.deselect();
+  }
+
+  function duplicateSelected() {
+    const sel = ES.state.selected;
+    if (!sel || !sel.parentElement) return;
+    if (sel === ES.state.doc.body || sel === ES.state.doc.documentElement) return;
+    const clone = sel.cloneNode(true);
+    sel.parentElement.insertBefore(clone, sel.nextSibling);
+    ES.snapshot('duplicate');
+    ES.select(clone);
+  }
+
+  function moveSelected(dir) {
+    const sel = ES.state.selected;
+    if (!sel || !sel.parentElement) return;
+    if (dir < 0) {
+      const prev = sel.previousElementSibling;
+      if (prev) sel.parentElement.insertBefore(sel, prev);
+    } else {
+      const next = sel.nextElementSibling;
+      if (next) sel.parentElement.insertBefore(next, sel);
+    }
+    ES.snapshot('move');
+    updateOverlay();
+  }
+
+  // ---- Drop handling ----
+  let lastDropTarget = null; // { el, position: 'before'|'after'|'inside' }
+
+  // A drag from outside the editor carrying files or a URL (not one of our
+  // own block/tree drags, and not an image dragged around inside the canvas).
+  function isExternalDrag(e) {
+    if (internalNativeDrag || !e.dataTransfer) return false;
+    const types = Array.from(e.dataTransfer.types || []);
+    return types.includes('Files') || types.includes('text/uri-list');
+  }
+
+  function externalDrop(e) {
+    const dt = e.dataTransfer;
+    const files = Array.from(dt.files || []);
+    const uri = (dt.getData('text/uri-list') || '').split(/\r?\n/).find(l => l && !l.startsWith('#')) || '';
+    const target = lastDropTarget;
+    hideDropIndicator();
+    lastDropTarget = null;
+    if (!window.Assets) return;
+    const images = files.filter(f => window.Assets.isImageFile(f));
+    if (images.length) { window.Assets.insertFiles(images, target); return; }
+    const html = files.find(f => /\.html?$/i.test(f.name));
+    if (html) {
+      window.FileOps.confirmDiscard().then(ok => ok && window.FileOps.importFile(html));
+      return;
+    }
+    if (files.length) {
+      window.Assets.toast(`Can't insert ${files[0].name}. Only images can be dropped onto the page.`, 'warn');
+      return;
+    }
+    if (uri) window.Assets.insertUrl(uri, target);
+  }
+
+  function updateDropTarget(clientX, clientY, external) {
+    const doc = ES.state.doc;
+    if (!doc) return;
+    const fr = iframe.getBoundingClientRect();
+    const iframeX = clientX - fr.left;
+    const iframeY = clientY - fr.top;
+    if (iframeX < 0 || iframeY < 0 || iframeX > fr.width || iframeY > fr.height) {
+      // Outside iframe — try body
+      lastDropTarget = { el: doc.body, position: 'inside' };
+      showDropIndicator(doc.body, 'inside');
+      return;
+    }
+    const target = doc.elementFromPoint(iframeX, iframeY);
+    if (!target || target === doc.documentElement) {
+      lastDropTarget = { el: doc.body, position: 'inside' };
+      showDropIndicator(doc.body, 'inside');
+      return;
+    }
+    // Don't drop on the moving element itself
+    if (dragData && dragData.type === 'move' && dragData.element &&
+        (dragData.element === target || dragData.element.contains(target))) {
+      hideDropIndicator();
+      lastDropTarget = null;
+      return;
+    }
+    const rect = target.getBoundingClientRect();
+    const localY = iframeY - rect.top;
+    const localX = iframeX - rect.left;
+    let position;
+    if (external && target.tagName === 'IMG') {
+      // Dropping an image onto an image replaces it.
+      position = 'inside';
+    } else if (canContain(target)) {
+      // Use thirds: top third = before, middle = inside, bottom = after
+      if (localY < rect.height / 3) position = 'before';
+      else if (localY > rect.height * 2 / 3) position = 'after';
+      else position = 'inside';
+    } else {
+      // Inline-ish — left or right half
+      position = localY < rect.height / 2 ? 'before' : 'after';
+    }
+    lastDropTarget = { el: target, position };
+    showDropIndicator(target, position);
+  }
+
+  function canContain(el) {
+    const tag = el.tagName.toLowerCase();
+    const voidTags = ['img','input','br','hr','meta','link','source','area','base','col','embed','param','track','wbr'];
+    if (voidTags.includes(tag)) return false;
+    return true;
+  }
+
+  function showDropIndicator(el, position) {
+    const rect = relRect(el);
+    if (!rect) { hideDropIndicator(); return; }
+    dropIndicator.hidden = false;
+    dropIndicator.classList.remove('vertical', 'inside');
+    if (position === 'inside') {
+      dropIndicator.classList.add('inside');
+      Object.assign(dropIndicator.style, {
+        left: rect.left + 'px',
+        top: rect.top + 'px',
+        width: rect.width + 'px',
+        height: rect.height + 'px',
+      });
+    } else if (position === 'before') {
+      Object.assign(dropIndicator.style, {
+        left: rect.left + 'px',
+        top: rect.top + 'px',
+        width: rect.width + 'px',
+        height: '2px',
+      });
+    } else {
+      Object.assign(dropIndicator.style, {
+        left: rect.left + 'px',
+        top: (rect.top + rect.height - 2) + 'px',
+        width: rect.width + 'px',
+        height: '2px',
+      });
+    }
+  }
+
+  function hideDropIndicator() { dropIndicator.hidden = true; }
+
+  function handleDrop(clientX, clientY) {
+    if (!dragData || !lastDropTarget) { clearDragData(); return; }
+    const doc = ES.state.doc;
+    const { el, position } = lastDropTarget;
+
+    let inserted = null;
+    if (dragData.type === 'block') {
+      const tpl = doc.createElement('template');
+      tpl.innerHTML = dragData.html.trim();
+      const frag = tpl.content;
+      inserted = frag.firstElementChild;
+      if (!inserted) { clearDragData(); return; }
+      insertElement(inserted, el, position);
+    } else if (dragData.type === 'move' && dragData.element) {
+      const moving = dragData.element;
+      if (moving === el || moving.contains(el)) { clearDragData(); return; }
+      insertElement(moving, el, position);
+      inserted = moving;
+    } else if (dragData.type === 'snippet') {
+      const tpl = doc.createElement('template');
+      tpl.innerHTML = dragData.html.trim();
+      const frag = tpl.content;
+      inserted = frag.firstElementChild;
+      if (!inserted) { clearDragData(); return; }
+      insertElement(inserted, el, position);
+    }
+    ES.snapshot('insert');
+    clearDragData();
+    if (inserted) ES.select(inserted);
+  }
+
+  function insertElement(node, target, position) {
+    if (position === 'before') {
+      target.parentElement.insertBefore(node, target);
+    } else if (position === 'after') {
+      target.parentElement.insertBefore(node, target.nextSibling);
+    } else {
+      target.appendChild(node);
+    }
+  }
+
+  function setPreview(p) {
+    isPreview = p;
+    if (p) {
+      hideHoverBox();
+      overlay.hidden = true;
+    } else {
+      updateOverlay();
+    }
+  }
+
+  function setDevice(d) {
+    canvasFrame.dataset.device = d;
+    requestAnimationFrame(updateOverlay);
+  }
+
+  return {
+    init, loadHtml, setDragData, clearDragData, getDragData, updateOverlay,
+    deleteSelected, duplicateSelected, moveSelected, setPreview, setDevice,
+    insertElement, hideDropIndicator,
+  };
+})();

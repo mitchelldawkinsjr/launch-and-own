@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interactive HTML Editor & Renderer — Free Visual HTML Editor in Your Browser</title>
+<meta name="description" content="Free interactive HTML editor and renderer. Drop in any .html file, edit visually with drag-and-drop, and save back to disk live — no signup, no upload, runs entirely in your browser.">
+<meta name="keywords" content="interactive html editor, html renderer, online html editor, visual html editor, browser html editor, free html editor, drag and drop html editor, live html editor, edit html online, wysiwyg html editor, html preview tool, html sandbox, code editor, web page editor">
+<meta name="author" content="mncoleman">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="google-site-verification" content="R8OAmagXr3mchZllRikUothamF8s5m4F8hNUoG_P9b0">
+<link rel="canonical" href="https://html.mncoleman.com/">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://html.mncoleman.com/">
+<meta property="og:title" content="Interactive HTML Editor & Renderer — Free Visual HTML Editor in Your Browser">
+<meta property="og:description" content="Drop in any .html file and edit it visually — drag-and-drop blocks, live preview, save back to disk. 100% free, runs entirely in your browser.">
+<meta property="og:image" content="https://html.mncoleman.com/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Interactive HTML Editor & Renderer — free visual HTML editor in your browser">
+<meta property="og:site_name" content="HTML Editor">
+<meta property="og:locale" content="en_US">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Interactive HTML Editor & Renderer">
+<meta name="twitter:description" content="Free visual HTML editor in your browser. Drag, drop, edit, and save back to disk — no signup.">
+<meta name="twitter:image" content="https://html.mncoleman.com/og-image.png">
+
+<!-- JSON-LD: SoftwareApplication -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "HTML Editor",
+  "alternateName": ["Interactive HTML Editor", "Visual HTML Renderer", "Online HTML Editor"],
+  "url": "https://html.mncoleman.com/",
+  "description": "Free interactive HTML editor and renderer that runs entirely in your browser. Drop in any .html file, edit it visually with drag-and-drop, and save back to your local disk live — no signup, no upload, no server.",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "HTML Editor",
+  "operatingSystem": "Any (Web Browser)",
+  "browserRequirements": "Requires a modern browser. Live local file editing requires Chrome, Edge, or Arc (File System Access API).",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "creator": {
+    "@type": "Person",
+    "name": "Matthew Coleman",
+    "url": "https://mncoleman.com/"
+  },
+  "softwareVersion": "1.0",
+  "license": "https://opensource.org/licenses/MIT",
+  "featureList": [
+    "Visual drag-and-drop HTML editing",
+    "Live local file editing via File System Access API",
+    "40+ pre-built component blocks",
+    "DOM tree navigation panel",
+    "Visual style, attribute, and raw HTML editors",
+    "Inline text editing with double-click",
+    "Undo/redo with full document snapshots",
+    "Autosave to localStorage",
+    "Reusable snippets",
+    "Device preview (desktop / tablet / mobile)",
+    "Dark and light themes",
+    "Diff vs. disk and diff vs. git HEAD",
+    "Source-code mode with CodeMirror",
+    "Open a whole site folder: linked CSS, images and pages render on the canvas",
+    "Add local images by drag-and-drop, paste, or upload"
+  ]
+}
+</script>
+
+<!-- JSON-LD: FAQ -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is an interactive HTML editor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "An interactive HTML editor lets you edit a web page visually — clicking elements, dragging blocks, and changing styles — instead of writing raw HTML by hand. This editor runs entirely in your browser, renders your HTML live, and saves changes back to your local file."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is this HTML editor free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. It is 100% free, open source (MIT license), with no signup, no upload, and no server. Your files never leave your computer."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which browsers support live local file editing?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Live local file editing uses the File System Access API, supported by Chrome, Edge, Arc, and other Chromium-based browsers. Safari and Firefox fall back to import/export."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I add my own images?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Drag image files onto the page, paste one with Cmd+V, or select an image and click Upload in the Style panel. With a site folder open, images are copied into the folder and linked with a relative path; with a single file they are embedded in the HTML."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I edit HTML without writing code?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Click any element to select it, drag blocks from the sidebar to add new content, double-click text to edit it inline, and use the properties panel to change typography, layout, spacing, background, borders, and effects — no code required."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is this different from VS Code or a plain text editor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Plain text editors show you code. This is a visual HTML editor and renderer — it shows you the rendered page and lets you edit it directly, more like Webflow or Pinegrow but free and browser-based. You can still drop into a source-code mode (CodeMirror) when you want byte-level control."
+      }
+    }
+  ]
+}
+</script>
+
+<link rel="stylesheet" href="css/editor.css">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+<!-- Importmap for lazy-loaded ESM modules. Pinned versions + SRI on the
+     entry-point URLs so esm.sh can't silently swap content underneath us.
+     (Transitive imports from esm.sh still hit network without SRI; that
+     would require vendoring the full dep tree.) -->
+<script type="importmap">
+{
+  "imports": {
+    "codemirror":                  "https://esm.sh/codemirror@6.0.1",
+    "@codemirror/lang-html":       "https://esm.sh/@codemirror/lang-html@6.4.9",
+    "@codemirror/theme-one-dark":  "https://esm.sh/@codemirror/theme-one-dark@6.1.2",
+    "@codemirror/state":           "https://esm.sh/@codemirror/state@6.4.1",
+    "@codemirror/view":            "https://esm.sh/@codemirror/view@6.26.3",
+    "diff":                        "https://esm.sh/diff@5.2.0",
+    "isomorphic-git":              "https://esm.sh/isomorphic-git@1.27.2?bundle"
+  },
+  "integrity": {
+    "https://esm.sh/codemirror@6.0.1":                 "sha384-YL2izXY6rDPj5rGRQ8rrOQjnj1q2ySpPnWQtiN5oLfIedVh/qsj8KEB61zL0afzp",
+    "https://esm.sh/@codemirror/lang-html@6.4.9":      "sha384-WNPN60/yKDx8LBH1bCO5R7tMvsjBfkg+64M4mCaxXH3HNV4NZufhF22bbThsYVUh",
+    "https://esm.sh/@codemirror/theme-one-dark@6.1.2": "sha384-yVtuYi63vy0cu7FtL7p0eg8sWO0UTayB2JG0+myxZNLNxnTwWaACpHWq81limpbI",
+    "https://esm.sh/@codemirror/state@6.4.1":          "sha384-TI1NDxu7gkE6pcZtsv4jkPNwxVmpgz5Vd8N6EHoEEvi3xiobzkaLSmdCpgg3NsfO",
+    "https://esm.sh/@codemirror/view@6.26.3":          "sha384-H7Mafy3thCoI/VlMWH8fEyOHS+SVQQDtSHPyx2Ay/nPvb6S84rKEibu95Nti3LMj",
+    "https://esm.sh/diff@5.2.0":                       "sha384-vPdKsMM4TALgN7RdcomEDT//QCeuLRGEVF7rmCrUSeZ0tFXFYeuAn9B3bE53NIXW",
+    "https://esm.sh/isomorphic-git@1.27.2?bundle":     "sha384-1mDCEwFlfKV4sHh9dF1KeeqC8ptVonTTJHVhpohfBQj/x46QtrGfuuWgATtCg4KG"
+  }
+}
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%230a0a0a'/%3E%3Ctext x='50' y='66' font-family='Roboto,Arial,sans-serif' font-size='52' font-weight='700' fill='%23fafafa' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- Empty state when no document loaded -->
+<div id="empty-state" class="empty-state">
+  <div class="empty-inner">
+    <div class="empty-logo"><i data-lucide="code-2"></i></div>
+    <h1><strong>Interactive HTML Editor</strong> &amp; Renderer</h1>
+    <p class="empty-tagline">A free visual HTML editor that runs in your browser. Drop in any <code>.html</code> file, edit it like a designer — drag, drop, click, type — and save changes back to your local disk live. No signup. No upload. No server.</p>
+    <div class="empty-actions">
+      <button class="btn btn-primary" id="empty-open-local" title="Edit a file on your disk with live save">
+        <kbd class="btn-shortcut">A</kbd>
+        <i data-lucide="folder-open" class="icon"></i>
+        <span>Open Local File</span>
+        <small>Live link — saves to disk</small>
+      </button>
+      <button class="btn" id="empty-open-folder" title="Open a whole website folder: linked CSS and images show up, new images are saved into the folder">
+        <kbd class="btn-shortcut">D</kbd>
+        <i data-lucide="folder-tree" class="icon"></i>
+        <span>Open Site Folder</span>
+        <small>CSS, images &amp; pages work</small>
+      </button>
+      <button class="btn" id="empty-import">
+        <kbd class="btn-shortcut">B</kbd>
+        <i data-lucide="upload" class="icon"></i>
+        <span>Import HTML</span>
+        <small>Read-only file picker</small>
+      </button>
+      <button class="btn" id="empty-new">
+        <kbd class="btn-shortcut">C</kbd>
+        <i data-lucide="file-plus" class="icon"></i>
+        <span>Start Blank</span>
+        <small>Empty page</small>
+      </button>
+    </div>
+    <div class="empty-drop-hint"><i data-lucide="mouse-pointer-2" class="hint-icon"></i> or drop an .html file or a site folder anywhere</div>
+    <div class="empty-shortcuts">
+      <kbd>⌘S</kbd> save · <kbd>⌘Z</kbd> undo · <kbd>⌘D</kbd> duplicate · <kbd>Delete</kbd> remove · <kbd>Esc</kbd> deselect
+    </div>
+    <div class="browser-warning" id="browser-warning" hidden>
+      Your browser doesn't support live local file editing (Safari/Firefox). Import/Export still works.
+    </div>
+  </div>
+  <a id="empty-version-chip" class="version-chip empty-version-chip" href="#" target="_blank" rel="noopener" title="View this commit on GitHub" hidden>
+    <i data-lucide="git-commit-horizontal"></i>
+    <span class="version-text">—</span>
+  </a>
+
+  <!-- SEO content: long-form description for crawlers and curious visitors -->
+  <section class="seo-content" aria-label="About this HTML editor">
+    <div class="seo-inner">
+      <h2>The fastest way to edit HTML visually in your browser</h2>
+      <p>This is an <strong>interactive HTML editor and renderer</strong> for anyone who wants to change a web page without writing code by hand. Open any local <code>.html</code> file, see it rendered live, click an element to select it, drag a new block in from the sidebar, type to edit text, and hit <kbd>⌘S</kbd> to save the file on your disk. It's a free, open-source alternative to tools like Webflow, Pinegrow, and BlocsApp — minus the paywall and minus the server round-trip.</p>
+
+      <h2>Features</h2>
+      <ul class="seo-features">
+        <li><strong>Visual HTML editing</strong> — click any element, drag to reorder, double-click text to edit inline.</li>
+        <li><strong>Live local file editing</strong> — saves straight back to your disk via the File System Access API (Chrome, Edge, Arc).</li>
+        <li><strong>40+ pre-built blocks</strong> — typography, layout, components, media, lists, forms, navigation, tables.</li>
+        <li><strong>DOM tree panel</strong> — collapsible tree with drag-reorder and click-to-select.</li>
+        <li><strong>Style, attribute, and raw HTML editors</strong> for every element.</li>
+        <li><strong>Source mode</strong> with CodeMirror for byte-level control.</li>
+        <li><strong>Undo, redo, autosave, snippets, recent files, device preview, dark/light themes.</strong></li>
+        <li><strong>Diff vs. disk and diff vs. git HEAD</strong> — see exactly what changed before you save.</li>
+        <li><strong>100% private</strong> — your file never leaves your computer. No upload. No account. No tracking.</li>
+      </ul>
+
+      <h2>Who it's for</h2>
+      <p>Designers tweaking a landing page. Developers prototyping a layout. Marketers fixing copy on a static site. Students learning HTML by manipulating it visually. Anyone who needs a quick <strong>online HTML editor</strong> or <strong>HTML renderer</strong> without installing software.</p>
+
+      <h2>Frequently asked questions</h2>
+      <details>
+        <summary>What is an interactive HTML editor?</summary>
+        <p>An interactive HTML editor lets you edit a web page visually instead of writing raw HTML. You see the rendered page, click to select elements, drag to rearrange them, and the underlying HTML updates as you go.</p>
+      </details>
+      <details>
+        <summary>Is this HTML editor really free?</summary>
+        <p>Yes — 100% free, MIT licensed, open source. There is no paid tier. The code is on <a href="https://github.com/mncoleman/html-editor" rel="noopener">GitHub</a>.</p>
+      </details>
+      <details>
+        <summary>Does it work offline?</summary>
+        <p>The first page load needs internet (it lazy-loads CodeMirror from a CDN for source mode). After that, visual editing of local files works without a connection.</p>
+      </details>
+      <details>
+        <summary>Which browsers are supported?</summary>
+        <p>Any modern browser can use the visual editor with import/export. Live "save to disk" requires Chrome, Edge, Arc, or another Chromium-based browser with the File System Access API.</p>
+      </details>
+      <details>
+        <summary>How do I add my own images?</summary>
+        <p>Drag image files from Finder or Explorer onto the page, paste one with <kbd>⌘V</kbd>, or select an image and click <em>Upload</em> in the Style panel. Double-clicking an image on the page also replaces it. If you opened a <strong>site folder</strong>, new images are copied into it (into an existing <code>images/</code> or <code>img/</code> folder when there is one) and linked with a relative path. With a single file, images are embedded in the HTML, and big photos can be shrunk first.</p>
+      </details>
+      <details>
+        <summary>My page shows up unstyled or with broken images. Why?</summary>
+        <p>When you open a single <code>.html</code> file, the editor can't see the CSS, images, and fonts sitting next to it on your disk. Use <strong>Open Site Folder</strong> and pick the folder that holds your site. The page then renders with its stylesheets and images, links between pages open in the editor, and the new-tab preview runs your scripts.</p>
+      </details>
+      <details>
+        <summary>Can I edit a whole website, not just one page?</summary>
+        <p>Yes. Open the site folder, then switch pages from the <em>Assets</em> tab, or click a link while in Preview mode. In Chrome, Edge, and Arc, saving writes straight to the files. In Safari, Firefox, and Brave the folder opens read-only and Save downloads the page.</p>
+      </details>
+      <details>
+        <summary>Do my files get uploaded anywhere?</summary>
+        <p>No. Everything runs locally in your browser. The editor is a static site — there is no backend.</p>
+      </details>
+    </div>
+  </section>
+</div>
+
+<noscript>
+  <div class="noscript-fallback">
+    <h1>Interactive HTML Editor &amp; Renderer</h1>
+    <p>This is a free, browser-based visual HTML editor. To use it, please enable JavaScript.</p>
+    <p>Features include drag-and-drop visual editing, live save to your local disk, 40+ component blocks, DOM tree navigation, style and attribute editors, source mode with CodeMirror, undo/redo, autosave, device preview, and dark/light themes.</p>
+    <p>Source code: <a href="https://github.com/mncoleman/html-editor">github.com/mncoleman/html-editor</a></p>
+  </div>
+</noscript>
+
+<!-- Main editor UI -->
+<div id="editor" class="editor" hidden>
+
+  <!-- Top toolbar -->
+  <header class="toolbar">
+    <div class="toolbar-left">
+      <div class="brand">
+        <span class="brand-mark">H</span>
+        <span class="brand-text">HTML Editor</span>
+      </div>
+      <div class="mode-toggle" id="mode-toggle" role="tablist" aria-label="Editor mode">
+        <button class="mode-btn active" data-mode="visual" title="Visual editing (may normalize source formatting on save)">
+          <i data-lucide="layout-template"></i><span>Visual</span>
+        </button>
+        <button class="mode-btn" data-mode="source" title="Source editing (byte-for-byte; preserves formatting)">
+          <i data-lucide="code-2"></i><span>Source</span>
+        </button>
+      </div>
+      <div class="file-info">
+        <span id="file-name" class="file-name">untitled.html</span>
+        <span id="save-status" class="save-status" data-state="saved">Saved</span>
+      </div>
+    </div>
+
+    <div class="toolbar-center">
+      <button class="tool-btn icon-only anim-press" id="tb-undo" title="Undo (⌘Z)"><i data-lucide="undo-2"></i></button>
+      <button class="tool-btn icon-only anim-press" id="tb-redo" title="Redo (⌘⇧Z)"><i data-lucide="redo-2"></i></button>
+      <span class="divider"></span>
+      <button class="tool-btn icon-only anim-press" id="tb-duplicate" title="Duplicate (⌘D)"><i data-lucide="copy"></i></button>
+      <button class="tool-btn icon-only anim-shake" id="tb-delete" title="Delete (⌫)"><i data-lucide="trash-2"></i></button>
+      <span class="divider"></span>
+      <button class="tool-btn icon-only anim-press" id="tb-move-up" title="Move up"><i data-lucide="arrow-up"></i></button>
+      <button class="tool-btn icon-only anim-press" id="tb-move-down" title="Move down"><i data-lucide="arrow-down"></i></button>
+      <button class="tool-btn icon-only anim-press" id="tb-parent" title="Select parent"><i data-lucide="corner-left-up"></i></button>
+      <span class="divider"></span>
+      <div class="device-toggle">
+        <button class="tool-btn icon-only device-btn active" data-device="desktop" title="Desktop"><i data-lucide="monitor"></i></button>
+        <button class="tool-btn icon-only device-btn" data-device="tablet" title="Tablet"><i data-lucide="tablet"></i></button>
+        <button class="tool-btn icon-only device-btn" data-device="mobile" title="Mobile"><i data-lucide="smartphone"></i></button>
+      </div>
+      <span class="divider"></span>
+      <button class="tool-btn icon-only anim-blink" id="tb-preview" title="Toggle preview mode (P) — hides editor chrome. Scripts don't run inside the editor; use the external preview button for that."><i data-lucide="eye"></i></button>
+      <button class="tool-btn icon-only anim-press" id="tb-external-preview" title="Open current document in a new tab (scripts run)"><i data-lucide="external-link"></i></button>
+    </div>
+
+    <div class="toolbar-right">
+      <button class="tool-btn anim-press" id="tb-open" title="Open a single local .html file"><i data-lucide="folder-open"></i><span>Open</span></button>
+      <button class="tool-btn icon-only anim-press" id="tb-open-folder" title="Open a site folder: linked CSS, images and pages work, new images are copied into it"><i data-lucide="folder-tree"></i></button>
+      <button class="tool-btn icon-only anim-press" id="tb-refresh" title="Refresh from disk — pull in external changes" disabled><i data-lucide="refresh-cw"></i></button>
+      <button class="tool-btn icon-only anim-press" id="tb-diff" title="Show diff vs. file on disk" disabled><i data-lucide="git-compare-arrows"></i></button>
+      <button class="tool-btn icon-only anim-press" id="tb-git-diff" title="Show diff vs. git HEAD (asks for repo directory)" disabled><i data-lucide="git-branch"></i></button>
+      <button class="tool-btn anim-press" id="tb-import" title="Import HTML"><i data-lucide="upload"></i><span>Import</span></button>
+      <button class="tool-btn anim-press" id="tb-export" title="Export HTML"><i data-lucide="download"></i><span>Export</span></button>
+      <button class="tool-btn primary anim-press" id="tb-save" title="Save (⌘S)"><i data-lucide="save"></i><span>Save</span></button>
+      <button class="tool-btn icon-only theme-toggle" id="tb-theme" title="Toggle theme">
+        <i data-lucide="sun" class="th-sun"></i>
+        <i data-lucide="moon" class="th-moon"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Body: 3-pane -->
+  <main class="workspace">
+
+    <!-- Left sidebar -->
+    <aside class="sidebar left-sidebar">
+      <nav class="sidebar-tabs">
+        <button class="tab active" data-tab="blocks">Blocks</button>
+        <button class="tab" data-tab="tree">Tree</button>
+        <button class="tab" data-tab="assets">Assets</button>
+      </nav>
+
+      <!-- Blocks tab -->
+      <div class="tab-panel active" data-panel="blocks">
+        <input type="search" id="blocks-search" class="search-input" placeholder="Search blocks…">
+        <div id="blocks-list" class="blocks-list"></div>
+      </div>
+
+      <!-- Tree tab -->
+      <div class="tab-panel" data-panel="tree">
+        <div id="dom-tree" class="dom-tree"></div>
+      </div>
+
+      <!-- Assets tab -->
+      <div class="tab-panel" data-panel="assets">
+        <div class="assets-section" id="site-section">
+          <div id="site-none">
+            <h3>Site folder</h3>
+            <p class="hint">Open your site's folder so its CSS and images show up and new images are saved as files next to your pages.</p>
+            <button class="btn-block" id="site-open-folder">Open site folder…</button>
+            <button class="btn-block site-reopen" id="site-reopen" hidden></button>
+          </div>
+          <div id="site-open" hidden>
+            <h3 class="site-title"><i data-lucide="folder-tree"></i><span id="site-name"></span></h3>
+            <label class="site-root-row" title="The folder that “/” means on your live site. For a build output (Next.js out/, dist/, build/) pick that folder so /_next/… and /css/… links resolve.">
+              <span>Site root</span>
+              <select id="site-root"></select>
+            </label>
+            <h4 class="site-sub">Pages</h4>
+            <div id="site-pages" class="recent-list site-pages"></div>
+            <h4 class="site-sub">Images <span id="site-image-count"></span></h4>
+            <input type="search" id="site-image-filter" class="search-input" placeholder="Filter images…">
+            <div id="site-images" class="site-images"></div>
+          </div>
+          <button class="btn-block" id="site-add-images" title="Pick image files from your computer">+ Add images…</button>
+          <p class="hint site-tip">Tip: you can also drag images onto the page or paste with ⌘V. Double-click an image to replace it.</p>
+        </div>
+        <div class="assets-section">
+          <h3>Snippets</h3>
+          <p class="hint">Saved blocks of your own</p>
+          <button class="btn-block" id="save-snippet" disabled>Save selection as snippet</button>
+          <div id="snippets-list" class="snippets-list"></div>
+        </div>
+        <div class="assets-section">
+          <h3>Recent files</h3>
+          <div id="recent-list" class="recent-list"></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Canvas -->
+    <section class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas-frame" data-device="desktop">
+        <iframe id="canvas" sandbox="allow-same-origin allow-forms" title="Canvas"></iframe>
+        <div class="selection-overlay" id="selection-overlay" hidden>
+          <div class="sel-box" id="sel-box"></div>
+          <div class="sel-label" id="sel-label"></div>
+          <div class="sel-toolbar" id="sel-toolbar">
+            <button data-action="move-up" title="Move up"><i data-lucide="arrow-up"></i></button>
+            <button data-action="move-down" title="Move down"><i data-lucide="arrow-down"></i></button>
+            <button data-action="parent" title="Select parent"><i data-lucide="corner-left-up"></i></button>
+            <button data-action="duplicate" title="Duplicate"><i data-lucide="copy"></i></button>
+            <button data-action="delete" title="Delete"><i data-lucide="trash-2"></i></button>
+            <span class="sel-divider" data-context-group="table"></span>
+            <button data-action="row-before" data-context-group="table" title="Add row above"><i data-lucide="arrow-up-from-line"></i></button>
+            <button data-action="row-after"  data-context-group="table" title="Add row below"><i data-lucide="arrow-down-from-line"></i></button>
+            <button data-action="col-before" data-context-group="table" title="Add column before"><i data-lucide="arrow-left-from-line"></i></button>
+            <button data-action="col-after"  data-context-group="table" title="Add column after"><i data-lucide="arrow-right-from-line"></i></button>
+            <button data-action="row-delete" data-context-group="table" title="Delete row"><i data-lucide="rows-3"></i></button>
+            <button data-action="col-delete" data-context-group="table" title="Delete column"><i data-lucide="columns-3"></i></button>
+            <span class="sel-divider" data-context-group="list"></span>
+            <button data-action="li-before" data-context-group="list" title="Add item above"><i data-lucide="arrow-up-from-line"></i></button>
+            <button data-action="li-after"  data-context-group="list" title="Add item below"><i data-lucide="arrow-down-from-line"></i></button>
+          </div>
+          <div class="hover-box" id="hover-box" hidden></div>
+          <div class="drop-indicator" id="drop-indicator" hidden></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Source mode pane -->
+    <section class="source-wrap" id="source-wrap" hidden>
+      <div class="source-pane" id="source-pane"></div>
+    </section>
+
+    <!-- Right sidebar (properties) -->
+    <aside class="sidebar right-sidebar">
+      <nav class="sidebar-tabs">
+        <button class="tab active" data-tab="style">Style</button>
+        <button class="tab" data-tab="attrs">Attributes</button>
+        <button class="tab" data-tab="html">HTML</button>
+      </nav>
+
+      <div class="tab-panel active" data-panel="style">
+        <div id="props-style" class="props"></div>
+      </div>
+      <div class="tab-panel" data-panel="attrs">
+        <div id="props-attrs" class="props"></div>
+      </div>
+      <div class="tab-panel" data-panel="html">
+        <div id="props-html" class="props"></div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Status bar -->
+  <footer class="statusbar">
+    <a id="version-chip" class="version-chip" href="#" target="_blank" rel="noopener" title="View this commit on GitHub" hidden>
+      <i data-lucide="git-commit-horizontal"></i>
+      <span class="version-text">—</span>
+    </a>
+    <span id="status-breadcrumbs" class="breadcrumbs"></span>
+    <span class="status-right">
+      <span id="status-message"></span>
+      <span class="autosave">Autosaved <span id="autosave-time">—</span></span>
+    </span>
+  </footer>
+
+</div>
+
+<!-- Hidden file inputs -->
+<input type="file" id="file-input" accept=".html,.htm" hidden>
+<input type="file" id="folder-input" webkitdirectory multiple hidden>
+
+<!-- Floating exit-preview button -->
+<button id="exit-preview-btn" class="exit-preview-btn" hidden>← Exit preview (P or Esc)</button>
+
+<!-- Toast container -->
+<div id="toasts" class="toasts"></div>
+
+<!-- Scripts -->
+<script src="js/dialog.js"></script>
+<script src="js/state.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/canvas.js"></script>
+<script src="js/tree.js"></script>
+<script src="js/properties.js"></script>
+<script src="js/blocks-panel.js"></script>
+<script src="js/source.js"></script>
+<script src="js/mode-switch.js"></script>
+<script src="js/site.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/file.js"></script>
+<script src="js/diff.js"></script>
+<script src="js/git.js"></script>
+<script src="js/keyboard.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/version.js"></script>
+<script src="js/launch-own-host.js"></script>
+
+</body>
+</html>
