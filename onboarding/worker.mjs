@@ -67,8 +67,8 @@ const redirect=(path,setCookie)=>{
 };
 // opts are UI-only (pageShell); never pass them as the headers argument.
 const view=(title,body,status=200,headers=textHeaders,opts={})=>new Response(pageShell({title,body,css:providerHelpCss,...opts}),{status,headers});
-const fail=(message,status=400)=>view('Setup could not continue',`<p>${escape(message)}</p><p><a href="/">Return to setup</a></p>`,status);
-const button=(action,label,csrf,extra='')=>`<form action="${action}" method="POST"><input type="hidden" name="csrf" value="${escape(csrf)}">${extra}<button type="submit">${escape(label)}</button></form>`;
+const fail=(message,status=400)=>view('That did not work',`<p>${escape(message)}</p><p>Nothing on your website was changed.</p><p><a href="/toolkit">Your website toolkit</a> · <a href="/">Setup</a></p>`,status);
+const button=(action,label,csrf,extra='',{secondary=false}={})=>`<form action="${action}" method="POST"><input type="hidden" name="csrf" value="${escape(csrf)}">${extra}<button type="submit"${secondary?' class="btn-secondary"':''}>${escape(label)}</button></form>`;
 function cookies(request){
   const output={};for(const part of (request.headers.get('cookie')||'').split(';')){
     const cut=part.indexOf('=');if(cut>0)output[part.slice(0,cut).trim()]=part.slice(cut+1).trim();
@@ -274,7 +274,7 @@ async function home(env,current,notice){
     <button type="submit">Upload and preview</button></form></section>`:'';
   const next=ready?
     '<section><h2>Create a simple website</h2><p>Fill in your business details, then preview the page. You will approve it in a separate step before anything goes live. After a verified launch, <strong>Your website toolkit</strong> shows recorded results and can open live account checks. Optional domain, email, and form <em>requests</em> are reviewed and stored there only—they do not change DNS, turn on mail, or create a form.</p>'+
-    button('/preview','Preview my website',current.csrf,siteFields)+'</section>':'';
+    button('/preview','Preview my website',current.csrf,siteFields,{secondary:zipEnabled})+'</section>':'';
   const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Your launches</a> · '+pagesAccessLink+'</p>':'';
   const cloudflareLine=connected
     ?(current.cloudflare_account_id?'Cloudflare connected · hosting account selected':'Cloudflare connected · choose your hosting account next')
@@ -700,7 +700,7 @@ async function review(env,current,id){
     }else{
       const accessField=pagesAccess?'<input type="hidden" name="pagesAccessId" value="'+escape(pagesAccess.access_id)+'">':'';
       const analyticsToggle=item.job_id||item.legacy_receipt_id?'':button('/review-analytics',analyticsOn?'Turn off visitor insights':'Turn on visitor insights',current.csrf,
-        launchIdField(id)+'<input type="hidden" name="analytics" value="'+(analyticsOn?'false':'true')+'">');
+        launchIdField(id)+'<input type="hidden" name="analytics" value="'+(analyticsOn?'false':'true')+'">',{secondary:true});
       controls=analyticsToggle+button('/approve',verifyExisting?'Approve and verify existing project':'Approve and create website',current.csrf,
         launchIdField(id)+accessField+'<input type="hidden" name="digest" value="'+escape(digest)+'">');
     }
@@ -733,7 +733,7 @@ async function review(env,current,id){
       const timestamp=new Date(item.next_attempt_at*1000).toISOString();
       output+=`<p>Tries so far: ${escape(item.attempts)}. Next try after <time datetime="${timestamp}">${timestamp}</time>.</p>`;
     }
-    if(status==='live')output=`<p class="pill">Your public website is live and matches what you approved</p><p><a href="${escape(website)}">${escape(website)}</a></p><p>Checked version: <code>${escape(item.expected_commit_sha)}</code></p>`;
+    if(status==='live')output=`<p class="pill">Your public website is live and matches what you approved</p><p><a href="${escape(website)}">${escape(website)}</a></p><details><summary>Technical details</summary><p>Checked version: <code>${escape(item.expected_commit_sha)}</code></p></details>`;
   }
   const source=zip?`<p>Uploaded website · ${zip.fileCount} ${zip.fileCount===1?'file':'files'} · ${Math.ceil(zip.totalBytes/1024)} KB</p>`:'';
   const shown=statusLabel[status]||status;

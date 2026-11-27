@@ -97,7 +97,7 @@ test('update status HTML leads with Open the change to publish for open PRs', ()
     escape
   });
   assert.match(html, /Open the change to publish/);
-  assert.match(html, /Publish in GitHub/);
+  assert.match(html, /Merged in GitHub/);
   assert.match(html, /https:\/\/github\.com\/tester\/esp-willow-studio\/pull\/3/);
   assert.doesNotMatch(html, /reviewable pull request/i);
 });

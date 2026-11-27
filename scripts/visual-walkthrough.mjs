@@ -40,7 +40,9 @@ function tokens() {
   const css = (el, prop) => el ? getComputedStyle(el)[prop] : '—';
   const visible = el => el && el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden';
   const h1 = document.querySelector('h1');
-  const button = [...document.querySelectorAll('main button, main .btn, button, .btn')].find(visible);
+  // The primary button (filled), so secondary buttons don't hide the house style.
+  const button = [...document.querySelectorAll('main button, main .btn, button, .btn')].filter(visible)
+    .find(el => !/^rgba?\(255, 255, 255|rgba\(0, 0, 0, 0\)/.test(getComputedStyle(el).backgroundColor));
   const link = [...document.querySelectorAll('main p a, p a')].find(visible);
   const frame = document.querySelector('main') || document.body.firstElementChild || document.body;
   return {
@@ -58,6 +60,24 @@ function tokens() {
     'Footer': document.querySelector('footer') ? 'yes' : 'no',
     'Step indicator': document.querySelector('[class*=step], ol[aria-label]') ? 'yes' : 'no'
   };
+}
+
+/** Measurable design-law checks (.claude/skills/design-laws). Runs in the page at desktop width. */
+function lawChecks() {
+  const flags = [];
+  const visible = el => el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const main = document.querySelector('main') || document.body;
+  const primary = [...main.querySelectorAll('button, .btn')].filter(visible).filter(el => {
+    const bg = getComputedStyle(el).backgroundColor;
+    return !/^rgba?\(255, 255, 255|rgba\(0, 0, 0, 0\)|transparent/.test(bg);
+  });
+  if (primary.length > 1) flags.push('Von Restorff: ' + primary.length + ' primary buttons (' + primary.slice(0, 3).map(b => b.textContent.trim().slice(0, 30)).join(' / ') + ')');
+  const text = main.innerText || '';
+  const hashes = text.match(/\b[a-f0-9]{40}\b/g) || [];
+  if (hashes.length) flags.push("Tesler: " + hashes.length + ' raw version code(s) on screen');
+  const words = text.split(/\s+/).filter(Boolean).length;
+  if (words > 450) flags.push('Cognitive load: ' + words + ' words visible');
+  return flags;
 }
 
 async function main() {
@@ -89,7 +109,7 @@ async function main() {
       .then(r => r.violations.map(v => v.id + ' ×' + v.nodes.length)).catch(() => ['axe could not run']);
     const u = new URL(page.url());
     screens.push({id, title, phase, notes, ownUi, url: u.pathname + u.search.replace(/(ticket|id|challenge_id)=[^&]+/g, '$1=…'),
-      status: page.__status ?? 200, shots, tokens: await page.evaluate(tokens), axe, console: page.__errors.splice(0)});
+      status: page.__status ?? 200, shots, tokens: await page.evaluate(tokens), laws: ownUi ? await page.evaluate(lawChecks) : [], axe, console: page.__errors.splice(0)});
     console.log('  ' + id + '  ' + u.pathname);
   }
   async function newPage() {
@@ -245,7 +265,8 @@ async function main() {
   await writeFile(join(outDir, 'report.json'), JSON.stringify(report, null, 2));
   await writeFile(join(outDir, 'index.html'), galleryHtml(report));
   console.log('\n' + screens.length + ' screens · ' + report.consistency.outliers + ' consistency outliers · ' +
-    screens.filter(s => s.axe.length).length + ' with accessibility issues · ' + problems.length + ' steps not reached');
+    screens.filter(s => s.axe.length).length + ' with accessibility issues · ' +
+    screens.filter(s => s.laws.length).length + ' with design-law flags · ' + problems.length + ' steps not reached');
   console.log('Gallery: ' + join(outDir, 'index.html'));
   if (wantOpen) execFileSync('open', [join(outDir, 'index.html')]);
 }
@@ -280,6 +301,7 @@ function galleryHtml(report) {
       ...s.axe.map(a => `<span class="flag a11y">a11y: ${esc(a)}</span>`),
       ...s.shots.filter(v => v.overflow).map(v => `<span class="flag">sideways scroll at ${v.width}px</span>`),
       ...s.console.map(c => `<span class="flag">console: ${esc(c)}</span>`),
+      ...(s.laws || []).map(l => `<span class="flag law">${esc(l)}</span>`),
       ...(s.status >= 400 ? [`<span class="flag">HTTP ${s.status}</span>`] : [])
     ].join('');
     return `<section class="card" id="${esc(s.id)}"><header><p class="phase">${esc(s.phase)} · <code>${esc(s.url)}</code></p><h2>${esc(s.id.slice(0, 2))} · ${esc(s.title)}</h2>` +
@@ -299,7 +321,7 @@ th,td{text-align:left;vertical-align:top;padding:8px 10px;border-top:1px solid v
 tr.bad td:last-child{background:var(--badbg)}td a{color:var(--bad)}
 .card{background:var(--panel);border:1px solid var(--rule);border-radius:14px;padding:16px;margin:0 0 20px;scroll-margin-top:16px}
 .card h2{margin:4px 0}.flags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.flag{background:var(--badbg);color:var(--bad);border-radius:999px;padding:3px 9px;font-size:12px}.flag.a11y{background:#fffaeb;color:#93370d}.ok{color:#067647;font-size:12px}
+.flag{background:var(--badbg);color:var(--bad);border-radius:999px;padding:3px 9px;font-size:12px}.flag.a11y{background:#fffaeb;color:#93370d}.flag.law{background:#f4f3ff;color:#5925dc}.ok{color:#067647;font-size:12px}
 .shots{display:grid;gap:12px;grid-template-columns:1fr 1.6fr 3fr;margin-top:12px;align-items:start}
 figure{margin:0}img{width:100%;border:1px solid var(--rule);border-radius:8px;background:#fff}figcaption{font-size:12px;color:var(--muted)}
 @media(max-width:900px){.layout{grid-template-columns:1fr}nav{position:static;max-height:none}.shots{grid-template-columns:1fr}}

@@ -184,7 +184,7 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       '<form action="/site-update-approve" method="POST"><input type="hidden" name="csrf" value="'+escape(current.csrf)+'">'+
         '<input type="hidden" name="ticket" value="'+escape(raw)+'">'+
         '<button type="submit" name="action" value="publish">Approve and publish</button> '+
-        '<button type="submit" name="action" value="pr">Open a pull request instead</button></form>'+
+        '<button type="submit" name="action" value="pr" class="btn-secondary">Open a pull request instead</button></form>'+
       '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p>');
   }
   async function html(env,current,raw) {

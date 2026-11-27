@@ -62,7 +62,7 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
       '<input type="hidden" name="approvalId" value="' + escape(approvalId) + '">' +
       '<input type="hidden" name="digest" value="' + escape(proposal.digest) + '">' +
       '<button type="submit" name="action" value="publish">Approve and publish</button> ' +
-      '<button type="submit" name="action" value="pr">Open a pull request instead</button></form>' +
+      '<button type="submit" name="action" value="pr" class="btn-secondary">Open a pull request instead</button></form>' +
       '<p><a href="/site-options?id=' + encodeURIComponent(ctx.job.id) + '">Back to site options</a></p>');
   }
 

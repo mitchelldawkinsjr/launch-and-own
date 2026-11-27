@@ -360,7 +360,8 @@ export function currentSiteDetails(site, escape) {
     ? '<p><a href="/toolkit/source?ticket=' + encodeURIComponent(site.sourceTicket) +
       '">Open site toolkit</a></p>'
     : '';
-  return repo + pages + sha + observed + source;
+  // Version codes are for troubleshooting, not the owner's next step (Tesler's law).
+  return repo + pages + (sha || site.productionCommitSha ? '<details><summary>Technical details</summary>' + sha + observed + '</details>' : observed) + source;
 }
 
 const DEPLOYMENT_COPY = Object.freeze({
@@ -390,8 +391,8 @@ function renderDeployment(inspection, escape) {
     (inspection.optionsPath
       ? '<p><a href="' + escape(inspection.optionsPath) + '">Review optional features</a></p>' : '');
   return '<section><h2>Deployment</h2><p role="status">' + message + '</p>' +
-    production + website + actions +
-    '<details><summary>Technical details</summary>' +
+    website + actions +
+    '<details><summary>Technical details</summary>' + production +
     '<p>Current GitHub version <code>' + escape(inspection.baseCommitSha) + '</code></p>' +
     '<p>Homepage fingerprint <code>' + escape(inspection.homepageHtmlSha256) + '</code></p>' +
     '<p>Git file ID <code>' + escape(inspection.homepageGitBlobSha) + '</code></p>' +

@@ -464,7 +464,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       throw new ImportedEditError(inspection.classification==='compiled_bundle'?'compiled_bundle':inspection.classification==='unsupported'?'unsupported':'source_project');
     }
       const requestId=crypto.randomUUID();
-      const summary='Owner preview';
+      const summary='A change to your website';
       let located;
       try{
         located=await locateTypedEdit({
@@ -523,7 +523,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
         const opened=await createZipPreview(env,ticket.previewArtifact,'draft',current.expires_at);
         previewForm='<form action="'+escape(opened.origin+'/_open')+'" method="POST" target="_blank">'+
           '<input name="ticket" type="hidden" value="'+escape(opened.ticket)+'">'+
-          '<button type="submit">Open the exact preview</button></form>'+
+          '<button type="submit" class="btn-secondary">Open the exact preview</button></form>'+
           '<p>Opens a private preview of these files on a separate address. Scripts stay blocked. Your live site is unchanged.</p>';
         headers={
           'content-type':'text/html; charset=utf-8','cache-control':'no-store',
@@ -650,7 +650,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       }catch(error){
         if(error instanceof ImportedEditError&&error.code==='credentials_revoked'){
           const screen=statusScreen(ticket,'needs_reauthorization','credentials_revoked');
-          if(screen)return view('Imported edit status',screen+'<p><a href="/history">Back to your launches</a></p>');
+          if(screen)return view('Website change status',screen+'<p><a href="/history">Back to your launches</a></p>');
         }
         throw error;
       }
@@ -681,7 +681,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
         :ticket.mergeNote?'GitHub did not allow an automatic merge, so it was not published. ':'';
       const follow=review.status==='pr_open'
         ?'<p>'+escape(blocked)+'Merge it yourself in GitHub when you are ready. This page does not publish the site.</p>':'';
-      return view('Imported edit status',
+      return view('Website change status',
         '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
         (screen||'<p>'+escape(detail)+'</p>')+follow+
         (pull.pullRequest?'<p><a href="'+escape(pull.pullRequest)+'" target="_blank" rel="noopener noreferrer">Open the pull request</a> (opens in a new tab)</p>':'')+

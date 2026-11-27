@@ -85,7 +85,7 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
       '<button type="submit" name="action" value="pr" class="btn-secondary">Open a pull request instead</button></form>'+
       '<p class="er-note"><strong>Approve and publish</strong> commits exactly this change to your website\'s <code>main</code> branch and merges it, and Cloudflare Pages publishes it. Every other file stays the same. If your site changed since this preview, nothing is published. Want to review it in GitHub first? Choose <strong>Open a pull request instead</strong> and merge it yourself. This approval works once.</p>':'';
   const expires=Number.isSafeInteger(binding.expiresAt)?new Date(binding.expiresAt*1000).toISOString():'';
-  return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">Review this change</h2>'+
+  return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">'+(status==='previewed'?'Review this change':'Your change')+'</h2>'+
     '<p class="er-summary">'+escape(proposal.summary||'Proposed change')+'</p>'+problem+timeline+
     changesBlock+
     '<p class="muted">Every other file stays exactly the same.</p>'+preview+form+

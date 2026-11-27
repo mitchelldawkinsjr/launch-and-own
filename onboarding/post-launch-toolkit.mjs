@@ -143,7 +143,7 @@ export function websiteUrlForSlug(siteSlug) {
 
 const UPDATE_STEPS = [
   {id: 'approved', title: 'Update approved', hint: 'We saved the exact page you reviewed.'},
-  {id: 'merge', title: 'Publish in GitHub', hint: 'This change is waiting as a pull request. Open it and click Merge when you are ready.'},
+  {id: 'merge', title: 'Merged in GitHub', hint: 'Approve and publish merges it for you. If you chose a pull request, open it and click Merge.'},
   {id: 'publishing', title: 'Checking your live site', hint: 'Waiting for the public site to match your approved change.'},
   {id: 'live', title: 'Live', hint: 'The public site matches your approved update.'}
 ];
@@ -244,8 +244,8 @@ function renderCard(card, escape, index = 0, found = '') {
   const website = card.recordedWebsite
     ? '<p>Public address when checked: <code>' + escape(card.recordedWebsite) + '</code></p>' : '';
   const verification = card.verifiedAt
-    ? '<p>Last checked ' + time(card.verifiedAt) + '</p><p>Checked version: <code>' +
-      escape(card.verifiedCommitSha) + '</code></p>' : '';
+    ? '<p>Last checked ' + time(card.verifiedAt) + '</p><details><summary>Technical details</summary><p>Checked version: <code>' +
+      escape(card.verifiedCommitSha) + '</code></p></details>' : '';
   const expires = card.expiresAt ? '<p>Stays on this list until ' + time(card.expiresAt) + '</p>' : '';
   const digest = card.approvalFingerprint
     ? '<p>Approval fingerprint <code>' + escape(card.approvalFingerprint.slice(0, 12)) + '…</code></p>' : '';
