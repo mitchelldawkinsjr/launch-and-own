@@ -36,7 +36,9 @@ window.Site = (function() {
   const wiredFrames = new WeakSet(); // ServiceWorkerContainers already answering
 
   function init() {
-    if ('serviceWorker' in navigator && window.isSecureContext) {
+    // Hosted Launch & Own loads pages from the server mirror; the folder SW is local-only.
+    const hosted = new URLSearchParams(location.search).get('id') && new URLSearchParams(location.search).get('page');
+    if (!hosted && 'serviceWorker' in navigator && window.isSecureContext) {
       swReady = navigator.serviceWorker.register('sw.js', { scope: './' }).catch((e) => {
         console.warn('[site] service worker registration failed', e);
         return null;
