@@ -68,8 +68,21 @@
         (window.top || window).location.href = response.url;
         return;
       }
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (location) {
+          (window.top || window).location.href = location;
+          return;
+        }
+      }
       const text = await response.text();
-      throw new Error(text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240) || 'Preview was refused.');
+      const paragraph = text.match(/<p>([^<]+)<\/p>/i);
+      const title = text.match(/<title>([^|<]+)/i);
+      const message = (paragraph?.[1] || title?.[1] || '')
+        .replace(/\s+/g, ' ').trim().slice(0, 240)
+        || text.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
+        || 'Preview was refused.';
+      throw new Error(message);
     } catch (error) {
       if (status) { status.dataset.state = 'error'; status.textContent = 'Not previewed'; }
       toast(error.message || 'Preview failed', 'error');

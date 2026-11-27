@@ -376,6 +376,25 @@ function unsafePageHtml(html) {
     || /\bsrcdoc\s*=/i.test(html) || /data\s*:/i.test(html);
 }
 
+// Visual saves may keep scripts/handlers that were already on the owner's page.
+// Reject only newly introduced script tags, on* handlers, javascript:, srcdoc, or data: URLs.
+function introducesUnsafeMarkup(before, after) {
+  const patterns = [
+    /<script\b[^>]*>[\s\S]*?<\/script>|<script\b[^>]*\/?>/gi,
+    /\son[a-z0-9_-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
+    /javascript\s*:[^\s"'<>]*/gi,
+    /\bsrcdoc\s*=\s*(?:"[^"]*"|'[^']*')/gi,
+    /data\s*:[^\s"'<>]*/gi
+  ];
+  for (const pattern of patterns) {
+    const prior = new Set([...before.matchAll(pattern)].map(match => match[0].toLowerCase()));
+    for (const match of after.matchAll(pattern)) {
+      if (!prior.has(match[0].toLowerCase())) return true;
+    }
+  }
+  return false;
+}
+
 /** Whole-page visual save. Existing editable HTML may be replaced. New files must be images under images/. */
 export async function validatePageSnapshot({ baseCommitSha, files, inspection, repositoryId, requestId, summary, nextFiles, expectedBlobs }) {
   if (typeof baseCommitSha !== 'string' || !SHA.test(baseCommitSha)) throw new ImportedEditError('stale_base');
@@ -420,7 +439,10 @@ export async function validatePageSnapshot({ baseCommitSha, files, inspection, r
     if (before) {
       if (!editableHtml.has(file.path) || !/\.html?$/i.test(file.path)) throw new ImportedEditError('kind_not_allowed');
       const html = utf8(file.bytes);
-      if (!/<html[\s>]/i.test(html) || !/<\/html>/i.test(html) || unsafePageHtml(html)) throw new ImportedEditError('context_not_allowed');
+      const beforeHtml = utf8(before);
+      if (!/<html[\s>]/i.test(html) || !/<\/html>/i.test(html) || introducesUnsafeMarkup(beforeHtml, html)) {
+        throw new ImportedEditError('context_not_allowed');
+      }
       htmlChanges += 1;
       const beforeBlobSha = await gitBlobSha(before);
       const expectedBlob = expectedBlobs?.get?.('public/' + file.path);

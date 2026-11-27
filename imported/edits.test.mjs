@@ -292,4 +292,14 @@ test('page snapshot accepts an editable page and a new image, and rejects unsafe
   await assert.rejects(snapshot(files, [nextHtml, css, { path: 'images/lo-1.svg', bytes: png() }]), /kind_not_allowed/);
   await assert.rejects(snapshot(files, [nextHtml, css, { path: 'images/lo-1.png', bytes: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12) }]), /kind_not_allowed/);
   await assert.rejects(snapshot(files, files), /no_match/);
+
+  // Existing owner scripts may stay; newly introduced ones may not.
+  const withScript = text('index.html', page('<h1>Willow Studio</h1><script src="/analytics.js"></script>'));
+  const kept = await snapshot([withScript, css], [
+    text('index.html', page('<h1>Harbor Lane</h1><script src="/analytics.js"></script>')), css
+  ]);
+  assert.equal(kept.changed.length, 1);
+  await assert.rejects(snapshot([withScript, css], [
+    text('index.html', page('<h1>Harbor Lane</h1><script src="/analytics.js"></script><script>alert(1)</script>')), css
+  ]), /context_not_allowed/);
 });

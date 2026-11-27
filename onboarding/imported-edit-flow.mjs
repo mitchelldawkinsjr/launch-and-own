@@ -42,7 +42,7 @@ const SAFE={
   'site_policy_unreadable':'The page\'s security settings could not be updated safely. No pull request was opened.',
   'not_found_anywhere':'We could not find that text on any page you can edit. Copy it exactly as it appears on your site.',
   'ambiguous_pages':'That text is on more than one page. Choose the page in the editor or enter the page file under Advanced.',
-  'context_not_allowed':'That replacement is not an allowed text, link, business-info, or custom-property color edit.',
+  'context_not_allowed':'That change is not allowed as saved. Keep existing scripts as they are, and do not add new scripts, click handlers, or data URLs.',
   'overlapping_edits':'Those edits overlap. Preview one unique phrase at a time.',
   'kind_not_allowed':'That change is not available for this file. JavaScript, dependencies, and hosting configuration stay unchanged.',
   'stale_base':'GitHub main changed. Start a fresh preview.',
