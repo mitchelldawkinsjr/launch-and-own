@@ -96,6 +96,7 @@ async function main() {
     const id = String(screens.length + 1).padStart(2, '0') + '-' + slug(title);
     seen.add(screenKey(page.url()));
     const shots = [];
+    await writeFile(join(outDir, 'shots', id + '.html'), await page.content());
     for (const vp of VIEWPORTS) {
       await page.setViewportSize({width: vp.width, height: vp.height});
       await page.evaluate(() => window.scrollTo(0, 0));
@@ -213,6 +214,16 @@ async function main() {
     await step('optional features', async () => {
       await owner.goto(base + '/site-options?id=' + jobId);
       await capture(owner, 'Optional features (created site)', 'Grow');
+      // One feature end to end: review the request, store it, then the turn-on step.
+      const insights = owner.locator('form').filter({has: owner.getByRole('button', {name: 'Review visitor insights request'})});
+      await insights.locator('input[name=analyticsConsent]').check();
+      await insights.getByRole('button', {name: 'Review visitor insights request'}).click();
+      await capture(owner, 'Optional service: review a request', 'Grow');
+      await owner.getByRole('button', {name: 'Store this request'}).click();
+      await capture(owner, 'Optional services: request stored', 'Grow');
+      // Turn on appears only once the owner's grant for that feature exists (not seeded in the mock).
+      const turnOn = owner.getByRole('link', {name: /Turn on visitor insights/}).or(owner.getByRole('button', {name: /Turn on visitor insights/}));
+      if (await turnOn.count()) { await turnOn.first().click(); await capture(owner, 'Optional service: turn on', 'Grow'); }
     });
 
     // 3. An uploaded (ZIP) site: upload and import report.
@@ -268,7 +279,62 @@ async function main() {
     screens.filter(s => s.axe.length).length + ' with accessibility issues · ' +
     screens.filter(s => s.laws.length).length + ' with design-law flags · ' + problems.length + ' steps not reached');
   console.log('Gallery: ' + join(outDir, 'index.html'));
+  await writeSurfaces(report);
   if (wantOpen) execFileSync('open', [join(outDir, 'index.html')]);
+}
+
+// Redesign surfaces: one folder each (visual-walkthrough/surfaces/<id>/) with screenshots, page HTML and a brief.
+export const SURFACES = [
+  {id: 'toolkit', title: 'Toolkit (dashboard)', match: s => /^\/toolkit/.test(s.path) && !/settings/i.test(s.title),
+    purpose: 'The owner\'s home after launch: every site, what they can do with it, and whether it is live.',
+    files: ['onboarding/post-launch-toolkit.mjs (renderToolkitPage, renderCard)', 'onboarding/toolkit-current-sites.mjs (In your accounts now, live check page)', 'onboarding/service-explorer.mjs', 'onboarding/ui.mjs (shared shell and tokens)']},
+  {id: 'launches', title: 'Launches (history)', match: s => s.path === '/history',
+    purpose: 'Every launch in the last 30 days, its result, and how to continue or update it.',
+    files: ['onboarding/worker.mjs (launchHistory)', 'onboarding/launch-jobs.mjs (data)', 'onboarding/ui.mjs']},
+  {id: 'site-edit', title: 'Site edit UI', match: s => /^\/(site-update|imported-edit)/.test(s.path),
+    purpose: 'Change a live site: pick or type the change, see the exact preview, approve, then follow it to Live and checked.',
+    files: ['onboarding/site-update-flow.mjs (created sites)', 'onboarding/imported-edit-flow.mjs (uploaded sites)', 'onboarding/edit-review.mjs (review and status screen)', 'onboarding/visual-editor.mjs (uploaded-site editor; other work in progress, coordinate first)', 'onboarding/ui.mjs (progressHtml, CHANGE_STEPS)']},
+  {id: 'settings', title: 'Settings', match: s => /settings/i.test(s.title) || /^\/cloudflare-pages-access/.test(s.path),
+    purpose: 'Where an owner sees what each site includes and manages provider access.',
+    files: ['onboarding/post-launch-toolkit.mjs (settings panel)', 'onboarding/pages-access-view.mjs', 'onboarding/ui.mjs']},
+  {id: 'optional-services', title: 'Optional services', match: s => /^\/(site-options|form-messages|form-connect)/.test(s.path),
+    purpose: 'Add features to a live site (contact form, visitor insights, custom domain, email, SEO, redirects): review each, approve, turn on, and read form messages.',
+    files: ['onboarding/post-launch-options.mjs', 'onboarding/form-messages.mjs', 'onboarding/form-connect.mjs', 'onboarding/form-detection.mjs', 'onboarding/ui.mjs']}
+];
+
+async function writeSurfaces(report) {
+  const {copyFile} = await import('node:fs/promises');
+  const index = [];
+  for (const surface of SURFACES) {
+    const screens = report.screens.filter(s => s.ownUi !== false && surface.match({path: s.url.split('?')[0], title: s.title}));
+    const dir = join(outDir, 'surfaces', surface.id);
+    await mkdir(dir, {recursive: true});
+    for (const s of screens) {
+      await copyFile(join(outDir, 'shots', s.id + '.html'), join(dir, s.id + '.html'));
+      for (const v of s.shots) await copyFile(join(outDir, v.file), join(dir, v.file.slice('shots/'.length)));
+    }
+    const flagsOf = s => [
+      ...report.consistency.rows.filter(r => r.odd.includes(s.id)).map(r => 'differs from house style: ' + r.name + ' = ' + s.tokens[r.name] + ' (house ' + r.house + ')'),
+      ...s.laws, ...s.axe.map(a => 'accessibility: ' + a), ...s.shots.filter(v => v.overflow).map(v => 'sideways scroll at ' + v.width + 'px')];
+    const md = ['# Redesign brief: ' + surface.title, '', surface.purpose, '',
+      '## Screens (' + screens.length + ')', '',
+      ...screens.flatMap(s => ['### ' + s.id + ' · ' + s.title, '', '- URL in the mock server: `' + s.url + '`',
+        '- Screenshots: ' + s.shots.map(v => '[' + v.viewport + ' ' + v.width + 'px](' + v.file.slice('shots/'.length) + ')').join(' · '),
+        '- Page HTML: [' + s.id + '.html](' + s.id + '.html)', ...(s.notes ? ['- Note: ' + s.notes] : []),
+        ...(flagsOf(s).length ? ['- Flags:', ...flagsOf(s).map(f => '  - ' + f)] : ['- Flags: none']), '']),
+      '## Where the code lives', '', ...surface.files.map(f => '- `' + f + '`'), '',
+      '## Rules for the redesign', '',
+      '- Follow `.claude/skills/design-laws/SKILL.md` (one primary action per screen, status first, progressive disclosure, plain language).',
+      '- Keep the shared shell, tokens and components in `onboarding/ui.mjs`; extend them rather than adding page-specific colours, radii or type sizes.',
+      '- Keep routes, forms, CSRF fields, approval bindings and every security check exactly as they are (see `AGENTS.md`). Markup, CSS and copy only, unless the owner approves more.',
+      '- Never link to a recorded pages.dev address; the live check is the safe route.',
+      '- Server-rendered HTML with inline CSS only: the onboarding CSP allows no scripts, remote fonts or images.',
+      '- Check your work: `npm test`, `npx playwright test`, and `npm run visual:walkthrough -- --open` (compare with these screenshots).', ''].join('\n');
+    await writeFile(join(dir, 'README.md'), md);
+    index.push({id: surface.id, title: surface.title, dir: 'surfaces/' + surface.id, screens: screens.map(s => s.id)});
+    console.log('  surface ' + surface.id + ': ' + screens.length + ' screens');
+  }
+  await writeFile(join(outDir, 'surfaces', 'index.json'), JSON.stringify(index, null, 2));
 }
 
 /** For each design value, the most common answer is the house style; every other screen is flagged. */
