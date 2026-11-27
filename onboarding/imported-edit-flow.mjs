@@ -335,11 +335,34 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
   }
   async function readVisualBody(request){
     const type=request.headers.get('content-type')||'';
-    if(!/^application\/json(?:\s*;|$)/i.test(type))return null;
-    const bytes=await request.arrayBuffer();
-    if(bytes.byteLength<2||bytes.byteLength>3_000_000)return null;
-    try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
-    catch{return null;}
+    if(/^application\/json(?:\s*;|$)/i.test(type)){
+      const bytes=await request.arrayBuffer();
+      if(bytes.byteLength<2||bytes.byteLength>3_000_000)return null;
+      try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
+      catch{return null;}
+    }
+    // Top-level form POST from the editor iframe (avoids fetch/"Failed to fetch" in the canvas host).
+    if(/^(?:application\/x-www-form-urlencoded|multipart\/form-data)(?:\s*;|$)/i.test(type)){
+      let form;
+      try{form=await request.formData();}catch{return null;}
+      const imagesRaw=form.get('images');
+      let images=[];
+      if(typeof imagesRaw==='string'&&imagesRaw.trim()){
+        try{
+          const parsed=JSON.parse(imagesRaw);
+          if(!Array.isArray(parsed))return null;
+          images=parsed;
+        }catch{return null;}
+      }
+      return {
+        csrf:typeof form.get('csrf')==='string'?form.get('csrf'):'',
+        id:typeof form.get('id')==='string'?form.get('id'):'',
+        page:typeof form.get('page')==='string'?form.get('page'):'',
+        html:typeof form.get('html')==='string'?form.get('html'):'',
+        images
+      };
+    }
+    return null;
   }
   async function visualPreview(request,env,current){
     await limitAttempts(request,env);

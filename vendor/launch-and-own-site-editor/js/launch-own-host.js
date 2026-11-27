@@ -57,32 +57,30 @@
     try {
       if (!csrf) throw new Error('Reload the editor from your launches page.');
       const packed = packImages(window.FileOps.currentHtml());
+      if (packed.html.length > 1_500_000) throw new Error('This page is too large to preview in one save.');
       if (status) { status.dataset.state = 'saving'; status.textContent = 'Previewing…'; }
-      const response = await fetch(savePath, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ csrf, id, page, html: packed.html, images: packed.images })
+      // Top-level form POST (not fetch): survives iframe/service-worker edge cases and
+      // follows the 303 to the review page in the parent window.
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = savePath;
+      form.target = '_top';
+      form.enctype = 'multipart/form-data';
+      form.hidden = true;
+      const fields = {
+        csrf, id, page,
+        html: packed.html,
+        images: JSON.stringify(packed.images)
+      };
+      Object.keys(fields).forEach(name => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = fields[name];
+        form.appendChild(input);
       });
-      if (response.redirected && response.url) {
-        (window.top || window).location.href = response.url;
-        return;
-      }
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get('location');
-        if (location) {
-          (window.top || window).location.href = location;
-          return;
-        }
-      }
-      const text = await response.text();
-      const paragraph = text.match(/<p>([^<]+)<\/p>/i);
-      const title = text.match(/<title>([^|<]+)/i);
-      const message = (paragraph?.[1] || title?.[1] || '')
-        .replace(/\s+/g, ' ').trim().slice(0, 240)
-        || text.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
-        || 'Preview was refused.';
-      throw new Error(message);
+      document.body.appendChild(form);
+      form.submit();
     } catch (error) {
       if (status) { status.dataset.state = 'error'; status.textContent = 'Not previewed'; }
       toast(error.message || 'Preview failed', 'error');
@@ -90,6 +88,11 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
+    // Hosted mode does not use site-folder interception; keep Preview off the SW path.
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.register = () => Promise.resolve({ unregister() { return Promise.resolve(true); } });
+      navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister())).catch(() => {});
+    }
     const hostedCss = document.createElement('style');
     hostedCss.textContent = ':root{--sidebar-w:240px;--sidebar-r-w:280px}' +
       'html,body{height:100%;margin:0;background:#0a0a0a}' +
