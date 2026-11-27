@@ -310,7 +310,7 @@ test('visual page save lists GitHub files, opens review without writing, and App
   assert.equal(visual.status, 303, await visual.text());
   assert.equal(writes(w.gh).length, before, 'preview does not write GitHub');
   const review = await (await w.call(visual.headers.get('location'))).text();
-  assert.match(review, /Visual page/);
+  assert.match(review, /Updated page/);
   assert.match(review, /Approve and publish/);
   const approved = await w.call('/approve', {
     method: 'POST',

@@ -161,7 +161,7 @@ async function buildScreens() {
       id: '05-toolkit',
       title: 'Website toolkit',
       phase: 'Own',
-      notes: 'Launch cards, sites found in your accounts, and what each site includes.',
+      notes: 'Stitch redesign: hero stats, site toolkit cards, update workflow ladder.',
       html: toolkitHtml
     });
 
@@ -174,6 +174,19 @@ async function buildScreens() {
         phase: 'Own',
         notes: 'Private homepage fingerprint check only; no raw HTML shown.',
         html: await source.text()
+      });
+    }
+
+    const options = await h.request('/site-options?id=' + encodeURIComponent(id), {
+      cookie: tenant.cookie
+    });
+    if (options.status === 200) {
+      screens.push({
+        id: '06b-site-options',
+        title: 'Optional features',
+        phase: 'Own',
+        notes: 'Stitch Phase A staged requests + Phase B edge controls.',
+        html: await options.text()
       });
     }
 
@@ -202,13 +215,37 @@ async function buildScreens() {
         const reviewPath = previewPost.headers.get('location');
         const updateReview = await h.request(reviewPath, {cookie: tenant.cookie});
         if (updateReview.status === 200) {
+          const reviewHtml = await updateReview.text();
           screens.push({
             id: '08-site-update-review',
             title: 'Update review & approve',
             phase: 'Update',
             notes: 'Exact preview before a GitHub change request is opened.',
-            html: await updateReview.text()
+            html: reviewHtml
           });
+
+          const approveCsrf = reviewHtml.match(/name="csrf" value="([^"]+)"/)?.[1] || tenant.csrf;
+          const ticket = new URL(reviewPath, 'https://onboard.test').searchParams.get('ticket');
+          if (ticket) {
+            const approved = await post(h, '/site-update-approve', tenant.cookie, {
+              csrf: approveCsrf,
+              ticket,
+              action: 'pr'
+            });
+            if (approved.status === 303) {
+              const statusPath = approved.headers.get('location');
+              const statusPage = await h.request(statusPath, {cookie: tenant.cookie});
+              if (statusPage.status === 200) {
+                screens.push({
+                  id: '08b-site-update-status',
+                  title: 'Update publication ladder',
+                  phase: 'Update',
+                  notes: 'Stitch publishing pipeline: approve → merge → rebuild → live.',
+                  html: await statusPage.text()
+                });
+              }
+            }
+          }
         }
       }
     }

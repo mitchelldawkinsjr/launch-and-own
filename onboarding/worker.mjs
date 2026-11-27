@@ -66,7 +66,9 @@ const redirect=(path,setCookie)=>{
   return new Response(null,{status:303,headers});
 };
 // opts are UI-only (pageShell); never pass them as the headers argument.
-const view=(title,body,status=200,headers=textHeaders,opts={})=>new Response(pageShell({title,body,css:providerHelpCss,...opts}),{status,headers});
+const view=(title,body,status=200,headers=textHeaders,opts={})=>new Response(
+  pageShell({title,body,...opts,css:providerHelpCss+(opts.css||'')}),
+  {status,headers:headers||textHeaders});
 const fail=(message,status=400)=>view('Setup could not continue',`<p>${escape(message)}</p><p><a href="/">Return to setup</a></p>`,status);
 const button=(action,label,csrf,extra='')=>`<form action="${action}" method="POST"><input type="hidden" name="csrf" value="${escape(csrf)}">${extra}<button type="submit">${escape(label)}</button></form>`;
 function cookies(request){
@@ -273,13 +275,20 @@ async function home(env,current,notice){
     <label for="website-zip">Website ZIP (up to 6 MB)</label><input id="website-zip" name="zip" type="file" accept=".zip,application/zip" required>
     <button type="submit">Upload and preview</button></form></section>`:'';
   const next=ready?
-    '<section><h2>Create a simple website</h2><p>Fill in your business details, then preview the page. You will approve it in a separate step before anything goes live. After a verified launch, <strong>Your website toolkit</strong> shows recorded results and can open live account checks. Optional domain, email, and form <em>requests</em> are reviewed and stored there only—they do not change DNS, turn on mail, or create a form.</p>'+
+    '<section><h2>Create a simple website</h2><p>Preview first. You approve in a separate step before anything goes live.</p>'+
     button('/preview','Preview my website',current.csrf,siteFields)+'</section>':'';
-  const historyLink=ready?'<p><a href="/toolkit">Your website toolkit</a> · <a href="/history">Your launches</a> · '+pagesAccessLink+'</p>':'';
+  const historyLink=ready
+    ?'<div class="lo-callout lo-callout-ok"><strong>After a verified launch</strong>, open the toolkit for updates and optional features.</div>'+
+      '<p class="tk-actions"><a class="btn-secondary btn" href="/toolkit">Your website toolkit</a> '+
+      '<a class="btn-secondary btn" href="/history">Your launches</a> '+pagesAccessLink+'</p>'
+    :'';
   const cloudflareLine=connected
     ?(current.cloudflare_account_id?'Cloudflare connected · hosting account selected':'Cloudflare connected · choose your hosting account next')
     :'Cloudflare not connected yet';
-  return view('Website setup',`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>${installHtml}${pagesHint}${providerConnectionCards({githubStatus:'connected',githubLogin:current.github_login,githubAppInstalled:appInstalled,cloudflareStatus:connected?'connected':appInstalled?'next':'later',cloudflareAccountSelected:Boolean(current.cloudflare_account_id)})}<p>${cloudflareLine}</p>${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section>${button('/logout','Disconnect and sign out',current.csrf)}</section>`,200,textHeaders,
+  const dashboardHero=ready
+    ?`<div class="lo-hero" aria-labelledby="dash-hero-title"><p class="eyebrow"><span class="lo-badge lo-badge-lo">Direct provider ownership</span><span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p><h2 id="dash-hero-title">Your digital footprint</h2><p>Accounts connected. Create or upload a site, then own it from the toolkit after launch.</p></div><div class="lo-stat-grid" role="group" aria-label="Connection status"><div class="lo-stat"><span>GitHub</span><strong>${escape(current.github_login)}</strong><p>Connected</p></div><div class="lo-stat"><span>Cloudflare</span><strong>${current.cloudflare_account_id?'Selected':'Next'}</strong><p>${escape(cloudflareLine)}</p></div><div class="lo-stat"><span>Ownership</span><strong>Yours</strong><p>No stored passwords · direct provider control</p></div></div>`
+    :`<p class="pill">GitHub connected: ${escape(current.github_login)}</p>`;
+  return view('Website setup',`${dashboardHero}${installHtml}${pagesHint}${providerConnectionCards({githubStatus:'connected',githubLogin:current.github_login,githubAppInstalled:appInstalled,cloudflareStatus:connected?'connected':appInstalled?'next':'later',cloudflareAccountSelected:Boolean(current.cloudflare_account_id)})}${ready?'':`<p>${cloudflareLine}</p>`}${accountHtml}${zipEntry}${aiEntry}${next}${historyLink}<section class="lo-disconnect">${button('/logout','Disconnect and sign out',current.csrf)}</section>`,200,textHeaders,
     {step:ready?'create':'connect',current:'/'});
 }
 
@@ -545,9 +554,13 @@ async function launchHistory(env,current){
     const pagesHelp=isPagesAccessError(item.error_code)?'<p>'+pagesAccessLink+' to continue this launch.</p>':'';
     return `<section><h2>${escape(item.customer_name)}</h2><p>Status: ${escape(item.display_status)}</p>${diagnostic}${pagesHelp}${live}${update}${imported}${action}${deletion}</section>`;
   }).join('');
-  return view('Your launches','<p>This list keeps launches for 30 days after you first approve them. Your live website and its private files stay in your accounts even if a row drops off this list. If a launch paused, reconnect and continue it from here.</p>'+
+  return view('Your launches',
+    '<div class="lo-page"><header class="lo-hero"><h1>Your launches</h1>'+
+    '<p>Rows stay for 30 days after first approval. Live sites and private files stay in your accounts even if a row drops off.</p></header>'+
     (cards||'<p>No launches yet for this GitHub and Cloudflare pair.</p>')+
-    '<p><a href="/">Back to setup</a></p>');
+    '<p class="tk-actions"><a class="btn-secondary btn" href="/toolkit">Website toolkit</a> '+
+    '<a class="btn-secondary btn" href="/">Back to setup</a></p></div>',
+    200,null,{wide:true,omitTitle:true});
 }
 
 async function restoreLaunch(request,env,current){

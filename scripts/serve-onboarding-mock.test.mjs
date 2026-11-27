@@ -69,7 +69,7 @@ test('editor fixture serves the site editor and a visual save reaches review', {
     assert.match(saved.res.headers.location, /^\/imported-edit-review\?ticket=/);
     const review = await send(port, saved.res.headers.location, {headers: {cookie}});
     assert.equal(review.res.statusCode, 200, review.body);
-    assert.match(review.body, /Visual page/);
+    assert.match(review.body, /Updated page/);
     assert.match(review.body, /Approve and publish/);
     const field = name => review.body.match(new RegExp('name="' + name + '" value="([^"]+)"'))[1];
     const approved = await send(port, '/imported-edit-approve', {

@@ -357,16 +357,25 @@ export function createSiteOptionsRoutes({
     const domainHost = storedDomainHostname(rows);
     const mailboxDefault = onboardingMailbox(job, current, domainHost);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const notice = '<p>Save each request first. For <strong>custom domain</strong> and <strong>email forwarding</strong>, ' +
-      'you can turn the feature on here after you store it—still bound to the exact hostname or mailbox you approved. ' +
-      'DNS and MX are not changed unless the provider action says so. For the <strong>contact form</strong>, you turn it on after ' +
-      'reviewing what it creates, what it stores and what it costs.</p>';
+    const storedCount = Object.keys(byKind).length;
+    const notice = '<header class="lo-hero" aria-labelledby="opt-hero-title">' +
+      '<p class="eyebrow"><span class="lo-badge lo-badge-lo">Optional features</span>' +
+      '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>' +
+      '<h1 id="opt-hero-title">Optional features for ' + escape(job.customer_name) + '</h1>' +
+      '<p>Save each request first. Nothing goes live until you turn it on after review—still bound to the exact hostname, mailbox, or plan you approved.</p>' +
+      '<div class="lo-toolbar"><a class="btn-secondary btn" href="' + website + '">View live site</a>' +
+      '<a class="btn-secondary btn" href="/toolkit">Back to toolkit</a></div></header>' +
+      '<div class="lo-stat-grid" role="group" aria-label="Optional features summary">' +
+      '<div class="lo-stat"><span>Site</span><strong><code>' + website + '</code></strong><p>Live managed address</p></div>' +
+      '<div class="lo-stat"><span>Stored requests</span><strong>' + storedCount + '</strong><p>Open loops to finish</p></div>' +
+      '<div class="lo-stat"><span>Impact</span><strong>Staged</strong><p>Nothing live until you turn it on</p></div></div>';
     const stored = (row, label) => row
-      ? '<p role="status">Stored ' + label + ' request. Fingerprint <code>' +
-        escape(row.approval_digest.slice(0, 12)) + '…</code></p>'
+      ? '<div class="lo-callout lo-callout-warn" role="status">Stored ' + label +
+        ' request — not turned on yet. Fingerprint <code>' +
+        escape(row.approval_digest.slice(0, 12)) + '…</code></div>'
       : '';
     const domainSection =
-      '<section><h2>Custom domain</h2>' +
+      '<section class="opt-module"><h3>Custom domain <span class="tag tag-safe">Safe · no live change yet</span></h3>' +
       '<p>Enter a web address you own. We connect it after a review. Your DNS does not change until you approve that step.</p>' +
       stored(byKind.domain, 'domain') +
       (domainHost ? '<p>Current request: <code>' + escape(domainHost) + '</code></p>' : '') +
@@ -379,7 +388,7 @@ export function createSiteOptionsRoutes({
       turnOn('domain', 'Turn on custom domain', byKind.domain) +
       '</section>';
     const emailSection =
-      '<section><h2>Email forwarding</h2>' +
+      '<section class="opt-module"><h3>Email forwarding <span class="tag tag-safe">MX staging</span></h3>' +
       (domainHost
         ? '<p>Forward mail for <code>' + escape(domainHost) +
           '</code> to a mailbox you already have. We set it up after a review. No new mailbox is created, and your mail settings stay the same until you approve.</p>' +
@@ -410,7 +419,7 @@ export function createSiteOptionsRoutes({
         '">Read your messages</a></p>'
       : '';
     const formsSection =
-      '<section><h2>Contact form</h2>' + formNote + connectLink +
+      '<section class="opt-module"><h3>Contact form <span class="tag tag-safe">Form endpoint</span></h3>' + formNote + connectLink +
       '<p>Connect your site\'s contact form so messages are saved in your own Cloudflare account, with spam protection. We set it up after a cost and privacy review.</p>' +
       stored(byKind.forms, 'form') +
       (byKind.forms && !activations.forms && ownerSelfActivationEnabled(env, 'forms')
@@ -426,7 +435,7 @@ export function createSiteOptionsRoutes({
       ? await currentAnalyticsRequestFingerprint(env, current, job, now())
       : null;
     const analyticsSection =
-      '<section><h2>Visitor insights</h2>' +
+      '<section class="opt-module"><h3>Visitor insights <span class="tag tag-edge">Next deploy</span></h3>' +
       '<p>New sites launch with visitor insights on. If this site launched without them, save a request to turn them on.</p>' +
       stored(byKind.analytics, 'visitor insights') +
       turnOn('analytics', 'Turn on visitor insights', byKind.analytics) +
@@ -446,7 +455,7 @@ export function createSiteOptionsRoutes({
         : '') +
       '</section>';
     const previewSection =
-      '<section><h2>Private update previews</h2>' +
+      '<section class="opt-module"><h3>Private update previews <span class="tag tag-edge">Edge control</span></h3>' +
       '<p>Save a request for scoped GitHub PR preview builds. Draft preview links can be public, so Access must be reviewed before enablement.</p>' +
       stored(byKind.pr_previews, 'preview') +
       button('/site-options-prepare', 'Review preview request', current.csrf,
@@ -457,7 +466,7 @@ export function createSiteOptionsRoutes({
         'I understand draft preview links can be public until Access protects them.</label>') +
       '</section>';
     const seoSection =
-      '<section><h2>SEO starter</h2>' +
+      '<section class="opt-module"><h3>SEO starter <span class="tag tag-safe">Files only</span></h3>' +
       '<p>Save a request for search basics: a robots.txt file and a sitemap of your pages. Turning it on only adds those two files after you review them; your pages are not edited.</p>' +
       stored(byKind.seo, 'SEO') +
       filesTurnOn(byKind.seo, 'Turn on SEO starter') +
@@ -467,7 +476,7 @@ export function createSiteOptionsRoutes({
         'Save this request for review.</label>') +
       '</section>';
     const redirectsSection =
-      '<section><h2>Redirects</h2>' +
+      '<section class="opt-module"><h3>Redirects <span class="tag tag-safe">URL rules</span></h3>' +
       (domainHost
         ? '<p>Same-host redirects for <code>' + escape(domainHost) +
           '</code>. We set them up after a review and your approval.</p>' +
@@ -489,14 +498,27 @@ export function createSiteOptionsRoutes({
             'Save these redirects for review.</label>')
         : '<p>Save a custom domain request first. Redirects need that hostname.</p>') +
       '</section>';
+    const phaseA = '<div class="opt-group" aria-labelledby="opt-phase-a">' +
+      '<div class="opt-phase-head"><h2 id="opt-phase-a">Phase A: Staged requests ' +
+      '<span class="tag tag-safe">Safe · no live site changes</span></h2>' +
+      '<p class="muted">Safe to save now. Nothing changes on the live site until you turn a feature on or approve the provider step.</p></div>' +
+      '<div class="opt-grid">' + domainSection + emailSection + formsSection + seoSection + redirectsSection + '</div></div>';
+    const phaseB = '<div class="opt-group" aria-labelledby="opt-phase-b">' +
+      '<div class="opt-phase-head"><h2 id="opt-phase-b">Phase B: Edge runtime controls ' +
+      '<span class="tag tag-edge">May change the next deployment</span></h2>' +
+      '<p class="muted">These touch how the edge serves or measures your site. Review carefully before enabling.</p></div>' +
+      '<div class="opt-grid">' + analyticsSection + previewSection + '</div></div>';
+    const ribbon = '<div class="opt-ribbon" role="region" aria-label="Stored requests">' +
+      '<div><h3>Stored requests stay with this site</h3>' +
+      '<p>Each module saves a digest-bound request first. Nothing deploys in bulk — turn features on one at a time after review.</p></div>' +
+      '<div class="opt-ribbon-actions"><span class="lo-badge">' + storedCount + ' stored</span>' +
+      '<a class="btn-secondary btn" href="/toolkit">Back to toolkit</a>' +
+      '<a class="btn-secondary btn" href="/history">Launch history</a></div></div>';
     if (!await hasCurrentOwnerSession(env, current, now()))
       return fail('Reconnect GitHub and Cloudflare to view your site options.', 403);
     return view('Optional features for ' + job.customer_name,
-      notice +
-      '<p><strong>Site:</strong> <code>' + website + '</code></p>' +
-      domainSection + emailSection + formsSection + analyticsSection + previewSection +
-      seoSection + redirectsSection +
-      '<p><a href="/toolkit">Back to toolkit</a> · <a href="/history">Launch history</a></p>');
+      '<div class="lo-page">' + notice + phaseA + phaseB + ribbon + '</div>',
+      200, null, {wide: true, omitTitle: true});
   }
 
   function hidden(id, kind) {

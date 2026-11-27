@@ -58,11 +58,11 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
       '<p><strong>Approve and publish</strong> commits exactly these files to your site\'s <code>main</code> branch and merges it, ' +
       'after confirming automatic Cloudflare Pages preview builds are off. Prefer to review it in GitHub first? Choose ' +
       '<strong>Open a pull request instead</strong>.</p>' +
-      '<form action="/site-options-files-publish" method="POST"><input type="hidden" name="csrf" value="' + escape(current.csrf) + '">' +
+      '<form class="lo-decision" action="/site-options-files-publish" method="POST"><input type="hidden" name="csrf" value="' + escape(current.csrf) + '">' +
       '<input type="hidden" name="approvalId" value="' + escape(approvalId) + '">' +
       '<input type="hidden" name="digest" value="' + escape(proposal.digest) + '">' +
       '<button type="submit" name="action" value="publish">Approve and publish</button> ' +
-      '<button type="submit" name="action" value="pr">Open a pull request instead</button></form>' +
+      '<button type="submit" class="btn-secondary" name="action" value="pr">Open a pull request instead</button></form>' +
       '<p><a href="/site-options?id=' + encodeURIComponent(ctx.job.id) + '">Back to site options</a></p>');
   }
 
