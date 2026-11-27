@@ -473,6 +473,17 @@ test('a visual page save opens review and does not write GitHub', async () => {
     assert.equal(visual.status, 303, await visual.text());
     assert.match(visual.headers.get('location'), /^\/imported-edit-review\?ticket=/);
     assert.equal(state.posts.length, 0);
+    const formPreview = await h.request('/imported-edit-visual-preview', {
+      method: 'POST', cookie: tenant.cookie,
+      headers: {'content-type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({
+        csrf: tenant.csrf, id: tenant.id, page: 'index.html',
+        html: '<!doctype html><html><body><h1>Harbor Form</h1></body></html>',
+        images: '[]'
+      }).toString()
+    });
+    assert.equal(formPreview.status, 303, await formPreview.text());
+    assert.match(formPreview.headers.get('location'), /^\/imported-edit-review\?ticket=/);
     const reviewHtml = await (await h.request(visual.headers.get('location'), {cookie: tenant.cookie})).text();
     assert.match(reviewHtml, /Visual page/);
     assert.match(reviewHtml, /Approve and publish/);
