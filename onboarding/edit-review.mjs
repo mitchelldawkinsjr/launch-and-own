@@ -31,6 +31,10 @@ const TICKET=/^[A-Za-z0-9_-]{50,6000}$/;
 const ACTION=/^(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
 const own=(o,k)=>typeof k==='string'&&Object.hasOwn(o,k);
 
+function isAddedImage(edit){
+  return /New image|new file/i.test(edit.replace||'') || (/\.(png|jpe?g|gif|webp)$/i.test(edit.path||'') && !/\.html?$/i.test(edit.path||''));
+}
+
 /** status: §4 status; code: optional §4 failure code; approve: {action, csrf} renders the approval form when status is 'previewed';
  * previewOrigin: the isolated preview origin, the only origin the preview link may point to. now: ms clock, for tests. */
 export function editReviewMarkup({proposal,binding,status='previewed',code,approve,previewOrigin,ticket,now=Date.now()}={}){
@@ -48,6 +52,19 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
   const swatch=(e,v)=>e.kind==='css_color'&&HEX.test(v)?'<span class="er-swatch" style="background:'+v+'" aria-hidden="true"></span>':'';
   const change=e=>'<li class="er-change"><div class="er-meta"><span class="badge">'+KINDS[e.kind]+'</span> <code>'+escape(e.path)+'</code></div>'+
     '<div class="er-diff"><p class="er-old"><span class="lo-sr">Before: </span>'+swatch(e,e.find)+'<del>'+escape(e.find)+'</del></p><p class="er-new"><span class="lo-sr">After: </span>'+swatch(e,e.replace)+'<ins>'+escape(e.replace)+'</ins></p></div></li>';
+  const visualOnly=proposal.edits.length>0&&proposal.edits.every(e=>e.kind==='page_snapshot');
+  const visualRow=e=>{
+    const label=isAddedImage(e)?'New image':'Updated page';
+    return '<li class="er-file"><span class="badge">'+label+'</span> <code>'+escape(e.path)+'</code></li>';
+  };
+  const pages=visualOnly?proposal.edits.filter(e=>!isAddedImage(e)):[];
+  const images=visualOnly?proposal.edits.filter(e=>isAddedImage(e)):[];
+  const changesBlock=visualOnly
+    ?('<h3>'+(live?'Files in this visual edit':'Files that were proposed')+' ('+proposal.edits.length+')</h3>'+
+      (pages.length?'<p class="er-group-label">Pages</p><ul class="er-files" aria-label="Updated pages">'+pages.map(visualRow).join('')+'</ul>':'')+
+      (images.length?'<p class="er-group-label">Images</p><ul class="er-files" aria-label="New images">'+images.map(visualRow).join('')+'</ul>':'')+
+      '<p class="er-note">Open the exact preview to see the full page. This approval still binds only these files.</p>')
+    :('<h3>'+(live?'What will change':'What was proposed')+' ('+proposal.edits.length+')</h3><ul class="er-changes">'+proposal.edits.map(change).join('')+'</ul>');
   const preview=previewHref
     ?'<p><a class="btn btn-secondary" href="'+escape(previewHref)+'" target="_blank" rel="noopener noreferrer">Open the exact preview</a></p><p class="er-note">Opens a private preview of exactly these files. Your live site is unchanged.</p>':'';
   const at=STEPS.findIndex(([s])=>s===status);
@@ -70,7 +87,7 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
   const expires=Number.isSafeInteger(binding.expiresAt)?new Date(binding.expiresAt*1000).toISOString():'';
   return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">Review this change</h2>'+
     '<p class="er-summary">'+escape(proposal.summary||'Proposed change')+'</p>'+problem+timeline+
-    '<h3>'+(live?'What will change':'What was proposed')+' ('+proposal.edits.length+')</h3><ul class="er-changes">'+proposal.edits.map(change).join('')+'</ul>'+
+    changesBlock+
     '<p class="muted">Every other file stays exactly the same.</p>'+preview+form+
     '<details><summary>Approval details</summary><ul class="er-facts"><li>Based on version <code>'+escape(binding.baseCommitSha.slice(0,12))+'</code></li>'+
     '<li>Preview fingerprint <code>'+escape(binding.artifactDigest.slice(0,12))+'…</code></li>'+

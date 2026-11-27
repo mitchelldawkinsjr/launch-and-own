@@ -69,8 +69,38 @@
       || 'Preview was refused.';
   }
 
+  function showLeavingOverlay() {
+    let overlay = document.getElementById('lo-preview-leaving');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'lo-preview-leaving';
+      overlay.setAttribute('role', 'status');
+      overlay.setAttribute('aria-live', 'polite');
+      overlay.innerHTML = '<div class="lo-preview-leaving-card"><div class="lo-preview-leaving-spin" aria-hidden="true"></div>' +
+        '<p><strong>Preparing your preview</strong></p><p>Taking you to the review page…</p></div>';
+      const style = document.createElement('style');
+      style.textContent = '#lo-preview-leaving{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;' +
+        'background:rgba(10,10,10,.72);color:#f4f4f5;font:15px/1.4 system-ui,sans-serif}' +
+        '.lo-preview-leaving-card{display:grid;gap:10px;justify-items:center;text-align:center;padding:28px 32px;' +
+        'border-radius:16px;background:#16161a;border:1px solid #2a2a30;max-width:22rem}' +
+        '.lo-preview-leaving-card p{margin:0}.lo-preview-leaving-card strong{font-size:1.05rem}' +
+        '.lo-preview-leaving-spin{width:36px;height:36px;border-radius:50%;border:3px solid #3f3f46;' +
+        'border-top-color:#f4f4f5;animation:lo-spin .8s linear infinite}' +
+        '@keyframes lo-spin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(style);
+      document.body.appendChild(overlay);
+    }
+    overlay.hidden = false;
+  }
+
+  function hideLeavingOverlay() {
+    const overlay = document.getElementById('lo-preview-leaving');
+    if (overlay) overlay.hidden = true;
+  }
+
   function goToReview(url) {
     clearDirty();
+    showLeavingOverlay();
     (window.top || window).location.href = url;
   }
 
@@ -82,6 +112,7 @@
       if (packed.html.length > 1_500_000) throw new Error('This page is too large to preview in one save.');
       if (status) { status.dataset.state = 'saving'; status.textContent = 'Previewing…'; }
       clearDirty();
+      showLeavingOverlay();
 
       const response = await fetch(savePath, {
         method: 'POST',
@@ -105,6 +136,7 @@
       const text = await response.text();
       throw new Error(errorMessageFromBody(text));
     } catch (error) {
+      hideLeavingOverlay();
       if (status) { status.dataset.state = 'error'; status.textContent = 'Not previewed'; }
       const message = error && error.message === 'Failed to fetch'
         ? 'Could not reach Preview. Check your connection, hard-refresh, and try again.'
@@ -115,6 +147,7 @@
 
   function submitPreviewForm(packed) {
     clearDirty();
+    showLeavingOverlay();
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = savePath;

@@ -485,7 +485,8 @@ test('a visual page save opens review and does not write GitHub', async () => {
     assert.equal(formPreview.status, 303, await formPreview.text());
     assert.match(formPreview.headers.get('location'), /^\/imported-edit-review\?ticket=/);
     const reviewHtml = await (await h.request(visual.headers.get('location'), {cookie: tenant.cookie})).text();
-    assert.match(reviewHtml, /Visual page/);
+    assert.match(reviewHtml, /Files in this visual edit/);
+    assert.match(reviewHtml, /Updated page/);
     assert.match(reviewHtml, /Approve and publish/);
     const scripted = await h.request('/imported-edit-visual-preview', {
       method: 'POST', cookie: tenant.cookie,
