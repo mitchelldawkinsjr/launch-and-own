@@ -8,7 +8,7 @@ import {MergeRefused,mergeVerifiedPullRequest} from '../pipeline/merge-approved-
 import {verifyWebsite} from '../pipeline/verify-site.mjs';
 import {getOwnedJob,isLaunchId,approvalSnapshot,hasCurrentOwnerSession} from './launch-jobs.mjs';
 import {seal,unseal} from './crypto.mjs';
-import {renderUpdateStatusBody} from './post-launch-toolkit.mjs';
+import {renderUpdateStatusBody, websiteUrlForSlug} from './post-launch-toolkit.mjs';
 import {readToolkitPreviewStatus} from './toolkit-preview.mjs';
 
 export class PreviewBuildPolicyUnavailable extends Error {}
@@ -146,10 +146,21 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
       '<label for="contactEmail">Contact email (optional)</label><input id="contactEmail" type="email" name="contactEmail" maxlength="254" value="'+escape(s.contactEmail)+'">'
     ].join('');
     const formNote=item.contactForm?'<p role="status">Your form service is set up, so this update adds a contact form to the Contact section. Preview it before you approve.</p>':'';
-    return view('Edit '+s.name,formNote+'<p>You are editing from the copy that was approved at launch. If you changed files on GitHub since then, read the preview carefully. Saving here never publishes straight to the live site.</p>'+
-      '<p><strong>Private files folder:</strong> '+escape('esp-'+item.job.site_slug)+'</p>'+
+    const liveUrl=websiteUrlForSlug(item.job.site_slug);
+    return view('Edit '+s.name,
+      '<div class="lo-page lo-edit"><header class="lo-hero">'+
+      '<p class="eyebrow"><span class="lo-badge lo-badge-lo">Safe editor</span>'+
+      '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>'+
+      '<h1>Edit '+escape(s.name)+'</h1>'+
+      '<p>You are editing from the copy that was approved at launch. If you changed files on GitHub since then, read the preview carefully. Saving here never publishes straight to the live site.</p>'+
+      '<div class="lo-toolbar">'+(liveUrl?'<a class="btn-secondary btn" href="'+escape(liveUrl)+'">Live production site</a>':'')+
+      '<a class="btn-secondary btn" href="/toolkit">Website toolkit</a></div></header>'+
+      formNote+
+      '<div class="lo-panel">'+
+      '<p><strong>Private files folder:</strong> <code>'+escape('esp-'+item.job.site_slug)+'</code></p>'+
       button('/site-update-preview','Preview website changes',current.csrf,fields)+
-      '<p><a href="/history">Back to your launches</a></p>');
+      '<p><a href="/history">Back to your launches</a></p></div></div>',
+      200,null,{wide:true,omitTitle:true});
   }
   async function prepare(request,env,current) {
     await limitAttempts(request,env);
@@ -175,17 +186,24 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     catch{return fail('This site update preview expired or your account changed. Start a fresh edit.',400);}
     const {item,ticket}=data;
     return view('Review your update',
-      '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+
-      '<p><a href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener"><strong>See exactly how it will look</strong></a></p>'+
-      '<p><strong>Approve and publish</strong> confirms automatic Cloudflare Pages preview builds are off, commits exactly this page to your website\'s <code>main</code> branch and merges it. Cloudflare Pages publishes it, and Launch &amp; Own checks the public site. If your site changed since this preview, nothing is published. Prefer to review it in GitHub first? Choose <strong>Open a pull request instead</strong> and merge it yourself.</p>'+
+      '<div class="lo-page"><header class="lo-hero">'+
+      '<p class="eyebrow"><span class="lo-badge lo-badge-lo">Exact preview</span>'+
+      '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>'+
+      '<h1>Review your update</h1>'+
+      '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p></header>'+
+      '<div class="lo-panel">'+
+      '<p class="tk-actions"><a class="btn-secondary btn" href="/site-update-html?ticket='+encodeURIComponent(raw)+'" target="_blank" rel="noopener">See exactly how it will look</a></p>'+
+      '<div class="lo-callout lo-callout-info"><strong>Approve and publish</strong> commits this exact page to <code>main</code>, merges it, and checks the live site. Prefer GitHub first? Choose <strong>Open a pull request instead</strong>.</div>'+
       '<details><summary>Technical details</summary><p>Starting version: <code>'+escape(ticket.baseCommitSha)+
-      '</code></p><p>Exact preview code: <code>'+escape(ticket.approvedHtmlSha256)+'</code></p></details>'+
+      '</code></p><p>Exact preview code: <code>'+escape(ticket.approvedHtmlSha256)+'</code></p>'+
+      '<p>Automatic Cloudflare Pages preview builds must stay off for this path.</p></details>'+
       // Owner decision 2026-11-26: approving publishes; a pull request stays available.
-      '<form action="/site-update-approve" method="POST"><input type="hidden" name="csrf" value="'+escape(current.csrf)+'">'+
+      '<form class="lo-decision" action="/site-update-approve" method="POST"><input type="hidden" name="csrf" value="'+escape(current.csrf)+'">'+
         '<input type="hidden" name="ticket" value="'+escape(raw)+'">'+
         '<button type="submit" name="action" value="publish">Approve and publish</button> '+
-        '<button type="submit" name="action" value="pr">Open a pull request instead</button></form>'+
-      '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p>');
+        '<button type="submit" class="btn-secondary" name="action" value="pr">Open a pull request instead</button></form>'+
+      '<p><a href="/site-update?id='+encodeURIComponent(item.job.id)+'">Edit again</a></p></div></div>',
+      200,null,{wide:true,omitTitle:true});
   }
   async function html(env,current,raw) {
     let data;
@@ -255,12 +273,19 @@ export function createSiteUpdateRoutes({view,fail,button,escape,formData,assertC
     const blocked=pr.status==='awaiting-customer-merge'&&receipt.mergeNote
       ?'<p>'+(receipt.mergeNote==='stale_base'?'Your website changed after you approved, so it was not published automatically.'
         :'GitHub did not allow an automatic merge, so it was not published.')+' Merge the pull request yourself when you are ready.</p>':'';
-    return view('Update status',
-      '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p>'+blocked+
+    return view(item.job.customer_name+' — Publishing & update pipeline',
+      '<div class="lo-page"><header class="lo-hero">'+
+      '<p class="eyebrow"><span class="lo-badge lo-badge-lo">Update status</span>'+
+      '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>'+
+      '<h1>'+escape(item.job.customer_name)+' — Publishing &amp; update pipeline</h1>'+
+      '<p><strong>Site:</strong> '+escape(item.job.customer_name)+'</p></header>'+blocked+
       renderUpdateStatusBody({
         pr, verifyResult: result, approvedHtmlSha256: receipt.approvedHtmlSha256,
-        ticketRaw: raw, jobId: item.job.id, escape
-      }));
+        ticketRaw: raw, jobId: item.job.id, escape,
+        liveWebsite: websiteUrlForSlug(item.job.site_slug),
+        prNumber: receipt.number
+      })+'</div>',
+      200,null,{wide:true,omitTitle:true});
   }
   return {editor,prepare,review,html,approve,status};
 }

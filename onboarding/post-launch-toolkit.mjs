@@ -240,8 +240,9 @@ export async function loadToolkitCards(env, session, time) {
   return cards;
 }
 
-const TOOLKIT_INTRO = 'This page combines <strong>recorded launch results</strong> (about 30 days) with <strong>live account reads</strong> when Pages access works. ' +
-  'Matched sites show live GitHub and Cloudflare links inside their launch card. Open <strong>Optional features</strong> to save a request, then Turn on domain, email, forms, analytics, or SEO/redirects when those controls are available.';
+const TOOLKIT_INTRO = 'Combines <strong>recorded launch results</strong> (about 30 days) with live account links when Pages access works. Update the site, or open <strong>Optional features</strong> to save a request and turn it on later.';
+
+const STITCH_PAGE = {wide: true, omitTitle: true};
 
 export function renderToolkitPage(cards, current, {view, escape}, {currentInventoryHtml = '', siteDetails = new Map()} = {}) {
   if (!current?.cloudflare_account_id)
@@ -249,65 +250,144 @@ export function renderToolkitPage(cards, current, {view, escape}, {currentInvent
       '<p>Connect GitHub and choose your Cloudflare account to open toolkit and launch history.</p>' +
       '<p class="muted">Until then, finish setup on the home page—nothing here configures domain, email, or forms.</p>' +
       '<p><a href="/">Back to setup</a></p>');
-  const launches = cards.length
-    ? cards.map((card, i) => renderCard(card, escape, i, siteDetails.get(card.slug))).join('')
-    : '<p>No websites in your recent launches. Create or upload a site from setup, then return after approval.</p>';
-  const launchesSection = '<section aria-labelledby="tk-recent-title"><h2 id="tk-recent-title">Recent launches</h2>' +
+  const liveCount = cards.filter(c => c.recordedWebsite).length;
+  const body = '<style>' + serviceExplorerCss + toolkitTabsCss + '</style>' +
+    '<div class="lo-page">' +
+    '<header class="lo-hero">' +
+    '<p class="eyebrow"><span class="lo-badge lo-badge-lo">Direct provider ownership</span>' +
+    '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>' +
+    '<h1>Your website toolkit</h1>' +
+    '<p>' + TOOLKIT_INTRO + '</p></header>' +
+    '<div class="lo-stat-grid" role="group" aria-label="Toolkit summary">' +
+    '<div class="lo-stat"><span>Provisioned sites</span><strong>' + cards.length + '</strong>' +
+    '<p>Recent launches on this list</p></div>' +
+    '<div class="lo-stat"><span>Public web</span><strong>' + (liveCount ? 'Live' : '—') + '</strong>' +
+    '<p>' + liveCount + ' address' + (liveCount === 1 ? '' : 'es') + ' recorded as live</p></div>' +
+    '<div class="lo-stat"><span>Ownership</span><strong>Yours</strong>' +
+    '<p>No stored passwords · files stay in your accounts</p></div></div>' +
+    '<section class="lo-panel" aria-labelledby="tk-recent-title"><h2 id="tk-recent-title">Recent launches</h2>' +
     '<p class="muted">Rows stay for 30 days after your first approval. Status, address, and fingerprints come from ' +
     'what we recorded when the launch was checked—not a live provider poll. When the site is still in your accounts, ' +
-    'live links appear under <strong>In your accounts now</strong> on that card.</p>' + launches + '</section>';
-  return view('Your website toolkit',
-    '<style>' + serviceExplorerCss + toolkitTabsCss + '</style><p>' + TOOLKIT_INTRO + '</p>' +
-    launchesSection + currentInventoryHtml +
-    '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p>');
+    'live links appear under <strong>In your accounts now</strong> on that card.</p>' +
+    (cards.length
+      ? cards.map((card, i) => renderCard(card, escape, i, siteDetails.get(card.slug))).join('')
+      : '<p>No websites in your recent launches. Create or upload a site from setup, then return after approval.</p>') +
+    '</section>' +
+    (currentInventoryHtml
+      ? '<section class="lo-panel" aria-labelledby="tk-discovered-title"><h2 id="tk-discovered-title">Discovered sites in your accounts</h2>' +
+        currentInventoryHtml + '</section>'
+      : '') +
+    '<p><a href="/history">Your launches</a> · <a href="/">Back to setup</a></p></div>';
+  return view('Your website toolkit', body, 200, null, STITCH_PAGE);
 }
 
 function renderCard(card, escape, index = 0, found = '') {
   const time = iso => '<time datetime="' + escape(iso) + '">' + escape(iso.slice(0, 10)) +
     ' ' + escape(iso.slice(11, 16)) + ' UTC</time>';
   const website = card.recordedWebsite
-    ? '<p>Public address when checked: <code>' + escape(card.recordedWebsite) + '</code></p>' : '';
+    ? '<div class="lo-url"><p>Public address when checked: <code>' + escape(card.recordedWebsite) +
+      '</code></p></div>' : '';
   const verification = card.verifiedAt
-    ? '<p>Last checked ' + time(card.verifiedAt) + '</p><p>Checked version: <code>' +
-      escape(card.verifiedCommitSha) + '</code></p>' : '';
+    ? '<p>Last checked ' + time(card.verifiedAt) + '</p>' +
+      '<details><summary>Checked version</summary><p><code>' +
+      escape(card.verifiedCommitSha) + '</code></p></details>' : '';
   const expires = card.expiresAt ? '<p>Stays on this list until ' + time(card.expiresAt) + '</p>' : '';
   const digest = card.approvalFingerprint
     ? '<p>Approval fingerprint <code>' + escape(card.approvalFingerprint.slice(0, 12)) + '…</code></p>' : '';
   const error = card.errorCode
     ? '<p>Last result code <code>' + escape(card.errorCode) + '</code></p>' : '';
   const edit = card.editPath
-    ? '<p><a href="' + escape(card.editPath) + '">' +
+    ? '<a class="btn" href="' + escape(card.editPath) + '">' +
       (card.editPath.startsWith('/imported-edit') ? 'Edit imported website' : 'Update this website') +
-      '</a></p>' : '';
+      '</a>' : '';
   const options = card.optionsPath
-    ? '<p><a href="' + escape(card.optionsPath) + '">Review optional requests (store only)</a></p>' +
-      '<p class="muted">Domain, email, forms, analytics, previews, SEO, and redirects are saved for review. ' +
-      'They are not applied from this page.</p>' : '';
+    ? '<p class="tk-actions"><a class="btn-secondary btn" href="' + escape(card.optionsPath) +
+      '">Review optional requests (store only)</a></p>' +
+      '<p class="muted">Save a request here for review. Nothing is applied from this page.</p>' : '';
   const caps = Object.entries(card.capabilities || {}).map(([id, item]) => {
     const label = CAP_LABELS[id] || id;
     const state = STATE_LABELS[item.state] || item.state;
     return '<li><strong>' + escape(label) + '</strong> · ' + escape(state) + ': ' +
       escape(item.detail) + '</li>';
   }).join('');
+  const checkItems = Object.entries(card.capabilities || {})
+    .filter(([id]) => ['web_analytics', 'pr_previews', 'custom_domains', 'contact_forms'].includes(id));
+  const readyCount = checkItems.filter(([, item]) =>
+    ['available_opt_in', 'active_verified', 'included_verified'].includes(item.state)).length;
+  const checklist = checkItems.map(([id, item]) => {
+    const label = CAP_LABELS[id] || id;
+    const state = STATE_LABELS[item.state] || item.state;
+    const impact = id === 'pr_previews'
+      ? 'Does not change the main public site'
+      : id === 'web_analytics'
+        ? 'Changes public site on next deploy'
+        : 'Changes public site when turned on';
+    return '<div class="lo-check"><div><strong>' + escape(label) + '</strong>' +
+      '<p>' + escape(impact) + '. ' + escape(item.detail) + '</p></div>' +
+      '<span class="lo-badge">' + escape(state) + '</span></div>';
+  }).join('');
   const updatesCap = card.capabilities?.website_updates;
   const tabs = '<fieldset class="tk-tabs"><legend class="lo-sr">Sections for ' + escape(card.name) + '</legend>' +
     SECTIONS.map(([id, label], i) => '<label class="tk-tab"><input class="tk-radio" type="radio" name="tk-site-' + index +
       '" value="' + id + '" aria-label="' + label + '"' + (i ? '' : ' checked') + '><span aria-hidden="true">' + label + '</span></label>').join('') + '</fieldset>';
   const panel = (id, label, html) => '<div class="tk-panel tk-p-' + id + '"><h3>' + label + '</h3>' + html + '</div>';
-  return '<section class="tk-site"><h2>' + escape(card.name) + '</h2><p class="pill">' + escape(card.statusLabel) + '</p>' + tabs +
-    panel('overview', 'Overview', '<p>' + escape(card.statusDetail) + '</p>' + website + verification + expires + error +
-      (found ? '<h4>In your accounts now</h4>' + found : '')) +
-    panel('updates', 'Updates', edit + (updatesCap ? '<p>' + escape(updatesCap.detail) + '</p>' : '') +
-      '<p><a href="/history">Your launches</a> shows every recorded launch and its result.</p>') +
-    panel('services', 'Services', options +
-      '<details><summary>Explore your website services</summary>' + serviceExplorerMarkup({mode:'toolkit', capabilities:card.capabilities}) + '</details>') +
-    panel('settings', 'Settings', digest +
+  const dual = '<div class="tk-block"><h3>Public web and verification</h3><div class="lo-dual">' +
+    '<div><h3>Your site on the internet <span class="lo-badge lo-badge-live">Public web</span></h3>' +
+    '<p class="pill">' + escape(card.statusLabel) + '</p>' +
+    '<p>' + escape(card.statusDetail) + '</p>' + website + '</div>' +
+    '<div><h3>Launch &amp; Own check <span class="lo-badge lo-badge-lo">Verification</span></h3>' +
+    verification + expires + error +
+    (card.verifiedAt
+      ? '<div class="lo-callout lo-callout-ok">Recorded check matched the approved files.</div>'
+      : '<div class="lo-callout lo-callout-warn">Open your launches for the recorded result if a check is missing.</div>') +
+    '</div></div></div>';
+  const infra = '<div class="tk-block"><h3 class="lo-section-title">Where your site lives</h3>' +
+    '<div class="lo-infra" role="group" aria-label="Where this site lives">' +
+    '<div><div class="lo-head"><span class="lo-ico lo-ico-gh" aria-hidden="true">GH</span>' +
+    '<div><span class="lo-badge lo-badge-gh">GitHub</span><h3>Private repository</h3></div></div>' +
+    '<p>Files stay in your GitHub account. Edits publish through a pull request you control.</p>' +
+    '<div class="lo-kv"><div><span class="k">Branch</span><span>main</span></div>' +
+    '<div><span class="k">Access</span><span>Private</span></div></div></div>' +
+    '<div><div class="lo-head"><span class="lo-ico lo-ico-cf" aria-hidden="true">CF</span>' +
+    '<div><span class="lo-badge lo-badge-cf">Cloudflare</span><h3>Pages project</h3></div></div>' +
+    '<p>Hosting stays in your Cloudflare account. Rebuilds follow merges to <code>main</code>.</p>' +
+    '<div class="lo-kv"><div><span class="k">Production branch</span><span>main</span></div>' +
+    '<div><span class="k">Ownership</span><span>Your account</span></div></div></div></div>' +
+    (found ? '<div class="lo-found"><h4>In your accounts now</h4>' + found + '</div>' : '') +
+    '</div>';
+  const updateSteps = '<div class="lo-steps" aria-label="How to update this site">' +
+    [['1', 'Edit files', 'Change copy here or in your repository.'],
+      ['2', 'Open a pull request', 'Preview the exact change before anything goes live.'],
+      ['3', 'Merge to main', 'You publish; Launch &amp; Own does not merge without your approval.'],
+      ['4', 'Wait for rebuild', 'Cloudflare Pages rebuilds the public site after merge.']
+    ].map(([n, t, d]) => '<div class="lo-step-card"><span class="n" aria-hidden="true">' + n +
+      '</span><h3>' + t + '</h3><p>' + d + '</p></div>').join('') + '</div>';
+  const headActions = edit ? '<p class="tk-actions">' + edit + '</p>' : '';
+  return '<section class="tk-site"><div class="tk-site-head"><div><h2>' + escape(card.name) +
+    ' — Site toolkit</h2><p class="pill">' + escape(card.statusLabel) + '</p></div>' + headActions + '</div>' + tabs +
+    panel('overview', 'Overview', dual + infra) +
+    panel('updates', 'Updates',
+      '<div class="tk-block"><h4>How to update this site</h4>' +
+      updateSteps + (edit ? '<p class="tk-actions" style="margin-top:14px">' + edit + '</p>' : '') +
+      (updatesCap ? '<p>' + escape(updatesCap.detail) + '</p>' : '') +
+      '<p><a href="/history">Your launches</a> shows every recorded launch and its result.</p></div>') +
+    panel('services', 'Services',
+      '<div class="tk-block">' + options + '</div>' +
+      (checklist
+        ? '<div class="lo-checklist"><div class="lo-checklist-head"><h2>After launch checklist</h2>' +
+          '<span class="lo-badge">' + readyCount + ' of ' + checkItems.length + ' available</span></div>' +
+          checklist + '</div>'
+        : '') +
+      '<div class="tk-block"><details><summary>Explore your website services</summary>' +
+      serviceExplorerMarkup({mode:'toolkit', capabilities:card.capabilities}) + '</details></div>') +
+    panel('settings', 'Settings',
+      '<div class="tk-block">' + digest +
       '<details><summary>What this site includes</summary><ul>' + caps + '</ul></details>' +
-      '<p>Your files stay in your GitHub account and your hosting in your Cloudflare account. Manage app access in each provider\'s settings.</p>') +
+      '<p>Your files stay in your GitHub account and your hosting in your Cloudflare account. Manage app access in each provider\'s settings.</p></div>') +
     '</section>';
 }
 
-export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ticketRaw, jobId, escape}) {
+export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ticketRaw, jobId, escape, liveWebsite = null, prNumber = null}) {
   const ladder = updatePublicationLadder({
     prStatus: pr.status, verifyStatus: verifyResult?.status
   });
@@ -320,22 +400,79 @@ export function renderUpdateStatusBody({pr, verifyResult, approvedHtmlSha256, ti
       (isLaunchId(jobId) ? '<p><a href="/site-update?id=' + encodeURIComponent(jobId) + '">Start a fresh edit</a></p>' : '');
   if (ladder.current === 'unavailable') return '<p>Update status is unavailable right now.</p>';
 
-  const steps = ladder.steps.map(step =>
-    '<li' + (step.active ? '><strong>' : '>') + escape(step.title) +
-    (step.active ? '</strong>' : '') + ': ' + escape(step.hint) + '</li>'
-  ).join('');
+  const order = ['approved', 'merge', 'publishing', 'live'];
+  const activeIdx = order.indexOf(ladder.current);
+  const statusLine = {
+    merge: 'Pipeline status: pull request awaiting your merge',
+    publishing: 'Pipeline status: checking your live site',
+    live: 'Pipeline status: live and checked'
+  }[ladder.current] || 'Pipeline status';
+  const pipe = ladder.steps.map((step, i) => {
+    const state = step.active ? 'is-active' : (activeIdx > i ? 'is-done' : '');
+    const mark = activeIdx > i ? '✓' : String(i + 1);
+    const tag = activeIdx > i
+      ? '<span class="lo-pipe-tag">Done</span>'
+      : (step.active ? '<span class="lo-pipe-tag lo-pipe-tag-now">Now</span>' : '');
+    return '<li class="' + state + '"><div class="lo-pipe-top"><span class="n" aria-hidden="true">' +
+      mark + '</span>' + tag + '</div><strong>' + escape(step.title) + '</strong><p>' +
+      escape(step.hint) + '</p></li>';
+  }).join('');
+  // Keep vertical ladder for title matches used by status tests/readers.
+  const steps = ladder.steps.map((step, i) => {
+    const state = step.active ? 'is-active' : (activeIdx > i ? 'is-done' : '');
+    const mark = activeIdx > i ? '✓' : String(i + 1);
+    return '<li class="' + state + '"><span class="dot" aria-hidden="true">' + mark +
+      '</span><div><strong>' + escape(step.title) + '</strong><p>' + escape(step.hint) + '</p></div></li>';
+  }).join('');
   const {label, detail} = ladder.primaryAction;
   const mergeCta = ladder.current === 'merge' && pr.pullRequest
-    ? '<p><a class="btn-like" href="' + escape(pr.pullRequest) + '" rel="noopener"><strong>' +
-      escape(label) + '</strong></a></p><p>' + escape(detail) + '</p>' : '';
-  const live = ladder.current === 'live' && verifyResult.website
+    ? '<p class="tk-actions"><a class="btn" href="' + escape(pr.pullRequest) + '" rel="noopener">' +
+      escape(label) + '</a></p><p>' + escape(detail) + '</p>' +
+      '<div class="lo-callout lo-callout-warn">You click merge in GitHub. Launch &amp; Own cannot merge without your authority.</div>'
+    : '';
+  const liveUrl = (ladder.current === 'live' && verifyResult?.website) || liveWebsite;
+  const live = ladder.current === 'live' && verifyResult?.website
     ? '<p class="pill">Live and checked</p><p><a href="' + escape(verifyResult.website) + '">' +
       escape(verifyResult.website) + '</a></p>' : '';
+  const liveProd = liveUrl
+    ? '<p class="tk-actions"><a class="btn-secondary btn" href="' + escape(liveUrl) + '">Live production site</a></p>'
+    : '';
   const checking = ladder.current === 'publishing' ? '<p>' + escape(detail) + '</p>' : '';
   const refresh = '<p><a href="/site-update-status?ticket=' + encodeURIComponent(ticketRaw) + '">Refresh status</a></p>';
   const revision = pr.mergedCommitSha ? '<p>Published version: <code>' + escape(pr.mergedCommitSha) + '</code></p>' : '';
-  return '<ol>' + steps + '</ol>' + mergeCta + live + checking + refresh +
+  const resolvedPrNumber = Number.isSafeInteger(prNumber) && prNumber > 0
+    ? prNumber
+    : Number((pr.pullRequest || '').match(/\/pull\/(\d+)/)?.[1]);
+  const prBadge = Number.isSafeInteger(resolvedPrNumber) && resolvedPrNumber > 0
+    ? '<span class="lo-badge lo-badge-lo">Pull request #' + escape(String(resolvedPrNumber)) + '</span>'
+    : '<span class="lo-badge lo-badge-lo">Publishing pipeline</span>';
+  return '<div class="lo-panel lo-pipe-card">' +
+    '<div class="lo-pipe-head"><p class="lo-pipe-status"><strong>' + escape(statusLine) +
+    '</strong></p><span class="muted">Direct edge sync after merge</span></div>' +
+    '<ol class="lo-pipe" aria-label="Publication steps">' + pipe + '</ol></div>' +
+    '<div class="lo-split"><div class="lo-pr-card">' +
+    '<p class="eyebrow">' + prBadge +
+    '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>' +
+    '<h2>Your approved update</h2>' +
+    '<p>Updates publish through a pull request you control. Nothing goes live until you merge.</p>' +
+    '<ol class="upd-ladder lo-sr" aria-hidden="true">' + steps + '</ol>' +
+    mergeCta + live + liveProd + checking + refresh +
     '<details><summary>Technical details</summary>' + revision + '<p>Exact preview code: <code>' +
-    escape(approvedHtmlSha256) + '</code></p></details>' +
-    '<p><a href="/toolkit">Website toolkit</a> · <a href="/history">Your launches</a></p>';
+    escape(approvedHtmlSha256) + '</code></p></details></div>' +
+    '<div class="lo-panel lo-own-card"><h2>Ownership stays with you</h2>' +
+    '<div class="lo-kv"><div><span class="k">Files</span><span>Your GitHub repository</span></div>' +
+    '<div><span class="k">Hosting</span><span>Your Cloudflare Pages project</span></div>' +
+    '<div><span class="k">Publish</span><span>Merge or Approve and publish</span></div></div>' +
+    '<p class="muted">Launch &amp; Own never holds a durable credential that can merge without your approval.</p>' +
+    '<p><a href="/toolkit">Website toolkit</a> · <a href="/history">Your launches</a></p></div></div>' +
+    '<div class="lo-panel lo-howto"><h2>How to make future updates</h2>' +
+    '<p class="muted">Edit, preview the exact page, then publish through a pull request you control.</p>' +
+    '<div class="lo-steps">' +
+    [['1', 'Edit', 'Change copy in the editor or in GitHub.'],
+      ['2', 'Preview', 'Review the exact page before anything goes live.'],
+      ['3', 'Approve', 'Open a pull request or publish with your approval.'],
+      ['4', 'Live check', 'We confirm the public site matches what you approved.']
+    ].map(([n, t, d]) => '<div class="lo-step-card"><span class="n">' + n + '</span><h3>' + t +
+      '</h3><p>' + d + '</p></div>').join('') +
+    '</div></div>';
 }
