@@ -4,8 +4,8 @@
 export const STITCH_TOKEN_CSS = `:root{
 --ink:#0F172A;--muted:#434652;--line:#E5E5DE;--bg:#FBFBF9;--card:#FFFFFF;
 --blue:#2563EB;--blue-deep:#1D4ED8;--blue-soft:#EFF6FF;--blue-brand:#174CA5;
---green:#059669;--green-soft:#D1FAE5;--green-live:#10B981;
---orange:#D97706;--orange-soft:#FFF7ED;--warn:#D97706;--warn-soft:#FFFBEB;
+--green:#047857;--green-soft:#D1FAE5;--green-live:#059669;
+--orange:#C2410C;--orange-soft:#FFF7ED;--warn:#B45309;--warn-soft:#FFFBEB;
 --danger:#DC2626;--danger-soft:#FEF2F2;
 --r:8px;--r-lg:16px;--r-xl:24px;
 --shadow:0 1px 3px rgba(15,23,42,.04),0 6px 16px -4px rgba(15,23,42,.03);

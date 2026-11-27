@@ -13,7 +13,7 @@ const tabsCss = `
 .lo-marketing .lo-tab:hover{background:#f0f4fa}
 .lo-marketing .lo-radio{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
 .lo-marketing .lo-tab-label{font-weight:800;font-size:1.02rem}.lo-marketing .lo-tab-hint{font-size:.8rem;color:var(--muted)}
-.lo-marketing .lo-tab:has(.lo-radio:checked){background:var(--blue);color:#fff}.lo-marketing .lo-tab:has(.lo-radio:checked) .lo-tab-hint{color:#dce8ff}
+.lo-marketing .lo-tab:has(.lo-radio:checked){background:var(--blue);color:#fff}.lo-marketing .lo-tab:has(.lo-radio:checked) .lo-tab-hint{color:#F0F7FF}
 .lo-marketing .lo-tab:has(.lo-radio:focus-visible){outline:3px solid var(--blue);outline-offset:3px}
 .lo-marketing:has(.lo-radio:checked) .lo-panel{display:none}
 .lo-marketing:has(#lo-tab-launch:checked) .lo-p-launch,.lo-marketing:has(#lo-tab-maintain:checked) .lo-p-maintain,.lo-marketing:has(#lo-tab-grow:checked) .lo-p-grow{display:block}
@@ -40,7 +40,7 @@ export const landingCss = marketingPipelineCss + tabsCss + `
 .lp{display:grid;gap:clamp(48px,8vw,96px);max-width:1024px;margin:0 auto}
 .lp-hero{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:clamp(28px,5vw,56px);align-items:center;min-height:min(78vh,720px);padding:clamp(8px,3vw,28px) 0 0}
 .lp-hero[data-enter]{animation:lp-enter .7s ease both}
-@keyframes lp-enter{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes lp-enter{from{transform:translateY(12px)}to{transform:none}}
 @media(prefers-reduced-motion:reduce){.lp-hero[data-enter]{animation:none}}
 .lp-kicker{margin:0;font-size:.78rem;letter-spacing:.13em;font-weight:800;text-transform:uppercase;color:var(--blue)}
 .lp-hero h1{margin:10px 0 14px;font-size:clamp(2.4rem,6.4vw,4.4rem);line-height:1.02;letter-spacing:-.055em}
