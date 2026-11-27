@@ -19,7 +19,41 @@ const tabsCss = `
 .lo-marketing:has(#lo-tab-launch:checked) .lo-p-launch,.lo-marketing:has(#lo-tab-maintain:checked) .lo-p-maintain,.lo-marketing:has(#lo-tab-grow:checked) .lo-p-grow{display:block}
 .lo-marketing .lo-panel{margin:0;padding:0;border:0}.lo-marketing .lo-panel-head{display:grid;gap:10px;margin-bottom:22px}
 .lo-marketing .lo-panel-head h3{font-size:clamp(1.6rem,3.6vw,2.4rem);letter-spacing:-.04em;line-height:1.1}
-.lo-marketing .lo-panel .lo-ai,.lo-marketing .lo-panel .lo-explorer{margin-top:0}
+.lo-marketing .lo-panel .lo-explorer{margin-top:0}
+.lo-marketing .lo-p-maintain .lo-ai{margin:28px 0 8px}
+.lo-marketing .lo-editor{margin:0 0 22px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:clamp(16px,3vw,24px);display:grid;gap:14px;justify-items:stretch}
+.lo-marketing .lo-editor>h3{margin:0;font-size:clamp(1.25rem,2.4vw,1.55rem);letter-spacing:-.03em}
+.lo-marketing .lo-editor>.lo-editor-lede{margin:0;color:var(--muted);font-size:.95rem;max-width:62ch;line-height:1.45}
+.lo-marketing .lo-editor>.lo-path-badge{justify-self:start}
+.lo-marketing .lo-ve-shot{border-radius:12px;overflow:hidden;border:1px solid #1a1a1a;background:#0a0a0a;box-shadow:0 18px 40px #0a0a0a33;min-width:0}
+.lo-marketing .lo-ve-top{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#111;color:#c9c9c9;font-size:.68rem;font-weight:700;letter-spacing:.04em;flex-wrap:wrap}
+.lo-marketing .lo-ve-top .on{background:#fff;color:#111;border-radius:6px;padding:3px 8px}
+.lo-marketing .lo-ve-top .off{opacity:.7;padding:3px 6px}
+.lo-marketing .lo-ve-top .file{margin-right:auto;opacity:.85}
+.lo-marketing .lo-ve-body{display:grid;grid-template-columns:132px minmax(0,1fr) 128px;min-height:220px;background:#0a0a0a}
+.lo-marketing .lo-ve-side{padding:10px;color:#bdbdbd;font-size:.68rem;border-right:1px solid #222}
+.lo-marketing .lo-ve-side.right{border-right:0;border-left:1px solid #222}
+.lo-marketing .lo-ve-tabs{display:flex;gap:8px;margin-bottom:10px;color:#888}
+.lo-marketing .lo-ve-tabs span:first-child{color:#fff;border-bottom:2px solid #fff;padding-bottom:2px}
+.lo-marketing .lo-ve-blocks{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.lo-marketing .lo-ve-blocks i{display:block;border:1px solid #333;border-radius:5px;padding:7px 4px;text-align:center;font-style:normal;background:#161616;color:#ddd}
+.lo-marketing .lo-ve-canvas{background:#eceff3;padding:18px;display:grid;align-content:start;gap:8px}
+.lo-marketing .lo-ve-page{background:#fff;border:1px solid #d5dbe3;border-radius:8px;padding:18px 16px;display:grid;gap:8px;box-shadow:0 8px 20px #15243a14}
+.lo-marketing .lo-ve-page strong{font:700 1.35rem/1.15 Georgia,serif;color:#1d4ed8}
+.lo-marketing .lo-ve-page b{font-size:.92rem;color:#0f172a}
+.lo-marketing .lo-ve-page em{font-style:normal;color:#2563eb;text-decoration:underline;font-size:.88rem}
+.lo-marketing .lo-ve-page .sel{outline:2px solid #2563eb;outline-offset:3px;border-radius:2px}
+.lo-marketing .lo-ve-hint{margin:8px 0 0;color:#777;font-size:.68rem;line-height:1.4}
+.lo-marketing .lo-ve-foot{display:flex;justify-content:flex-end;padding:6px 12px;background:#111;color:#888;font-size:.65rem}
+.lo-marketing .lo-editor-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.lo-marketing .lo-editor-steps li{display:grid;gap:4px;padding:12px;border-radius:12px;background:#f8fafc;border:1px solid var(--line);min-width:0}
+.lo-marketing .lo-editor-steps b{color:var(--blue);font-size:.72rem;letter-spacing:.04em}
+.lo-marketing .lo-editor-steps strong{font-size:.9rem}.lo-marketing .lo-editor-steps p{margin:0;font-size:.82rem;color:var(--muted);line-height:1.45}
+.lo-marketing .lo-editor details{margin:0;padding-top:4px;border-top:1px solid var(--line)}
+.lo-marketing .lo-editor summary{cursor:pointer;color:var(--blue);font-weight:750;font-size:.9rem}
+.lo-marketing .lo-editor details p,.lo-marketing .lo-editor details ul{margin:8px 0 0;color:var(--muted);font-size:.88rem;line-height:1.5}
+.lo-marketing .lo-editor details ul{padding-left:18px}
+@media(max-width:700px){.lo-marketing .lo-ve-body{grid-template-columns:1fr}.lo-marketing .lo-ve-side{display:none}}
 .lo-marketing .lo-paths{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}
 .lo-marketing .lo-path{background:#fff;border:1px solid var(--line);border-radius:15px;padding:18px;display:grid;gap:8px;align-content:start;transition:transform .15s ease,box-shadow .15s ease}
 .lo-marketing .lo-path:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
@@ -32,8 +66,8 @@ const tabsCss = `
 .lo-marketing .lo-asst-steps p{margin:2px 0 0;font-size:.85rem;color:var(--muted)}
 .lo-marketing .lo-asst-n{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#fff4dc;color:#8a5300;font-weight:800;font-size:.85rem}
 .lo-marketing .lo-asst ul{margin:0;padding-left:18px;color:var(--muted);font-size:.9rem}
-@media(max-width:900px){.lo-marketing .lo-asst-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){.lo-marketing .lo-asst-steps{grid-template-columns:1fr}.lo-marketing .lo-tabs{grid-template-columns:1fr}.lo-marketing .lo-tab{grid-template-columns:auto 1fr;align-items:baseline;column-gap:10px}.lo-marketing .lo-paths{grid-template-columns:1fr}}
+@media(max-width:900px){.lo-marketing .lo-asst-steps,.lo-marketing .lo-editor-steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.lo-marketing .lo-asst-steps,.lo-marketing .lo-editor-steps{grid-template-columns:1fr}.lo-marketing .lo-tabs{grid-template-columns:1fr}.lo-marketing .lo-tab{grid-template-columns:auto 1fr;align-items:baseline;column-gap:10px}.lo-marketing .lo-paths{grid-template-columns:1fr}}
 `;
 
 export const landingCss = marketingPipelineCss + tabsCss + `
@@ -93,15 +127,47 @@ export const zipCompatibilityHtml =
 // Name lives on the radio; the visible spans are hidden from assistive tech so screen readers announce each tab once.
 const tab=(id,label,hint,checked)=>'<label class="lo-tab"><input class="lo-radio" type="radio" name="lo-explore" id="lo-tab-'+id+'" value="'+id+'" aria-label="'+label+': '+hint+'"'+(checked?' checked':'')+'><span class="lo-tab-label" aria-hidden="true">'+label+'</span><span class="lo-tab-hint" aria-hidden="true">'+hint+'</span></label>';
 
-// Honest maintenance paths (#165, #43/#55): only the independent tool path is available today.
-const maintainPaths = '<div class="lo-paths" aria-label="Ways to make changes">'+
+// Hosted visual HTML editor (site-editor) is available in hosted beta. Own AI tools stay available. Customer-owned assistant stays planned (#165).
+// Decorative mock only (CSP has no img-src): mirrors the real Visual / Source editor chrome without scripts or screenshots.
+const editorShot =
+  '<div class="lo-ve-shot" aria-hidden="true">'+
+  '<div class="lo-ve-top"><span class="file">INDEX.HTML</span><span class="on">Visual</span><span class="off">Source</span><span class="off">Desktop</span><span class="off">Preview</span></div>'+
+  '<div class="lo-ve-body"><div class="lo-ve-side"><div class="lo-ve-tabs"><span>Blocks</span><span>Tree</span><span>Assets</span></div>'+
+  '<div class="lo-ve-blocks"><i>H1</i><i>H2</i><i>Paragraph</i><i>Divider</i></div></div>'+
+  '<div class="lo-ve-canvas"><div class="lo-ve-page"><strong class="sel">Example Bakery</strong><b>Saturday: 9 AM–2 PM</b><em>Contact us</em></div></div>'+
+  '<div class="lo-ve-side right"><div class="lo-ve-tabs"><span>Style</span><span>Attributes</span><span>HTML</span></div>'+
+  '<p class="lo-ve-hint">Select an element to edit its style.</p></div></div>'+
+  '<div class="lo-ve-foot">Autosaved · nothing published yet</div></div>';
+
+const maintainEditor =
+  '<article class="lo-editor" aria-labelledby="lo-editor-title">'+
+  '<p class="lo-path-badge">Available · hosted beta</p>'+
+  '<h3 id="lo-editor-title">Built-in visual HTML editor</h3>'+
+  '<div class="lo-editor-lede">After a live launch, open your toolkit and edit the real page in a full visual HTML editor — Visual and Source modes, blocks, styles, and a live canvas. Change text on the page, then choose Preview. Nothing goes live until you approve that exact change, or open a pull request and merge it yourself.</div>'+
+  editorShot+
+  '<ol class="lo-editor-steps" aria-label="How the visual editor works">'+
+  [['01 · Open','Your toolkit','Sign in and open Updates for the live site you own.'],
+   ['02 · Edit','Visual HTML editor','Click the page, swap text and links, or switch to Source. Hosting files stay off-limits.'],
+   ['03 · Preview','Exact private preview','See the changed pages before anything goes public.'],
+   ['04 · Decide','Approve or pull request','Approve that exact version to publish, or open a pull request and merge it yourself.']]
+    .map(([b,t,d])=>'<li><b>'+b+'</b><strong>'+t+'</strong><p>'+d+'</p></li>').join('')+
+  '</ol>'+
+  '<details><summary>What can the visual editor change today?</summary>'+
+  '<ul><li><strong>Uploaded websites:</strong> edit plain HTML and CSS pages in the visual editor — text, links, contact details, and colors. Publishing still goes through preview and your approval.</li>'+
+  '<li><strong>Simple one-page sites:</strong> a guided form for headline, about copy, services, theme, and optional contact email.</li>'+
+  '<li>Compiled or minified bundles stay read-only here; edit those with your own coding tool.</li>'+
+  '<li>Nothing publishes until you approve the exact preview, or merge a pull request yourself.</li></ul></details></article>';
+
+// Other Maintain paths (own AI tools + planned assistant). The #164 AI journey sits between the editor and these.
+const maintainOtherPaths =
+  '<div class="lo-paths" aria-label="Other ways to make changes">'+
   '<article class="lo-path"><span class="lo-path-badge">Available with your own tools</span><h3>Your own AI coding tool</h3><p>Use Codex, Claude Code, or another GitHub coding tool that can write to your repo. Read-only ChatGPT GitHub access cannot push.</p><p>Ask for a branch and a pull request. Do not let it write straight to your production branch.</p></article>'+
   '<article class="lo-path"><span class="lo-path-badge plan">Planned · not released</span><h3>Your own website assistant</h3><p>A private assistant you would set up in your own GitHub and Cloudflare accounts. Ask in plain words, preview the exact change, then approve once to publish. Or open a pull request and merge it yourself.</p><p>Launch &amp; Own would have no access to it. It is not available yet, and no release date is promised.</p></article></div>'+
   '<div class="lo-asst"><h3 id="lo-asst-title">How the planned assistant would work</h3>'+
   '<ol class="lo-asst-steps">'+
   [['Ask','Describe the change, such as new Saturday hours.'],['Prepare','It prepares the change on a separate branch. Your live site is untouched.'],['Preview','You see an exact private preview of the changed pages.'],['Approve','You approve that exact version. The approval works once and expires after 15 minutes.'],['Merge','Approving merges that exact change into your site\'s main branch, only if nothing changed since the preview. Or choose a pull request and merge it yourself.'],['Publish and check','Cloudflare publishes the merged files and the assistant checks the live site.']]
     .map(([t,d],i)=>'<li><span class="lo-asst-n" aria-hidden="true">'+(i+1)+'</span><div><strong>'+t+'</strong><p>'+d+'</p></div></li>').join('')+'</ol>'+
-  '<details><summary>What could it change first?</summary><p>Up to 10 changes in up to 5 files — text, links, business details and colors — through the visual editor for a page you already own, or a short request to your AI assistant when that path is turned on. Changes still go through an exact preview and your approval. Anything that would touch code is refused, and every other file stays exactly the same.</p></details>'+
+  '<details><summary>What could it change first?</summary><p>Up to 10 changes in up to 5 files — text, links, business details and colors — from a short request when that path is turned on. Changes still go through an exact preview and your approval. Anything that would touch code is refused, and every other file stays exactly the same.</p></details>'+
   '<details><summary>What stays in your control?</summary><ul>'+
   '<li>You run the setup in your own accounts and review everything it would create first. The Grow tab lists those resources.</li>'+
   '<li>Only you can sign in to it.</li>'+
@@ -136,11 +202,12 @@ export function exploreMarkup({zipEnabled=false}={}){
     :'Create a website and publish it in accounts you own. We help you connect, show a private preview, and publish only when you approve.';
   return '<div class="lo-marketing" id="explore" aria-labelledby="lo-explore-title"><div class="lo-hero"><p class="lo-kicker">How it works</p><h2 id="lo-explore-title">Launch today. Improve any time. Grow when you are ready.</h2></div>'+
     '<fieldset class="lo-tabs"><legend class="lo-sr">Choose what to explore</legend>'+
-    tab('launch','Launch','Get your business online',true)+tab('maintain','Maintain','Make changes. Just ask.')+tab('grow','Grow','Grow beyond a website')+'</fieldset>'+
+    tab('launch','Launch','Get your business online',true)+tab('maintain','Maintain','Visual HTML editor')+tab('grow','Grow','Grow beyond a website')+'</fieldset>'+
     '<section class="lo-panel lo-p-launch" aria-labelledby="lo-launch-title"><div class="lo-panel-head"><h3 id="lo-launch-title">Get your business online.</h3><p class="lo-lede">'+lede+'</p><div class="lo-trust"><span>No code needed for a simple site</span><span>Nothing publishes without your approval</span><span>Your files stay yours</span></div></div>'+
     pipeline.slice(from,to)+
     (zipEnabled?'<details><summary>What kind of website can I bring?</summary>'+zipCompatibilityHtml+'</details>':'')+'</section>'+
-    '<section class="lo-panel lo-p-maintain" aria-label="Maintain: make changes">'+journey+maintainPaths+'</section>'+
+    '<section class="lo-panel lo-p-maintain" aria-labelledby="lo-maintain-title"><div class="lo-panel-head"><h3 id="lo-maintain-title">Make changes after launch.</h3><p class="lo-lede">Use the built-in visual HTML editor in your toolkit — edit the page like a design canvas, or switch to Source. Or work in your own GitHub with an AI coding tool. A private assistant you run yourself is planned and not released yet.</p><div class="lo-trust"><span>Visual HTML editor · hosted beta</span><span>Exact preview before publish</span><span>Approve or open a pull request</span></div></div>'+
+    maintainEditor+journey+maintainOtherPaths+'</section>'+
     '<section class="lo-panel lo-p-grow" aria-label="Grow beyond a website">'+serviceExplorerMarkup()+assistantResources+'</section>'+
     pipeline.slice(foot,pipeline.lastIndexOf('</div>'))+'</div>';
 }
@@ -150,7 +217,8 @@ const faq = zipEnabled => [
   ['What will I connect, and what can Launch &amp; Own do?','You sign in to GitHub and install the Launch &amp; Own GitHub app so it can create a private repository for your website files. You connect Cloudflare and pick the account that hosts the site. Cloudflare also needs its own Workers &amp; Pages GitHub app with access to that repository. Each provider shows you the permissions before you agree. No repository or hosting project is created until you approve the exact preview.'],
   ['What does it cost?','GitHub and Cloudflare offer free plans that suit many simple sites, within their limits. Launch &amp; Own does not sell you hosting. A custom domain or extras may cost money from the provider you choose.'],
   ['Can I use my own domain?','Your site launches on a free <code>pages.dev</code> address. After launch you can save a custom domain request from your toolkit. Saving it does not change DNS. Each step needs your review and approval.'],
-  ['Can AI update my website?','Today you can use your own AI coding tool with write access, such as Codex or Claude Code, to open pull requests you review and merge. A private assistant in your own GitHub and Cloudflare accounts is planned and has not been released. It would never approve for you. It would publish only after you approve that exact version.'],
+  ['Can I edit my website after launch?','Yes. After a live launch, open your website toolkit. Uploaded sites open in a built-in visual HTML editor (Visual and Source modes) so you can change the page on a live canvas. Simple one-page sites use a guided form. You always preview the exact change, then approve to publish or open a pull request instead. Compiled bundles stay read-only in the toolkit.'],
+  ['Can AI update my website?','You can also use your own AI coding tool with write access, such as Codex or Claude Code, to open pull requests you review and merge. A private assistant in your own GitHub and Cloudflare accounts is planned and has not been released. It would never approve for you. It would publish only after you approve that exact version.'],
   ['What happens if I stop using Launch &amp; Own?','Your files stay in your GitHub repository. Your site stays in your Cloudflare account. Disconnect any time and remove app access in each provider\'s settings.']
 ];
 
