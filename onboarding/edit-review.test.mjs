@@ -67,3 +67,25 @@ test('untrusted proposal text and preview URLs are escaped or dropped; bad shape
     assert.doesNotMatch(editReviewMarkup({...base,binding:{...binding,previewUrl}}),/Open the exact preview/,previewUrl);
   assert.doesNotMatch(editReviewMarkup({...base,previewOrigin:undefined}),/Open the exact preview/);
 });
+
+test('visual page snapshots list files compactly instead of fake before/after copy',()=>{
+  const visual={
+    ...base,
+    proposal:{
+      v:1,
+      summary:'Visual editor preview',
+      edits:[
+        {kind:'page_snapshot',path:'public/index.html',find:'Current page',replace:'Updated in the visual editor'},
+        {kind:'page_snapshot',path:'public/about.html',find:'Current page',replace:'Updated in the visual editor'},
+        {kind:'page_snapshot',path:'public/images/lo-1.png',find:'New file',replace:'New image'}
+      ]
+    }
+  };
+  const html=editReviewMarkup(visual);
+  assert.match(html,/Files in this visual edit \(3\)/);
+  assert.match(html,/Updated pages/);
+  assert.match(html,/New images/);
+  assert.match(html,/<span class="badge">Updated page<\/span> <code>public\/index\.html<\/code>/);
+  assert.match(html,/<span class="badge">New image<\/span> <code>public\/images\/lo-1\.png<\/code>/);
+  assert.doesNotMatch(html,/<del>Current page<\/del>|<ins>Updated in the visual editor<\/ins>/);
+});

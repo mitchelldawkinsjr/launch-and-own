@@ -497,9 +497,6 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       const item=await ownedZip(env,current,ticket.jobId);
       if(!item)return fail('This imported edit preview expired or the website is no longer yours.',404);
       await reviewedTree(env,current,ticket,item);
-      const edit=ticket.edits[0];
-      const relative=edit.path.startsWith('public/')?edit.path.slice('public/'.length):edit.path;
-      const fileLink='/imported-edit-file?ticket='+encodeURIComponent(raw)+'&path='+encodeURIComponent(relative);
       const screen=editReviewMarkup({
         proposal:{v:1,summary:ticket.summary,edits:ticket.edits},
         binding:{
@@ -523,8 +520,17 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
           'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+opened.origin+"; base-uri 'none'; frame-ancestors 'none'"
         };
       }
-      const body=screen+previewForm+
-        '<p><a href="'+escape(fileLink)+'">See the exact changed file</a></p>'+
+      const fileLinks=ticket.edits.map(edit=>{
+        const relative=edit.path.startsWith('public/')?edit.path.slice('public/'.length):edit.path;
+        const href='/imported-edit-file?ticket='+encodeURIComponent(raw)+'&path='+encodeURIComponent(relative);
+        return '<li><a href="'+escape(href)+'">See '+escape(relative)+'</a></li>';
+      }).join('');
+      const filesBlock=ticket.edits.length===1
+        ?'<p><a href="'+escape('/imported-edit-file?ticket='+encodeURIComponent(raw)+'&path='+encodeURIComponent(
+          ticket.edits[0].path.startsWith('public/')?ticket.edits[0].path.slice('public/'.length):ticket.edits[0].path
+        ))+'">See the exact changed file</a></p>'
+        :'<p class="er-group-label">Exact changed files</p><ul class="er-file-links">'+fileLinks+'</ul>';
+      const body=screen+previewForm+filesBlock+
         '<p><a href="/imported-edit?id='+encodeURIComponent(item.job.id)+'">Start over</a></p>';
       return headers?view('Review imported edit',body,200,headers):view('Review imported edit',body);
     }catch(error){
