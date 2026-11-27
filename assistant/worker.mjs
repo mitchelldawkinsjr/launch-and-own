@@ -83,7 +83,7 @@ export async function handle(request, env, { fetchFn = fetch, now = () => Date.n
       assetUrl.search = '';
       const response = await env.ASSETS.fetch(new Request(assetUrl, { method: 'GET' }));
       const headers = new Headers(response.headers);
-      headers.set('content-security-policy', "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
+      headers.set('content-security-policy', "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-src 'self' https://*.pages.dev; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
       headers.delete('x-frame-options');
       return new Response(response.body, { status: response.status, headers });
     }

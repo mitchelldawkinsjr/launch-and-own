@@ -25,6 +25,14 @@ test('visual editor markup is script-free and lists targets', () => {
   assert.doesNotMatch(html, /<script/i);
   assert.match(html, /ve-targets/);
   assert.match(html, /\/site-editor\/index\.html\?id=job-1&amp;page=index\.html#csrf=/);
+  const withSlug = visualEditorMarkup({
+    jobId: 'job-1', page: 'index.html', pages: ['index.html'],
+    iframeSrc: livePreviewUrl('/imported-edit-live/', 'index.html', { jobId: 'job-1' }),
+    targets: [], picked: null, csrf: 'a'.repeat(32),
+    previewAction: '/imported-edit-preview', editorPath: '/imported-edit',
+    siteSlug: 'willow'
+  });
+  assert.match(withSlug, /\/site-editor\/index\.html\?id=job-1&amp;page=index\.html&amp;slug=willow#csrf=/);
   assert.doesNotMatch(html, /sandbox=/);
   assert.match(html, /Advanced: one exact text change/);
   assert.match(html, /Preview this edit/);

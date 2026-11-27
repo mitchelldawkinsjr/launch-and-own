@@ -13,16 +13,26 @@
     ? '/live/'
     : '/imported-edit-live/' + encodeURIComponent(id) + '/';
   const csrf = decodeURIComponent((location.hash.match(/(?:^#|&)csrf=([^&]*)/) || [])[1] || '');
+  const siteSlug = params.get('slug') || '';
   const pageUrl = mirrorBase + page.split('/').map(encodeURIComponent).join('/');
   const dir = page.includes('/') ? page.slice(0, page.lastIndexOf('/') + 1) : '';
   const baseHref = location.origin + mirrorBase + dir.split('/').filter(Boolean).map(encodeURIComponent).join('/') + (dir ? '/' : '');
+  const liveSiteUrl = siteSlug && /^[a-z0-9-]{1,40}$/.test(siteSlug)
+    ? ('https://esp-' + siteSlug + '-site.pages.dev' + (
+      page === 'index.html' ? '/'
+        : page.endsWith('/index.html') ? '/' + page.slice(0, -'index.html'.length)
+          : '/' + page.split('/').map(encodeURIComponent).join('/')
+    ))
+    : '';
 
-  // Keep local-folder tools hidden. Leave tb-external-preview visible so owners can
-  // open a blob tab where the page's own scripts run (they cannot run in the canvas).
+  // Keep local-folder tools hidden. Preview (eye) runs page JS in a sandboxed viewer.
   const HIDE = [
     'tb-open', 'tb-open-folder', 'tb-import', 'tb-refresh', 'tb-diff', 'tb-export',
     'empty-open-local', 'empty-open-folder', 'empty-import', 'empty-new', 'site-open-folder'
   ];
+
+  let scriptView = null;
+  let scriptViewBusy = false;
 
   function toast(msg, type) {
     const t = document.createElement('div');
@@ -44,6 +54,179 @@
     if (/<base\b/i.test(html)) return html;
     const tag = '<base id="__he_base__" href="' + baseHref + '">';
     return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, match => match + tag) : tag + html;
+  }
+
+  function isMirrorUrl(url) {
+    try {
+      const parsed = new URL(url, baseHref);
+      const prefix = mirrorBase.startsWith('/') ? mirrorBase : '/' + mirrorBase;
+      return parsed.origin === location.origin && parsed.pathname.startsWith(prefix);
+    } catch {
+      return false;
+    }
+  }
+
+  function resolveAssetUrl(href) {
+    try {
+      return new URL(href, baseHref).href;
+    } catch {
+      return null;
+    }
+  }
+
+  async function blobToDataUrl(blob) {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('read failed'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // Build a self-contained page for the sandboxed viewer: parent fetches the
+  // owner's mirror files (known domain / repo paths) with the session cookie,
+  // then inlines them so the viewer can run scripts without sharing that session.
+  async function buildScriptedPreviewHtml() {
+    const raw = injectHostBase(window.FileOps.currentHtml());
+    const doc = new DOMParser().parseFromString(raw, 'text/html');
+    if (!doc.querySelector('base')) {
+      const base = doc.createElement('base');
+      base.id = '__he_base__';
+      base.href = baseHref;
+      (doc.head || doc.documentElement).prepend(base);
+    }
+
+    for (const link of [...doc.querySelectorAll('link[rel~="stylesheet"][href]')]) {
+      const url = resolveAssetUrl(link.getAttribute('href'));
+      if (!url || !isMirrorUrl(url)) continue;
+      try {
+        const response = await fetch(url, { credentials: 'same-origin' });
+        if (!response.ok) continue;
+        const style = doc.createElement('style');
+        style.setAttribute('data-lo-inlined', link.getAttribute('href') || '');
+        style.textContent = await replaceCssUrls(await response.text());
+        link.replaceWith(style);
+      } catch (_) {}
+    }
+
+    for (const script of [...doc.querySelectorAll('script[src]')]) {
+      const type = (script.getAttribute('type') || 'text/javascript').toLowerCase();
+      if (type === 'module' || (type && type !== 'text/javascript' && type !== 'application/javascript' && type !== 'text/ecmascript')) continue;
+      const url = resolveAssetUrl(script.getAttribute('src'));
+      if (!url) continue;
+      if (!isMirrorUrl(url)) continue; // leave CDN scripts as src — they load without our cookies
+      try {
+        const response = await fetch(url, { credentials: 'same-origin' });
+        if (!response.ok) continue;
+        const code = await response.text();
+        script.removeAttribute('src');
+        script.textContent = code.replace(/<\/(script)/gi, '<\\/$1');
+      } catch (_) {}
+    }
+
+    for (const el of [...doc.querySelectorAll('img[src], source[src], video[src], audio[src]')]) {
+      const src = el.getAttribute('src');
+      if (!src || src.startsWith('data:')) continue;
+      const url = resolveAssetUrl(src);
+      if (!url || !isMirrorUrl(url)) continue;
+      try {
+        const response = await fetch(url, { credentials: 'same-origin' });
+        if (!response.ok) continue;
+        el.setAttribute('src', await blobToDataUrl(await response.blob()));
+      } catch (_) {}
+    }
+
+    for (const el of [...doc.querySelectorAll('[style*="url("]')]) {
+      const style = el.getAttribute('style') || '';
+      const next = await replaceCssUrls(style);
+      if (next !== style) el.setAttribute('style', next);
+    }
+
+    let html = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+    return html.replace(/<\/(script)/gi, '<\\/$1');
+  }
+
+  async function replaceCssUrls(css) {
+    const re = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/gi;
+    const parts = [];
+    let last = 0;
+    let match;
+    while ((match = re.exec(css))) {
+      parts.push(css.slice(last, match.index));
+      const raw = match[2].trim();
+      last = match.index + match[0].length;
+      if (!raw || raw.startsWith('data:') || raw.startsWith('#')) {
+        parts.push(match[0]);
+        continue;
+      }
+      const url = resolveAssetUrl(raw);
+      if (!url || !isMirrorUrl(url)) {
+        parts.push(match[0]);
+        continue;
+      }
+      try {
+        const response = await fetch(url, { credentials: 'same-origin' });
+        if (!response.ok) {
+          parts.push(match[0]);
+          continue;
+        }
+        parts.push('url("' + await blobToDataUrl(await response.blob()) + '")');
+      } catch (_) {
+        parts.push(match[0]);
+      }
+    }
+    parts.push(css.slice(last));
+    return parts.join('');
+  }
+
+  function ensureScriptView() {
+    if (scriptView) return scriptView;
+    const frame = document.querySelector('.canvas-frame');
+    const canvas = document.getElementById('canvas');
+    if (!frame || !canvas) return null;
+    scriptView = document.createElement('iframe');
+    scriptView.id = 'lo-script-view';
+    scriptView.title = 'Page preview with scripts';
+    // No allow-same-origin: scripts run, but cannot read the Launch & Own session.
+    scriptView.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-modals');
+    scriptView.setAttribute('referrerpolicy', 'no-referrer');
+    scriptView.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff;z-index:6';
+    frame.appendChild(scriptView);
+    return scriptView;
+  }
+
+  async function showScriptedPreview() {
+    const view = ensureScriptView();
+    const canvas = document.getElementById('canvas');
+    if (!view || !canvas || scriptViewBusy) return;
+    scriptViewBusy = true;
+    try {
+      view.hidden = false;
+      canvas.style.visibility = 'hidden';
+      const html = await buildScriptedPreviewHtml();
+      view.removeAttribute('src');
+      view.srcdoc = html;
+    } catch (error) {
+      if (liveSiteUrl) {
+        view.removeAttribute('srcdoc');
+        view.src = liveSiteUrl;
+      } else {
+        toast(error.message || 'Could not build scripted preview.', 'error');
+        hideScriptedPreview();
+      }
+    } finally {
+      scriptViewBusy = false;
+    }
+  }
+
+  function hideScriptedPreview() {
+    const canvas = document.getElementById('canvas');
+    if (scriptView) {
+      scriptView.hidden = true;
+      scriptView.removeAttribute('src');
+      scriptView.srcdoc = '';
+    }
+    if (canvas) canvas.style.visibility = '';
   }
 
   // Turn embedded images still referenced by the page into images/lo-N.ext files.
@@ -210,27 +393,45 @@
       if (label) label.textContent = 'Preview';
       save.title = 'Preview for approval. Publishing happens on the next screen when you Approve and publish.';
     }
+    const eye = document.getElementById('tb-preview');
+    if (eye) {
+      eye.title = 'View this page with its JavaScript running (sandboxed). Click again to return to editing.';
+    }
     const git = document.getElementById('tb-git-diff');
     if (git) git.disabled = false;
     const external = document.getElementById('tb-external-preview');
     if (external) {
       external.hidden = false;
-      external.title = 'Open this page in a new tab with its scripts running. The editor canvas keeps scripts off to protect your session.';
-      external.addEventListener('click', (event) => {
+      external.title = liveSiteUrl
+        ? 'Open your live pages.dev site in a new tab (scripts run on your site’s domain).'
+        : 'Open a sandboxed tab with this page’s scripts running.';
+      external.addEventListener('click', async (event) => {
         event.preventDefault();
         event.stopImmediatePropagation();
-        const html = injectHostBase(window.FileOps.currentHtml());
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const win = window.open(url, '_blank', 'noopener,noreferrer');
-        if (win) try { win.opener = null; } catch (_) {}
-        setTimeout(() => URL.revokeObjectURL(url), 15_000);
+        if (liveSiteUrl) {
+          window.open(liveSiteUrl, '_blank', 'noopener,noreferrer');
+          return;
+        }
+        try {
+          const html = await buildScriptedPreviewHtml();
+          // data: URLs are opaque-origin — unlike blob: URLs they do not inherit the editor session.
+          const url = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+          window.open(url, '_blank', 'noopener,noreferrer');
+        } catch (error) {
+          toast(error.message || 'Could not open scripted preview.', 'error');
+        }
       }, true);
     }
 
     const originalInject = window.Site.injectBase.bind(window.Site);
     window.Site.injectBase = html => injectHostBase(originalInject(html));
     window.FileOps.save = previewSave;
+    const originalSetPreview = window.Canvas.setPreview.bind(window.Canvas);
+    window.Canvas.setPreview = (on) => {
+      originalSetPreview(on);
+      if (on) showScriptedPreview();
+      else hideScriptedPreview();
+    };
     window.GitDiff.showDiff = async () => {
       const head = window.__loBaseHtml || '';
       const current = window.FileOps.currentHtml();
