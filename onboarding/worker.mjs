@@ -1,3 +1,4 @@
+import {AsyncLocalStorage} from 'node:async_hooks';
 import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app-oauth.mjs';
 import {
   CLOUDFLARE_WORKERS_PAGES_APP_SLUG,
@@ -50,13 +51,15 @@ import {
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
+// Cloudflare Web Analytics only (cookieless). No Google/third-party ad trackers.
 const textHeaders={
   'content-type':'text/html; charset=utf-8','cache-control':'no-store',
   'x-frame-options':'DENY','x-content-type-options':'nosniff',
   // same-origin, not no-referrer: under no-referrer Chrome sends `Origin: null` on form POSTs, failing assertCsrf.
   'referrer-policy':'same-origin',
-  'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+  'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; script-src https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 };
+const requestUi=new AsyncLocalStorage();
 const now=()=>Math.floor(Date.now()/1000);
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const cookie=(name,value,maxAge)=>`${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
@@ -67,7 +70,8 @@ const redirect=(path,setCookie)=>{
 };
 // opts are UI-only (pageShell); never pass them as the headers argument.
 const view=(title,body,status=200,headers=textHeaders,opts={})=>new Response(
-  pageShell({title,body,...opts,css:providerHelpCss+(opts.css||'')}),
+  pageShell({title,body,...opts,css:providerHelpCss+(opts.css||''),
+    analyticsToken:opts.analyticsToken??requestUi.getStore()?.analyticsToken??''}),
   {status,headers:headers||textHeaders});
 const fail=(message,status=400)=>view('Setup could not continue',`<p>${escape(message)}</p><p><a href="/">Return to setup</a></p>`,status);
 const button=(action,label,csrf,extra='')=>`<form action="${action}" method="POST"><input type="hidden" name="csrf" value="${escape(csrf)}">${extra}<button type="submit">${escape(label)}</button></form>`;
@@ -995,8 +999,7 @@ async function siteEditorAsset(request, env, url) {
   return new Response(response.body, { status: response.status, headers });
 }
 
-export default {
-  async fetch(request,env,context){
+async function handleFetch(request,env,context){
     try{
       const url=new URL(request.url);
       if(url.pathname==='/health'&&request.method==='GET'){
@@ -1085,6 +1088,13 @@ export default {
       console.error(JSON.stringify({event:'onboarding_request_error',code}));
       return fail(code==='not_configured'?'Account connections are being configured.':'This request could not be completed. Refresh and try again.',code==='not_configured'?503:400);
     }
+}
+
+export default {
+  async fetch(request,env,context){
+    const analyticsToken=/^[a-f0-9]{32}$/i.test(env.ONBOARD_WEB_ANALYTICS_TOKEN||'')
+      ?env.ONBOARD_WEB_ANALYTICS_TOKEN:'';
+    return requestUi.run({analyticsToken},()=>handleFetch(request,env,context));
   },
   async scheduled(_event,env){
     try{

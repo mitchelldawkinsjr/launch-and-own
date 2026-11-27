@@ -15,13 +15,21 @@ test('stepper marks active and completed steps without invented job percentages'
   assert.match(stepperHtml('launch',{complete:true}),/live and verified/);
 });
 
-test('page shell stays CSP-safe: no images, remote scripts, fonts, or trackers',()=>{
+test('page shell stays CSP-safe: no images, remote scripts, fonts, or ad trackers',()=>{
   const html=pageShell({title:'Welcome <x>',body:'<p>Describe it. Launch it. Own it.</p>',step:'connect'});
   assert.match(html,/Launch &amp; Own/);
   assert.match(html,/by <a class="studio-link" href="https:\/\/360web\.solutions" target="_blank" rel="noopener noreferrer">360 Web Solutions<\/a>/);
   assert.match(html,/Welcome &lt;x&gt;/);
   assert.match(html,/href="#main"/);
   assert.doesNotMatch(html,/<(?:script|img|link)\b|cdn\.|fonts\.googleapis|googletagmanager/i);
+});
+
+test('page shell can attach cookieless Cloudflare Web Analytics only',()=>{
+  const token='a'.repeat(32);
+  const html=pageShell({title:'Analytics',body:'<p>Hi</p>',analyticsToken:token});
+  assert.match(html,/static\.cloudflareinsights\.com\/beacon\.min\.js/);
+  assert.match(html,/data-cf-beacon='\{"token":"a{32}"\}'/);
+  assert.doesNotMatch(html,/googletagmanager|google-analytics|gtag\(/i);
 });
 
 test('landing leads with the outcome, keeps one panel open and links CTAs to the real setup',()=>{
