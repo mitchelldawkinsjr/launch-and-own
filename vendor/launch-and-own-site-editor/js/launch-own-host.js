@@ -44,20 +44,34 @@
     return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, match => match + tag) : tag + html;
   }
 
-  // Turn embedded images into images/lo-N.ext so the preview stores real files.
+  // Turn embedded images still referenced by the page into images/lo-N.ext files.
+  // Only src= / url() data URIs count — removed images must not become PR files.
   function packImages(html) {
     const images = [];
     let n = 0;
-    const next = html.replace(/data:image\/(png|jpeg|jpg|gif|webp);base64,([A-Za-z0-9+/=]+)/g, (all, ext, data) => {
-      n += 1;
-      if (n > 8) return all;
-      const name = ext === 'jpeg' ? 'jpg' : ext;
-      const path = 'images/lo-' + n + '.' + name;
-      images.push({ path, base64: data });
-      return path;
-    });
+    const dataUri = /data:image\/(png|jpeg|jpg|gif|webp);base64,([A-Za-z0-9+/=]+)/i;
+    const next = String(html).replace(
+      /(\bsrc\s*=\s*(["'])|url\(\s*(["']?))(data:image\/(?:png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=]+)(\2|\3)?(\))?/gi,
+      (all, prefix, q1, q2, uri, closeQuote, closeParen) => {
+        const match = dataUri.exec(uri);
+        if (!match) return all;
+        n += 1;
+        if (n > 8) return all;
+        const name = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
+        const path = 'images/lo-' + n + '.' + name;
+        images.push({ path, base64: match[2] });
+        if (prefix.toLowerCase().startsWith('url')) {
+          const quote = q2 || '';
+          return 'url(' + quote + path + quote + (closeParen || ')');
+        }
+        const quote = q1 || '"';
+        return 'src=' + quote + path + quote;
+      }
+    );
     if (n > 8) throw new Error('At most 8 new images can be previewed at once.');
-    return { html: next, images };
+    // Drop any packed file the HTML no longer references (add-then-remove).
+    const kept = images.filter(image => next.includes(image.path));
+    return { html: next, images: kept };
   }
 
   function errorMessageFromBody(text) {
