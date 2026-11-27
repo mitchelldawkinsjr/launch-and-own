@@ -959,7 +959,8 @@ async function activateOwnerOption(request,env,current){
   return renderOptionExecutionResult(result);
 }
 
-const SITE_EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'none'";
+// form-action 'self' so Preview can POST to /imported-edit-visual-preview (was 'none', which silently blocked saves).
+const SITE_EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
 
 async function siteEditorAsset(request, env, url) {
   if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') return fail('The page editor is unavailable.', 404);
