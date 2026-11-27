@@ -66,10 +66,28 @@ export async function handle(request, env, { fetchFn = fetch, now = () => Date.n
   let form = null;
   if (request.method === 'POST') {
     if (request.headers.get('origin') !== env.ASSISTANT_ORIGIN) return send(403, 'Forbidden');
+    if (url.pathname === '/visual-preview') {
+      const edit = await editRoute(request, url, null, env, { sub: claims.sub, csrf, fetchFn, now: now() });
+      return edit || send(404, 'Not found');
+    }
     form = await request.formData().catch(() => null);
     if (!form || !constantTimeEqual(form.get('csrf'), csrf)) return send(403, 'Forbidden');
     if (url.pathname === '/self-check') return asJson(200, await selfCheck(env, fetchFn));
   } else if (request.method !== 'GET') return send(405, 'Method not allowed');
+
+  if (request.method === 'GET' && url.pathname.startsWith('/site-editor/') && env.ASSETS?.fetch) {
+    const relative = url.pathname.slice('/site-editor'.length);
+    if (relative.startsWith('/') && !relative.includes('..')) {
+      const assetUrl = new URL(request.url);
+      assetUrl.pathname = relative;
+      assetUrl.search = '';
+      const response = await env.ASSETS.fetch(new Request(assetUrl, { method: 'GET' }));
+      const headers = new Headers(response.headers);
+      headers.set('content-security-policy', "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'none'");
+      headers.delete('x-frame-options');
+      return new Response(response.body, { status: response.status, headers });
+    }
+  }
 
   const edit = await editRoute(request, url, form, env, { sub: claims.sub, csrf, fetchFn, now: now() });
   if (edit) return edit;

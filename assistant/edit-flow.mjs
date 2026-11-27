@@ -3,14 +3,14 @@
 // Nothing is stored between steps except the single-use approval claim; every step re-reads GitHub, so a moved base fails closed.
 import { escape } from '../onboarding/ui.mjs';
 import { editReviewMarkup } from '../onboarding/edit-review.mjs';
-import { livePreviewUrl, VISUAL_EDITOR_CSS, visualEditorMarkup } from '../onboarding/visual-editor.mjs';
+import { assistantPromptMarkup, livePreviewUrl, VISUAL_EDITOR_CSS, visualEditorMarkup } from '../onboarding/visual-editor.mjs';
 import { defaultEditorPage, editablePages, listEditTargets, pickEditTarget } from '../imported/targets.mjs';
 import { structuralPath } from '../imported/intelligence.mjs';
-import { base64Decode, base64Encode } from '../imported/bytes.mjs';
+import { base64Decode, base64Encode, encodeUtf8 } from '../imported/bytes.mjs';
 import { readCurrentRevision } from '../imported/revision.mjs';
 import { inspectSite } from '../imported/intelligence.mjs';
 import { locateTypedEdit } from '../imported/locate.mjs';
-import { parseModelOutput, validateEdits } from '../imported/edits.mjs';
+import { parseModelOutput, validateEdits, validatePageSnapshot } from '../imported/edits.mjs';
 import { buildModelRequest, retrieveSnippets } from '../imported/snippets.mjs';
 import { isolatePreview, previewResponse, scriptFreePreviewHeaders } from '../imported/preview.mjs';
 import { bindApproval, newApprovalId } from '../imported/approval.mjs';
@@ -104,10 +104,85 @@ async function liveSite(site, { fetchFn, now }) {
 async function reviewedTree(site, ticket, deps) {
   const live = await liveSite(site, deps);
   if (live.revision.commitSha !== ticket.baseCommitSha || live.revision.repositoryId !== site.repositoryId) throw new ImportedEditError('stale_base');
+  if (ticket.mode === 'snapshot') return reviewSnapshot(site, ticket, live);
   const proposal = parseModelOutput(JSON.stringify({ v: 1, requestId: ticket.requestId, repositoryId: site.repositoryId, baseCommitSha: ticket.baseCommitSha, summary: ticket.summary, edits: ticket.edits }));
   const validated = await validateEdits({ baseCommitSha: ticket.baseCommitSha, files: live.files, inspection: live.inspection, proposal, repositoryId: site.repositoryId });
   if (validated.proposalDigest !== ticket.proposalDigest || validated.artifactDigest !== ticket.artifactDigest) throw new ImportedEditError('approval_mismatch');
   return { ...live, validated };
+}
+
+async function reviewSnapshot(site, ticket, live) {
+  if (!Array.isArray(ticket.snapshot) || !Array.isArray(ticket.edits) || ticket.edits.length < 1
+      || ticket.edits.some(edit => edit?.kind !== 'page_snapshot') || !Array.isArray(ticket.changed)
+      || ticket.changed.length !== ticket.edits.length || ticket.changed.length !== ticket.snapshot.length) {
+    throw new ImportedEditError('approval_mismatch');
+  }
+  const next = live.files.map(file => ({ path: file.path, bytes: file.bytes }));
+  for (const item of ticket.snapshot) {
+    if (!item || typeof item.path !== 'string' || typeof item.base64 !== 'string') throw new ImportedEditError('approval_mismatch');
+    let bytes;
+    try { bytes = base64Decode(item.base64); } catch { throw new ImportedEditError('approval_mismatch'); }
+    const existing = next.find(file => file.path === item.path);
+    if (existing) existing.bytes = bytes;
+    else next.push({ path: item.path, bytes });
+  }
+  const expectedBlobs = new Map(ticket.changed.filter(row => typeof row.beforeBlobSha === 'string').map(row => [row.path, row.beforeBlobSha]));
+  const validated = await validatePageSnapshot({
+    baseCommitSha: live.revision.commitSha, files: live.files, inspection: live.inspection,
+    repositoryId: site.repositoryId, requestId: ticket.requestId, summary: ticket.summary,
+    nextFiles: next, expectedBlobs
+  });
+  if (validated.proposalDigest !== ticket.proposalDigest || validated.artifactDigest !== ticket.artifactDigest
+      || JSON.stringify(validated.changed) !== JSON.stringify(ticket.changed)) throw new ImportedEditError('approval_mismatch');
+  return { ...live, validated };
+}
+
+async function visualPreview(env, site, request, { sub, csrf, fetchFn, now }) {
+  const type = request.headers.get('content-type') || '';
+  if (!/^application\/json(?:\s*;|$)/i.test(type)) throw new ImportedEditError('invalid_output');
+  const raw = await request.arrayBuffer();
+  if (raw.byteLength < 2 || raw.byteLength > 3_000_000) throw new ImportedEditError('limit_exceeded');
+  let body;
+  try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw)); } catch { throw new ImportedEditError('invalid_output'); }
+  if (!body || body.csrf !== csrf || body.id !== 'site') throw new ImportedEditError('invalid_output');
+  const page = typeof body.page === 'string' ? body.page : '';
+  let html = typeof body.html === 'string' ? body.html : '';
+  html = html.replace(/<base\b[^>]*id=(?:"__he_base__"|'__he_base__')[^>]*>/gi, '');
+  const images = Array.isArray(body.images) ? body.images : [];
+  if (!page || !html || html.length > 1_500_000 || images.length > 8) throw new ImportedEditError('invalid_output');
+  const live = await liveSite(site, { fetchFn, now });
+  const next = live.files.map(file => ({ path: file.path, bytes: file.path === page ? encodeUtf8(html) : file.bytes }));
+  if (!next.some(file => file.path === page)) throw new ImportedEditError('kind_not_allowed');
+  for (const image of images) {
+    if (!image || typeof image.path !== 'string' || typeof image.base64 !== 'string') throw new ImportedEditError('kind_not_allowed');
+    let bytes;
+    try { bytes = base64Decode(image.base64); } catch { throw new ImportedEditError('kind_not_allowed'); }
+    if (next.some(file => file.path === image.path)) throw new ImportedEditError('kind_not_allowed');
+    next.push({ path: image.path, bytes });
+  }
+  const requestId = crypto.randomUUID();
+  const summary = 'Visual editor preview';
+  const validated = await validatePageSnapshot({
+    baseCommitSha: live.revision.commitSha, files: live.files, inspection: live.inspection,
+    repositoryId: site.repositoryId, requestId, summary, nextFiles: next
+  });
+  const snapshot = validated.changed.map(row => {
+    const relative = row.path.slice('public/'.length);
+    const file = validated.files.find(item => item.path === relative);
+    return { path: relative, base64: base64Encode(file.bytes) };
+  });
+  const edits = validated.changed.map(row => ({
+    kind: 'page_snapshot', path: row.path,
+    find: row.added ? 'New file' : 'Current page',
+    replace: row.added ? 'New image' : 'Updated in the visual editor'
+  }));
+  const ticket = await sealTicket(env, 'review', sub, {
+    mode: 'snapshot', repositoryId: site.repositoryId, baseCommitSha: live.revision.commitSha, requestId, summary, edits,
+    proposalDigest: validated.proposalDigest, artifactDigest: validated.artifactDigest, approvalId: newApprovalId(),
+    changed: validated.changed, snapshot
+  }, now);
+  if (ticket.length > 5900) throw new ImportedEditError('limit_exceeded');
+  return redirect('/review?ticket=' + encodeURIComponent(ticket));
 }
 
 const modelText = out => typeof out?.response === 'string' ? out.response : out?.response && typeof out.response === 'object' ? JSON.stringify(out.response) : out?.choices?.[0]?.message?.content ?? '';
@@ -120,13 +195,9 @@ async function home(env, site, url, { csrf, fetchFn, now }) {
   const activePage = typeof rawPage === 'string' && pages.includes(rawPage) ? rawPage : defaultEditorPage(pages);
   const targets = listEditTargets(live.files, live.inspection);
   const picked = pickEditTarget(targets, url.searchParams.get('pick'));
-  const iframeSrc = livePreviewUrl('/live/', activePage, '');
+  const iframeSrc = livePreviewUrl('/live/', activePage);
   const ai = env.AI_EDITS === 'on' && env.AI;
-  const aiBlock = ai
-    ? '<h2>Or describe it</h2><form method="post" action="/preview"><input type="hidden" name="csrf" value="' + escape(csrf) + '"><input type="hidden" name="mode" value="ai">' +
-      '<p><label>What should change?<br><textarea name="request" maxlength="1000" rows="3" cols="50" required></textarea></label></p>' +
-      '<p><small>Uses your own Cloudflare Workers AI allowance. You still see the exact change before anything happens.</small></p><p><button>Prepare a preview</button></p></form>'
-    : '';
+  const aiBlock = ai ? assistantPromptMarkup({ csrf, action: '/preview' }) : '';
   const body = '<style>' + VISUAL_EDITOR_CSS + '</style>' +
     '<p>Every change is previewed first. <strong>Nothing goes live until you approve it</strong>.</p>' +
     visualEditorMarkup({
@@ -253,7 +324,7 @@ async function prStatus(env, site, url, { sub, fetchFn, now }) {
 
 /** Routes after the Worker has verified Access, the owner and (for POST) origin + CSRF. Returns null for unknown routes. */
 export async function editRoute(request, url, form, env, ctx) {
-  const routes = { 'GET /': 1, 'POST /preview': 1, 'GET /review': 1, 'GET /file': 1, 'POST /approve': 1, 'GET /pr': 1 };
+  const routes = { 'GET /': 1, 'GET /files': 1, 'POST /preview': 1, 'POST /visual-preview': 1, 'GET /review': 1, 'GET /file': 1, 'POST /approve': 1, 'GET /pr': 1 };
   const live = url.pathname.startsWith('/live/') && request.method === 'GET';
   if (!routes[request.method + ' ' + url.pathname] && !live) return null;
   const site = siteConfig(env);
@@ -261,7 +332,12 @@ export async function editRoute(request, url, form, env, ctx) {
   if (url.pathname === '/') return await home(env, site, url, ctx);
   if (live) return await liveFile(site, url, ctx);
   try {
+    if (url.pathname === '/files') {
+      const listed = await liveSite(site, ctx);
+      return Response.json({ files: listed.files.map(file => file.path).sort() }, { headers: { 'cache-control': 'no-store' } });
+    }
     if (url.pathname === '/preview') return await preview(env, site, form, ctx);
+    if (url.pathname === '/visual-preview') return await visualPreview(env, site, request, ctx);
     if (url.pathname === '/review') return await review(env, site, url, ctx);
     if (url.pathname === '/file') return await file(env, site, url, ctx);
     if (url.pathname === '/approve') return await approve(env, site, form, ctx);

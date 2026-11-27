@@ -51,7 +51,9 @@
       ],
       "blockers": [
         "Independent consenting customer acceptance of a post-launch edit is still pending (#21)",
-        "Toolkit edits cover text, links, business email or phone, and CSS custom-property colors only; compiled bundles stay read-only"
+        "Visual page-snapshot editor (vendored site-editor + page_snapshot) is merged in code but not live-available until Domain deploys onboarding with ASSETS and orchestration accepts the matrix update",
+        "Span edits (text, links, business email or phone, CSS custom-property colors) remain as Advanced; compiled bundles stay read-only",
+        "Customer-owned assistant visual parity is planned with the assistant surface, not a separate public claim"
       ]
     },
     "portable_skill": {

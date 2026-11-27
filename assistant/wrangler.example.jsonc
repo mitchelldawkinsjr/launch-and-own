@@ -31,5 +31,12 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "lo-assistant-<site-slug>", "database_id": "<id>", "migrations_dir": "assistant/migrations" }
   ],
-  "ai": { "binding": "AI" }
+  "ai": { "binding": "AI" },
+  "assets": {
+    "directory": "../vendor/launch-and-own-site-editor",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  }
 }

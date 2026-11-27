@@ -59,13 +59,20 @@ function fakeGitHub({ repoId = 101 } = {}) {
       if (path.startsWith(root + '/git/refs/heads/') && method === 'PATCH') { state.refs.set(path.slice((root + '/git/refs/heads/').length), body.sha); return json({ object: { sha: body.sha } }); }
       if (path === root + '/git/blobs' && method === 'POST') { const b = base64Decode(body.content), sha = await gitBlobSha(b); blobs.set(sha, b); return json({ sha }, 201); }
       if (path === root + '/git/trees' && method === 'POST') {
-        const next = trees.get(body.base_tree).map(e => ({ ...e, ...(body.tree.find(c => c.path === e.path) || {}) }));
+        const merged = new Map(trees.get(body.base_tree).map(e => [e.path, { ...e }]));
+        for (const entry of body.tree) merged.set(entry.path, entry);
+        const next = [...merged.values()];
         const sha = sha1(JSON.stringify(next)); trees.set(sha, next); return json({ sha }, 201);
       }
       if (path === root + '/git/commits' && method === 'POST') { const sha = sha1(JSON.stringify(body)); commits.set(sha, { tree: body.tree, parent: body.parents[0] }); return json({ sha }, 201); }
       if (path.startsWith(root + '/commits/')) {
         const sha = path.split('/').pop(), c = commits.get(sha), before = trees.get(commits.get(c.parent).tree), after = trees.get(c.tree);
-        const files = after.filter(e => e.type === 'blob' && before.find(b => b.path === e.path).sha !== e.sha).map(e => ({ filename: e.path, status: 'modified', sha: e.sha }));
+        const files = after.filter(e => e.type === 'blob').flatMap(e => {
+          const prior = before.find(b => b.path === e.path);
+          if (!prior) return [{ filename: e.path, status: 'added', sha: e.sha }];
+          if (prior.sha !== e.sha) return [{ filename: e.path, status: 'modified', sha: e.sha }];
+          return [];
+        });
         return json({ sha, parents: [{ sha: c.parent }], commit: { tree: { sha: c.tree } }, files });
       }
       if (path === root + '/pulls' && method === 'GET') return json(state.pulls);
@@ -103,22 +110,28 @@ async function world({ ai, envExtra = {} } = {}) {
   };
   const cache = accessKeyCache({ fetchFn: gh.fetchFn, now: () => clock.t });
   const csrf = await csrfToken(env, OWNER);
-  const call = async (path, { method = 'GET', form } = {}) => handle(new Request(ORIGIN + path, {
-    method, headers: { 'cf-access-jwt-assertion': await token(), ...(method === 'POST' ? { origin: ORIGIN } : {}) },
-    body: form ? new URLSearchParams({ csrf, ...form }) : undefined
+  const call = async (path, { method = 'GET', form, json } = {}) => handle(new Request(ORIGIN + path, {
+    method,
+    headers: {
+      'cf-access-jwt-assertion': await token(),
+      ...(method === 'POST' ? { origin: ORIGIN } : {}),
+      ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
+      ...(json ? { 'content-type': 'application/json' } : {})
+    },
+    body: json ? JSON.stringify({ csrf, ...json }) : form ? new URLSearchParams({ csrf, ...form }) : undefined
   }), env, { fetchFn: gh.fetchFn, now: () => clock.t, cache });
   const loc = res => { assert.equal(res.status, 303, 'expected redirect'); return res.headers.get('location'); };
   const hidden = (html, name) => new RegExp('name="' + name + '" value="([^"]+)"').exec(html)?.[1].replace(/&amp;/g, '&');
-  return { gh, env, db, clock, call, loc, hidden, aiCalls };
+  return { gh, env, db, clock, call, loc, hidden, aiCalls, csrf };
 }
 
-const writes = gh => gh.history.filter(h => h.method !== 'GET');
+const writes = gh => gh.history.filter(h => h.method !== 'GET' && !h.path.endsWith('/access_tokens'));
 
 test('happy path: typed edit -> preview -> review -> exact file -> Approve and publish -> one PR merged at the approved head, never /user', async () => {
   const w = await world();
   const home = await (await w.call('/')).text();
   assert.match(home, /Preview this edit/);
-  assert.doesNotMatch(home, /Or describe it/, 'AI path off by default');
+  assert.doesNotMatch(home, /Ask your AI assistant/, 'AI path off by default');
   const repoWrites = () => writes(w.gh).filter(h => !h.path.endsWith('/access_tokens'));
   const beforePreview = repoWrites().length;
   const review = w.loc(await w.call('/preview', { method: 'POST', form: { mode: 'typed', kind: 'text', old: 'Saturday: 9 AM-2 PM', replacement: 'Saturday: 10 AM-4 PM' } }));
@@ -209,7 +222,7 @@ const hoursEdit = user => { const f = user.capabilities.files.find(x => x.path =
 
 test('AI path (opt-in): budget reserved before the call, proposal validated, then the same review flow', async () => {
   const w = await world({ ai: aiProposal(hoursEdit) });
-  assert.match(await (await w.call('/')).text(), /Or describe it/);
+  assert.match(await (await w.call('/')).text(), /Ask your AI assistant/);
   const aiPreview = await w.call('/preview', { method: 'POST', form: { mode: 'ai', request: 'Open Saturdays 10 to 4' } });
   if (aiPreview.status !== 303) throw new Error(await aiPreview.text());
   const review = aiPreview.headers.get('location');
@@ -275,6 +288,52 @@ test('an AI proposal too large for a review ticket fails clearly as too large', 
   const w = await world({ ai: aiProposal(big) });
   const res = await w.call('/preview', { method: 'POST', form: { mode: 'ai', request: 'long' } });
   assert.match(await res.text(), /too large/);
+});
+
+test('visual page save lists GitHub files, opens review without writing, and Approve and publish merges', async () => {
+  const w = await world();
+  const home = await (await w.call('/')).text();
+  assert.match(home, /\/site-editor\/index\.html\?id=site/);
+  assert.match(home, /Advanced: one exact text change/);
+  const listed = await w.call('/files');
+  assert.equal(listed.status, 200);
+  assert.deepEqual((await listed.json()).files, ['about.html', 'contact.html', 'index.html', 'styles.css']);
+  const before = writes(w.gh).length;
+  const visual = await w.call('/visual-preview', {
+    method: 'POST',
+    json: {
+      id: 'site', page: 'index.html',
+      html: '<!doctype html><html><body><h1>Harbor Lane</h1></body></html>',
+      images: []
+    }
+  });
+  assert.equal(visual.status, 303, await visual.text());
+  assert.equal(writes(w.gh).length, before, 'preview does not write GitHub');
+  const review = await (await w.call(visual.headers.get('location'))).text();
+  assert.match(review, /Visual page/);
+  assert.match(review, /Approve and publish/);
+  const approved = await w.call('/approve', {
+    method: 'POST',
+    form: {
+      ticket: w.hidden(review, 'ticket'), approvalId: w.hidden(review, 'approvalId'),
+      proposalDigest: w.hidden(review, 'proposalDigest'), artifactDigest: w.hidden(review, 'artifactDigest'),
+      action: 'publish'
+    }
+  });
+  assert.equal(approved.status, 303, await approved.text());
+  assert.equal(w.gh.merges.length, 1);
+  assert.match(await w.gh.blobText('public/index.html'), /Harbor Lane/);
+  const status = await (await w.call(approved.headers.get('location'))).text();
+  assert.match(status, /You merged|Published|merged/);
+  const scripted = await w.call('/visual-preview', {
+    method: 'POST',
+    json: {
+      id: 'site', page: 'index.html',
+      html: '<!doctype html><html><body><script>alert(1)</script></body></html>',
+      images: []
+    }
+  });
+  assert.equal(scripted.status, 400);
 });
 
 test('Approve and publish: a merge GitHub refuses leaves the PR open with an explanation', async () => {

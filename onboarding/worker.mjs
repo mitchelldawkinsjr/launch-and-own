@@ -959,6 +959,25 @@ async function activateOwnerOption(request,env,current){
   return renderOptionExecutionResult(result);
 }
 
+const SITE_EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'none'";
+
+async function siteEditorAsset(request, env, url) {
+  if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') return fail('The page editor is unavailable.', 404);
+  const relative = url.pathname.slice('/site-editor'.length);
+  if (!relative.startsWith('/') || relative.includes('..') || relative.includes('\\')) return fail('The page editor is unavailable.', 404);
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = relative;
+  assetUrl.search = '';
+  const response = await env.ASSETS.fetch(new Request(assetUrl, { method: 'GET' }));
+  const headers = new Headers(response.headers);
+  headers.set('content-security-policy', SITE_EDITOR_CSP);
+  headers.set('x-content-type-options', 'nosniff');
+  headers.set('referrer-policy', 'same-origin');
+  headers.set('cache-control', 'no-store');
+  headers.delete('x-frame-options');
+  return new Response(response.body, { status: response.status, headers });
+}
+
 export default {
   async fetch(request,env,context){
     try{
@@ -1002,8 +1021,10 @@ export default {
         if(url.pathname==='/site-update-review')return await siteUpdates.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-html')return await siteUpdates.html(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/site-update-status')return await siteUpdates.status(env,current,url.searchParams.get('ticket'));
+        if(url.pathname.startsWith('/site-editor/'))return await siteEditorAsset(request,env,url);
         if(url.pathname.startsWith('/imported-edit-live/'))return await importedEdits.live(env,current,url);
         if(url.pathname==='/imported-edit')return await importedEdits.editor(env,current,url.searchParams.get('id'),url);
+        if(url.pathname==='/imported-edit-files')return await importedEdits.projectFiles(env,current,url.searchParams.get('id'));
         if(url.pathname==='/imported-edit-review')return await importedEdits.review(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/imported-edit-file')return await importedEdits.file(env,current,url);
         if(url.pathname==='/imported-edit-status')return await importedEdits.status(env,current,url.searchParams.get('ticket'));
@@ -1028,6 +1049,7 @@ export default {
         if(url.pathname==='/site-update-preview')return await siteUpdates.prepare(request,env,current);
         if(url.pathname==='/site-update-approve')return await siteUpdates.approve(request,env,current);
         if(url.pathname==='/imported-edit-preview')return await importedEdits.prepare(request,env,current);
+        if(url.pathname==='/imported-edit-visual-preview')return await importedEdits.visualPreview(request,env,current);
         if(url.pathname==='/imported-edit-approve')return await importedEdits.approve(request,env,current);
         if(url.pathname==='/form-connect-approve')return await importedEdits.connectFormApprove(request,env,current);
         if(url.pathname==='/site-options-prepare')return await siteOptions.prepare(request,env,current);

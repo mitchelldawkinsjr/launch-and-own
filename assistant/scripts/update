@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+// Owner-run update shim (ADR-004 option B). Same provenance checks as the weekly Actions workflow.
+// Usage from the private assistant repo root: node assistant/scripts/update
+import { updateCheck } from '../update/run-update-check.mjs';
+
+const result = await updateCheck({
+  log: console.log,
+  summary: null
+});
+
+if (result.action === 'pr' || result.action === 'exists') {
+  console.log('Update branch/PR ready for ' + result.target + '. Review and merge it yourself.');
+  process.exit(0);
+}
+if (result.action === 'notice') {
+  console.log('Update ' + result.target + ' is available. Re-run with Actions PR permissions, or apply the verified release manually.');
+  process.exit(0);
+}
+if (result.action === 'none') {
+  console.log('Already on the latest verified release.');
+  process.exit(0);
+}
+console.error('Update check finished with action: ' + result.action);
+process.exit(1);

@@ -57,7 +57,7 @@ test('checks candidate model names and the shared free allocation against a cata
 test('keeps imported editing unreleased after the hosted routes are wired', () => {
   assert.equal(IMPORTED_EDITING_MILESTONE.hostedWorkerWiring, 'routed');
   assert.equal(IMPORTED_EDITING_MILESTONE.releaseAccess, 'not_available');
-  assert.equal(IMPORTED_EDITING_MILESTONE.slice, 'ws1-ws3-hosted-routes');
+  assert.equal(IMPORTED_EDITING_MILESTONE.slice, 'ws1-ws3-hosted-routes-visual-editor');
   assert.equal(IMPORTED_EDITING_MILESTONE.liveWorker, 'launch-and-own-onboarding-beta');
   assert.equal(IMPORTED_EDITING_MILESTONE.liveVersion, 'b31ee9eb-a86a-4e2e-bdb7-4358ee8b3ca5');
   assert.equal(IMPORTED_EDITING_MILESTONE.liveBase, '35a5f8d9fc0432af3dd19b3a1c07e57d500740ba');

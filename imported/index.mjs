@@ -11,16 +11,17 @@ export { bindApproval } from './approval.mjs';
 export { proposeImportedPullRequest, readImportedPullRequest } from './pull-request.mjs';
 export { assessPublishedRevision, verifyPublishedRevision } from './verify-published.mjs';
 
-// Hosted routes are wired. The live upload below is not this commit.
-// Release access stays not_available until orchestration reviews the release
-// matrix and an owner-live edit is recorded.
+// Hosted routes include the visual page-snapshot editor. The live Worker below
+// is an older upload without vendored ASSETS. Release access stays not_available
+// until Domain deploys with ASSETS, orchestration reviews the release matrix,
+// and an owner-live edit is recorded.
 export const IMPORTED_EDITING_MILESTONE = Object.freeze({
-  slice: 'ws1-ws3-hosted-routes',
+  slice: 'ws1-ws3-hosted-routes-visual-editor',
   hostedWorkerWiring: 'routed',
   releaseAccess: 'not_available',
   liveWorker: 'launch-and-own-onboarding-beta',
   liveVersion: 'b31ee9eb-a86a-4e2e-bdb7-4358ee8b3ca5',
   liveBase: '35a5f8d9fc0432af3dd19b3a1c07e57d500740ba',
   livePinned: false,
-  reason: 'Cloudflare version b31ee9eb was uploaded from uncommitted files on 35a5f8d. This commit is ahead of that upload. Availability stays not_available until orchestration reviews the release matrix and an owner-live edit is recorded.'
+  reason: 'Visual page_snapshot and ASSETS wiring are in this branch. Cloudflare version b31ee9eb predates that deploy. Availability stays not_available until Domain deploys with ASSETS, orchestration reviews the release matrix, and an owner-live edit is recorded.'
 });
