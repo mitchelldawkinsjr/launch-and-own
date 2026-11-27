@@ -94,7 +94,7 @@ function installGit(h, files) {
     if (path === root + '/commits/' + HEAD) {
       return json({
         sha: HEAD, parents: [{sha: BASE}], commit: {tree: {sha: NEXT}},
-        files: [{filename: 'public/index.html', status: 'modified', sha: await gitBlobSha(files.nextHtml)}]
+        files: files.commitFiles ? await files.commitFiles() : [{filename: 'public/index.html', status: 'modified', sha: await gitBlobSha(files.nextHtml)}]
       });
     }
     if (path === root + '/pulls' && method === 'GET') return json(state.pull ? [state.pull] : []);
@@ -170,7 +170,9 @@ test('a live imported site can preview and approve one pull request without merg
     assert.match(editorHtml, /ve-targets/);
     assert.match(editorHtml, /Willow Studio/);
     assert.match(editorHtml, /Preview this edit/);
-    assert.match(editorHtml, /imported-edit-live\/index\.html/);
+    assert.match(editorHtml, /\/site-editor\/index\.html\?id=/);
+    assert.match(editorHtml, /page=index\.html/);
+    assert.match(editorHtml, /#csrf=/);
     const pkg = text('{"name":"site"}\n');
     const pkgSha = await gitBlobSha(pkg);
     files.blobs.set(pkgSha, pkg);
@@ -421,6 +423,196 @@ test('an owner connects the existing contact form through one approved pull requ
     assert.match(status, /Merge it yourself in GitHub/);
     const replay = await post(h, '/form-connect-approve', tenant.cookie, {csrf: tenant.csrf, ...fields});
     assert.notEqual(replay.status, 303, 'the approval works once');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a visual page save opens review and does not write GitHub', async () => {
+  const h = harness();
+  globalThis.fetch = h.fetchFn;
+  Object.assign(h.env, {
+    ZIP_ARTIFACTS: localBucket(),
+    ZIP_PREVIEW_DOMAIN: 'preview.example.test',
+    ZIP_PREVIEW_KEY: 'cd'.repeat(32)
+  });
+  try {
+    const tenant = await liveSite(h);
+    markImported(h, tenant.id);
+    const html = text('<!doctype html><html><body><h1>Willow Studio</h1></body></html>');
+    const css = text('h1 { color: #1f4b3a; }\n');
+    const files = {
+      nextHtml: text('<!doctype html><html><body><h1>Harbor Lane</h1></body></html>'),
+      blobs: new Map(),
+      baseTree: [],
+      headTree: async () => []
+    };
+    const [htmlSha, cssSha] = await Promise.all([gitBlobSha(html), gitBlobSha(css)]);
+    files.blobs.set(htmlSha, html);
+    files.blobs.set(cssSha, css);
+    files.baseTree = [
+      {path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40)},
+      {path: 'public/index.html', mode: '100644', type: 'blob', sha: htmlSha},
+      {path: 'public/styles.css', mode: '100644', type: 'blob', sha: cssSha}
+    ];
+    const state = installGit(h, files);
+    const editorHtml = await (await h.request('/imported-edit?id=' + tenant.id, {cookie: tenant.cookie})).text();
+    assert.match(editorHtml, /\/site-editor\/index\.html\?id=/);
+    const listed = await h.request('/imported-edit-files?id=' + tenant.id, {cookie: tenant.cookie});
+    assert.equal(listed.status, 200);
+    assert.deepEqual((await listed.json()).files, ['index.html', 'styles.css']);
+    const visual = await h.request('/imported-edit-visual-preview', {
+      method: 'POST', cookie: tenant.cookie,
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        csrf: tenant.csrf, id: tenant.id, page: 'index.html',
+        html: '<!doctype html><html><body><h1>Harbor Lane</h1></body></html>',
+        images: []
+      })
+    });
+    assert.equal(visual.status, 303, await visual.text());
+    assert.match(visual.headers.get('location'), /^\/imported-edit-review\?ticket=/);
+    assert.equal(state.posts.length, 0);
+    const reviewHtml = await (await h.request(visual.headers.get('location'), {cookie: tenant.cookie})).text();
+    assert.match(reviewHtml, /Visual page/);
+    assert.match(reviewHtml, /Approve and publish/);
+    const scripted = await h.request('/imported-edit-visual-preview', {
+      method: 'POST', cookie: tenant.cookie,
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        csrf: tenant.csrf, id: tenant.id, page: 'index.html',
+        html: '<!doctype html><html><body><script>alert(1)</script></body></html>',
+        images: []
+      })
+    });
+    assert.equal(scripted.status, 400);
+    assert.equal(state.posts.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a visual save accept opens the pull request and merges it', async () => {
+  const h = harness();
+  globalThis.fetch = h.fetchFn;
+  Object.assign(h.env, {
+    ZIP_ARTIFACTS: localBucket(),
+    ZIP_PREVIEW_DOMAIN: 'preview.example.test',
+    ZIP_PREVIEW_KEY: 'cd'.repeat(32)
+  });
+  try {
+    const tenant = await liveSite(h);
+    markImported(h, tenant.id);
+    const html = text('<!doctype html><html><body><h1>Willow Studio</h1></body></html>');
+    const css = text('h1 { color: #1f4b3a; }\n');
+    const nextHtml = text('<!doctype html><html><body><h1>Harbor Lane</h1></body></html>');
+    const files = {nextHtml, blobs: new Map(), baseTree: [], headTree: async () => []};
+    const [htmlSha, cssSha, nextSha] = await Promise.all([gitBlobSha(html), gitBlobSha(css), gitBlobSha(nextHtml)]);
+    files.blobs.set(htmlSha, html);
+    files.blobs.set(cssSha, css);
+    files.baseTree = [
+      {path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40)},
+      {path: 'public/index.html', mode: '100644', type: 'blob', sha: htmlSha},
+      {path: 'public/styles.css', mode: '100644', type: 'blob', sha: cssSha}
+    ];
+    files.headTree = async () => [
+      {path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40)},
+      {path: 'public/index.html', mode: '100644', type: 'blob', sha: nextSha},
+      {path: 'public/styles.css', mode: '100644', type: 'blob', sha: cssSha}
+    ];
+    const state = installGit(h, files);
+    state.allowMerge = true;
+    const visual = await h.request('/imported-edit-visual-preview', {
+      method: 'POST', cookie: tenant.cookie,
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        csrf: tenant.csrf, id: tenant.id, page: 'index.html',
+        html: '<!doctype html><html><body><h1>Harbor Lane</h1></body></html>',
+        images: []
+      })
+    });
+    assert.equal(visual.status, 303, await visual.text());
+    assert.equal(state.posts.length, 0, 'preview does not write GitHub');
+    const reviewHtml = await (await h.request(visual.headers.get('location'), {cookie: tenant.cookie})).text();
+    const field = name => reviewHtml.match(new RegExp('name="' + name + '" value="([^"]+)"'))[1];
+    const approved = await post(h, '/imported-edit-approve', tenant.cookie, {
+      csrf: tenant.csrf, ticket: field('ticket'), approvalId: field('approvalId'),
+      proposalDigest: field('proposalDigest'), artifactDigest: field('artifactDigest'), action: 'publish'
+    });
+    assert.equal(approved.status, 303, await approved.text());
+    assert.deepEqual(state.posts, ['ref', 'blob', 'tree', 'commit', 'patch', 'pull']);
+    assert.equal(state.merges.length, 1);
+    assert.equal(state.merges[0].sha, HEAD);
+    assert.equal(state.merges[0].merge_method, 'squash');
+    const statusHtml = await (await h.request(approved.headers.get('location'), {cookie: tenant.cookie})).text();
+    assert.match(statusHtml, /aria-current="step">You merged/);
+    assert.doesNotMatch(statusHtml, /aria-current="step">Pull request open/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a visual save with a new image opens a pull request only after approval', async () => {
+  const h = harness();
+  globalThis.fetch = h.fetchFn;
+  Object.assign(h.env, {
+    ZIP_ARTIFACTS: localBucket(),
+    ZIP_PREVIEW_DOMAIN: 'preview.example.test',
+    ZIP_PREVIEW_KEY: 'cd'.repeat(32)
+  });
+  try {
+    const tenant = await liveSite(h);
+    markImported(h, tenant.id);
+    const html = text('<!doctype html><html><body><h1>Willow Studio</h1></body></html>');
+    const css = text('h1 { color: #1f4b3a; }\n');
+    const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13);
+    const nextHtml = text('<!doctype html><html><body><h1>Harbor Lane</h1><img src="images/lo-1.png" alt="Storefront"></body></html>');
+    const files = {nextHtml, blobs: new Map(), baseTree: [], headTree: async () => [], commitFiles: null};
+    const [htmlSha, cssSha, pngSha, nextSha] = await Promise.all([gitBlobSha(html), gitBlobSha(css), gitBlobSha(png), gitBlobSha(nextHtml)]);
+    files.blobs.set(htmlSha, html);
+    files.blobs.set(cssSha, css);
+    files.baseTree = [
+      {path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40)},
+      {path: 'public/index.html', mode: '100644', type: 'blob', sha: htmlSha},
+      {path: 'public/styles.css', mode: '100644', type: 'blob', sha: cssSha}
+    ];
+    files.headTree = async () => [
+      {path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40)},
+      {path: 'public/images', mode: '040000', type: 'tree', sha: '3'.repeat(40)},
+      {path: 'public/index.html', mode: '100644', type: 'blob', sha: nextSha},
+      {path: 'public/styles.css', mode: '100644', type: 'blob', sha: cssSha},
+      {path: 'public/images/lo-1.png', mode: '100644', type: 'blob', sha: pngSha}
+    ];
+    files.commitFiles = async () => [
+      {filename: 'public/index.html', status: 'modified', sha: nextSha},
+      {filename: 'public/images/lo-1.png', status: 'added', sha: pngSha}
+    ];
+    const state = installGit(h, files);
+    const visual = await h.request('/imported-edit-visual-preview', {
+      method: 'POST', cookie: tenant.cookie,
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        csrf: tenant.csrf, id: tenant.id, page: 'index.html',
+        html: new TextDecoder().decode(nextHtml),
+        images: [{path: 'images/lo-1.png', base64: base64Encode(png)}]
+      })
+    });
+    assert.equal(visual.status, 303, await visual.text());
+    assert.equal(state.posts.length, 0, 'preview does not write GitHub');
+    const reviewHtml = await (await h.request(visual.headers.get('location'), {cookie: tenant.cookie})).text();
+    assert.match(reviewHtml, /New image/);
+    const field = name => reviewHtml.match(new RegExp('name="' + name + '" value="([^"]+)"'))[1];
+    const approved = await post(h, '/imported-edit-approve', tenant.cookie, {
+      csrf: tenant.csrf, ticket: field('ticket'), approvalId: field('approvalId'),
+      proposalDigest: field('proposalDigest'), artifactDigest: field('artifactDigest'), action: 'pr'
+    });
+    assert.equal(approved.status, 303, await approved.text());
+    assert.deepEqual(state.posts, ['ref', 'blob', 'blob', 'tree', 'commit', 'patch', 'pull']);
+    const written = [...files.blobs.values()];
+    assert.ok(written.some(bytes => bytes.length === png.length && bytes.every((byte, index) => byte === png[index])));
+    assert.ok(written.some(bytes => new TextDecoder().decode(bytes).includes('Harbor Lane')));
+    const statusHtml = await (await h.request(approved.headers.get('location'), {cookie: tenant.cookie})).text();
+    assert.match(statusHtml, /Pull request open/);
   } finally {
     globalThis.fetch = originalFetch;
   }

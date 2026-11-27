@@ -1,6 +1,6 @@
 // Hosted imported-site edits. The owner session, CSRF check, and launch record
 // decide who can ask. Model output is not accepted on these routes.
-import {encodeUtf8,gitBlobSha,jcs,sha256Bytes,sha256Text,utf8} from '../imported/bytes.mjs';
+import {base64Decode,encodeUtf8,gitBlobSha,jcs,sha256Bytes,sha256Text,utf8} from '../imported/bytes.mjs';
 import {connectContactForm,formConnectSummary,FormConnectError} from './form-connect.mjs';
 import {detectContactForm} from './form-detection.mjs';
 import {readFormService} from './form-service.mjs';
@@ -9,9 +9,9 @@ import {d1ApprovalStore} from '../imported/approval-store.mjs';
 import {ImportedEditError} from '../imported/errors.mjs';
 import {inspectSite,structuralPath} from '../imported/intelligence.mjs';
 import {locateTypedEdit} from '../imported/locate.mjs';
-import {parseModelOutput,validateEdits} from '../imported/edits.mjs';
+import {parseModelOutput,validateEdits,validatePageSnapshot} from '../imported/edits.mjs';
 import {defaultEditorPage,editablePages,listEditTargets,pickEditTarget} from '../imported/targets.mjs';
-import {livePreviewUrl,VISUAL_EDITOR_CSS,visualEditorMarkup} from './visual-editor.mjs';
+import {assistantPromptMarkup,livePreviewUrl,pagesDevPreviewUrl,VISUAL_EDITOR_CSS,visualEditorMarkup} from './visual-editor.mjs';
 import {artifactDigest,isolatePreview,previewResponse,scriptFreePreviewHeaders} from '../imported/preview.mjs';
 import {proposeImportedPullRequest,readImportedPullRequest} from '../imported/pull-request.mjs';
 import {readCurrentRevision} from '../imported/revision.mjs';
@@ -19,7 +19,7 @@ import {verifyPublishedRevision} from '../imported/verify-published.mjs';
 import {MergeRefused,mergeVerifiedPullRequest} from '../pipeline/merge-approved-pr.mjs';
 import {getOwnedJob,hasCurrentOwnerSession,isLaunchId} from './launch-jobs.mjs';
 import {seal,unseal} from './crypto.mjs';
-import {isZipArtifact,stageZip} from './zip-artifacts.mjs';
+import {isZipArtifact,loadZipFiles,stageZip} from './zip-artifacts.mjs';
 import {createZipPreview,zipPreviewConfigured} from './zip-preview-access.mjs';
 import {readToolkitPreviewStatus} from './toolkit-preview.mjs';
 import {editReviewMarkup} from './edit-review.mjs';
@@ -175,6 +175,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     return value;
   }
   async function reviewedTree(env,current,ticket,item){
+    if(ticket.mode==='snapshot')return reviewSnapshot(env,current,ticket,item);
     if(ticket.repositoryId!==item.job.repository_id||typeof ticket.requestId!=='string'||typeof ticket.summary!=='string'||
        !Array.isArray(ticket.edits)||ticket.edits.length!==1||
        !Array.isArray(ticket.changed)||ticket.changed.length!==1)throw new ImportedEditError('approval-digest-mismatch');
@@ -208,6 +209,37 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     if(approvedRows!==actualRows)throw new ImportedEditError('approval-digest-mismatch');
     return {files,validated,preview};
   }
+  async function reviewSnapshot(env,current,ticket,item){
+    if(ticket.repositoryId!==item.job.repository_id||typeof ticket.requestId!=='string'||typeof ticket.summary!=='string'||
+       !isZipArtifact(ticket.previewArtifact)||!Array.isArray(ticket.edits)||ticket.edits.length<1||
+       ticket.edits.some(edit=>edit?.kind!=='page_snapshot')||
+       !Array.isArray(ticket.changed)||ticket.changed.length<1||ticket.changed.length!==ticket.edits.length){
+      throw new ImportedEditError('approval-digest-mismatch');
+    }
+    const fetchFn=fencedFetch(env,current);
+    const revision=await readCurrentRevision({
+      owner:item.job.github_login,repo:'esp-'+item.job.site_slug,
+      token:item.grants.githubAccessToken,fetchFn
+    });
+    if(revision.commitSha!==ticket.baseCommitSha||revision.repositoryId!==item.job.repository_id||
+       revision.githubUserId!==item.job.github_user_id)throw new ImportedEditError('stale_base');
+    const files=revision.files.map(file=>({path:file.path,bytes:file.bytes}));
+    const inspection=await inspectSite(files);
+    const stored=await loadZipFiles(env.ZIP_ARTIFACTS,ticket.previewArtifact,'draft');
+    const expectedBlobs=new Map(ticket.changed.filter(row=>typeof row.beforeBlobSha==='string').map(row=>[row.path,row.beforeBlobSha]));
+    const validated=await validatePageSnapshot({
+      baseCommitSha:revision.commitSha,files,inspection,repositoryId:revision.repositoryId,
+      requestId:ticket.requestId,summary:ticket.summary,nextFiles:stored,expectedBlobs
+    });
+    const preview=await isolatePreview({
+      files:validated.files,baseCommitSha:revision.commitSha,githubUserId:revision.githubUserId,
+      repositoryId:revision.repositoryId,ownerLogin:revision.ownerLogin
+    });
+    if(preview.digest!==ticket.previewDigest||validated.proposalDigest!==ticket.proposalDigest||
+       validated.artifactDigest!==ticket.artifactDigest||
+       JSON.stringify(validated.changed)!==JSON.stringify(ticket.changed))throw new ImportedEditError('approval_mismatch');
+    return {files,validated,preview};
+  }
   function reasonLines(inspection){
     return inspection.reasons
       .filter(code=>code!=='has_index_html'&&code!=='external_dependency')
@@ -222,7 +254,7 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     });
     return inspectSite(revision.files.map(file=>({path:file.path,bytes:file.bytes})));
   }
-  const editorCsp="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-src 'self'; frame-ancestors 'none'";
+  const editorCsp="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-src 'self' https://*.pages.dev; frame-ancestors 'none'";
   const editorHeaders={
     'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-frame-options':'DENY',
     'x-content-type-options':'nosniff','referrer-policy':'same-origin','content-security-policy':editorCsp
@@ -250,18 +282,42 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     const page=typeof rawPage==='string'&&pages.includes(rawPage)?rawPage:defaultEditorPage(pages);
     const targets=listEditTargets(files,inspection);
     const picked=pickEditTarget(targets,url?.searchParams?.get('pick'));
-    const iframeSrc=livePreviewUrl('/imported-edit-live/',page,'id='+encodeURIComponent(id));
-    const body=heading+notes+visualEditorMarkup({
-      jobId:id,page,pages,iframeSrc,targets,picked,csrf:current.csrf,
-      previewAction:'/imported-edit-preview',editorPath:'/imported-edit',
+    const previewView=url?.searchParams?.get('view')==='live'?'live':'mirror';
+    const iframeSrc=livePreviewUrl('/imported-edit-live/',page,{jobId:id});
+    const liveSiteSrc=pagesDevPreviewUrl(item.job.site_slug,page);
+    const aiBlock=env.EDITOR_ASSISTANT_PROMPT==='on'
+      ?assistantPromptMarkup({csrf:current.csrf,action:'/imported-edit-preview',id}):'';
+    const body=notes+visualEditorMarkup({
+      jobId:id,page,pages,iframeSrc,previewView,liveSiteSrc,targets,picked,csrf:current.csrf,
+      previewAction:'/imported-edit-preview',editorPath:'/imported-edit',aiBlock,
+      meta:'Repository: esp-'+item.job.site_slug,
       notes:'<p>When you approve, we publish exactly that change. You can choose to open a pull request instead and merge it yourself.</p>'
     })+'<p><a href="/history">Back to your launches</a></p>';
-    return view('Edit imported website',body,200,editorHeaders,{wide:true,css:VISUAL_EDITOR_CSS,omitTitle:false});
+    return view('Edit imported website',body,200,editorHeaders,{wide:true,css:VISUAL_EDITOR_CSS,omitTitle:true});
+  }
+  async function projectFiles(env,current,id){
+    const item=await ownedZip(env,current,id);
+    if(!item)return fail('This live imported website is not available for editing.',404);
+    try{
+      const fetchFn=fencedFetch(env,current);
+      const revision=await readCurrentRevision({
+        owner:item.job.github_login,repo:'esp-'+item.job.site_slug,
+        token:item.grants.githubAccessToken,fetchFn
+      });
+      const paths=revision.files.map(file=>file.path).sort();
+      return Response.json({files:paths},{headers:{'cache-control':'no-store','x-content-type-options':'nosniff'}});
+    }catch(error){
+      return safeFailure(error);
+    }
   }
   async function live(env,current,url){
-    const relative=url.pathname.startsWith('/imported-edit-live/')?decodeURIComponent(url.pathname.slice('/imported-edit-live/'.length)):null;
-    if(!relative||!structuralPath(relative))return fail('This preview page is not available.',404);
-    const item=await ownedZip(env,current,url.searchParams.get('id'));
+    const rest=url.pathname.startsWith('/imported-edit-live/')?url.pathname.slice('/imported-edit-live/'.length):'';
+    const split=rest.indexOf('/');
+    if(split<1)return fail('This preview page is not available.',404);
+    const id=decodeURIComponent(rest.slice(0,split));
+    const relative=decodeURIComponent(rest.slice(split+1))||'index.html';
+    if(!isLaunchId(id)||!structuralPath(relative))return fail('This preview page is not available.',404);
+    const item=await ownedZip(env,current,id);
     if(!item)return fail('This preview is not available.',404);
     try{
       const fetchFn=fencedFetch(env,current);
@@ -277,11 +333,83 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       return fail('This preview is not available.',404);
     }
   }
+  async function readVisualBody(request){
+    const type=request.headers.get('content-type')||'';
+    if(!/^application\/json(?:\s*;|$)/i.test(type))return null;
+    const bytes=await request.arrayBuffer();
+    if(bytes.byteLength<2||bytes.byteLength>3_000_000)return null;
+    try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
+    catch{return null;}
+  }
+  async function visualPreview(request,env,current){
+    await limitAttempts(request,env);
+    const body=await readVisualBody(request);
+    if(!current||!body||request.headers.get('origin')!==baseUrl(env)||body.csrf!==current.csrf)
+      return fail('This form expired. Please reload the page',400);
+    const id=typeof body.id==='string'?body.id:'';
+    const page=typeof body.page==='string'?body.page:'';
+    let html=typeof body.html==='string'?body.html:'';
+    html=html.replace(/<base\b[^>]*id=(?:"__he_base__"|'__he_base__')[^>]*>/gi,'');
+    const images=Array.isArray(body.images)?body.images:[];
+    if(!isLaunchId(id)||!structuralPath(page)||!html||html.length>1_500_000||images.length>8)
+      return fail('Enter the page to preview.',400);
+    const item=await ownedZip(env,current,id);
+    if(!item)return fail('This live imported website is not available for editing.',404);
+    try{
+      const fetchFn=fencedFetch(env,current);
+      const revision=await readCurrentRevision({
+        owner:item.job.github_login,repo:'esp-'+item.job.site_slug,
+        token:item.grants.githubAccessToken,fetchFn
+      });
+      const files=revision.files.map(file=>({path:file.path,bytes:file.bytes}));
+      const inspection=await inspectSite(files);
+      const next=files.map(file=>({path:file.path,bytes:file.path===page?encodeUtf8(html):file.bytes}));
+      if(!next.some(file=>file.path===page))throw new ImportedEditError('kind_not_allowed');
+      for(const image of images){
+        if(!image||typeof image.path!=='string'||typeof image.base64!=='string'||image.base64.length>2_800_000)
+          throw new ImportedEditError('kind_not_allowed');
+        let bytes;
+        try{bytes=base64Decode(image.base64);}catch{throw new ImportedEditError('kind_not_allowed');}
+        if(next.some(file=>file.path===image.path))throw new ImportedEditError('kind_not_allowed');
+        next.push({path:image.path,bytes});
+      }
+      const requestId=crypto.randomUUID();
+      const summary='Visual editor preview';
+      const validated=await validatePageSnapshot({
+        baseCommitSha:revision.commitSha,files,inspection,repositoryId:revision.repositoryId,
+        requestId,summary,nextFiles:next
+      });
+      const previewArtifact=await stageEditPreview(env,validated.files);
+      if(!previewArtifact)return fail('Website ZIP previews are unavailable.',409);
+      const preview=await isolatePreview({
+        files:validated.files,baseCommitSha:revision.commitSha,githubUserId:revision.githubUserId,
+        repositoryId:revision.repositoryId,ownerLogin:revision.ownerLogin
+      });
+      const edits=validated.changed.map(row=>({
+        kind:'page_snapshot',path:row.path,
+        find:row.added?'New file':'Current page',
+        replace:row.added?'New image':'Updated in the visual editor'
+      }));
+      const ticket=await encodeTicket(env,'review',current,{
+        mode:'snapshot',jobId:item.job.id,repositoryId:item.job.repository_id,baseCommitSha:revision.commitSha,
+        previewDigest:preview.digest,proposalDigest:validated.proposalDigest,artifactDigest:validated.artifactDigest,
+        approvalId:newApprovalId(),requestId,summary,edits,changed:validated.changed,previewArtifact
+      });
+      if(ticket.length>6000)throw new ImportedEditError('limit_exceeded');
+      return new Response(null,{status:303,headers:{
+        location:'/imported-edit-review?ticket='+encodeURIComponent(ticket),
+        'cache-control':'no-store','referrer-policy':'same-origin'
+      }});
+    }catch(error){
+      return safeFailure(error);
+    }
+  }
   async function prepare(request,env,current){
     await limitAttempts(request,env);
     const form=await formData(request);assertCsrf(request,form,current,baseUrl(env));
     const item=await ownedZip(env,current,oneField(form,'id',80));
     if(!item)return fail('This live imported website is not available for editing.',404);
+    if(form.get('mode')==='ai')return fail('A described change is prepared in the customer-owned assistant. Use Preview in the editor, or Advanced, on this page.',400);
     const kind=oneField(form,'kind',40);
     const rawPath=form.get('path');
     const path=typeof rawPath==='string'&&rawPath.trim()===''&&form.getAll('path').length<=1?null:oneField(form,'path',240);
@@ -338,7 +466,11 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
   async function review(env,current,raw){
     try{
       const ticket=await decodeTicket(env,'review',current,raw);
-      if(!Array.isArray(ticket.edits)||ticket.edits.length!==1)throw new ImportedEditError('approval-digest-mismatch');
+      const snapshot=ticket.mode==='snapshot';
+      if(snapshot){
+        if(!Array.isArray(ticket.edits)||ticket.edits.length<1||ticket.edits.some(edit=>edit?.kind!=='page_snapshot'))
+          throw new ImportedEditError('approval-digest-mismatch');
+      }else if(!Array.isArray(ticket.edits)||ticket.edits.length!==1)throw new ImportedEditError('approval-digest-mismatch');
       const item=await ownedZip(env,current,ticket.jobId);
       if(!item)return fail('This imported edit preview expired or the website is no longer yours.',404);
       await reviewedTree(env,current,ticket,item);
@@ -618,5 +750,5 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
       return safeFailure(error);
     }
   }
-  return {editor,prepare,review,file,approve,status,connectForm,connectFormApprove,live};
+  return {editor,prepare,visualPreview,review,file,approve,status,connectForm,connectFormApprove,live,projectFiles};
 }

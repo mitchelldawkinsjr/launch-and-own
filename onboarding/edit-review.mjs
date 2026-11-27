@@ -3,7 +3,7 @@
  * The hosted review route renders this. The server still verifies the sealed ticket and the recomputed digests. */
 import {escape} from './ui.mjs';
 
-const KINDS={text:'Text',link:'Link',business_info:'Business details',css_color:'Color'};
+const KINDS={text:'Text',link:'Link',business_info:'Business details',css_color:'Color',page_snapshot:'Visual page'};
 const STEPS=[['previewed','Preview ready'],['approved','You approved'],['pr_open','Pull request open'],['merged','You merged'],['deploying','Cloudflare publishing'],['live','Live and checked']];
 const TERMINAL={rejected:'Not approved',failed:'Stopped',expired:'Expired',needs_reauthorization:'Reconnect needed'};
 const CODES={
