@@ -84,7 +84,7 @@ export function historyToolkitCapabilities({
       'Imported editing appears after this ZIP launch is confirmed live.');
   else if (canEdit && verified)
     updates = cap('available_opt_in', 'editor_eligible',
-      'Open the visual editor, preview the exact page, and approve to publish (or open a pull request instead). Then we check the live site.');
+      'Change the copy, preview the exact page, and approve to publish (or open a pull request instead). Then we check the live site.');
   else
     updates = cap('not_available', 'update_acceptance_pending',
       verified

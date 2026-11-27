@@ -380,9 +380,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const adapters = defaultAdapters({ cwd: process.cwd() });
     // Live repo/wrangler-var helpers stay explicit so dry-run and tests do not invent provider writes.
     adapters.ensureRepo = async ({ owner: o, siteSlug: s }) => {
-      console.log('Create private repo ' + o + '/' + s + '-assistant from the pinned upstream template, then press Enter.');
-      await rl.question('');
-      return { name: o + '/' + s + '-assistant', created: true };
+      const name = o + '/' + s + '-assistant';
+      console.log('Create private repo ' + name + ' from the pinned upstream template (or confirm it already exists).');
+      const created = String(await rl.question('Did this run create that repo? [y/N]: ')).trim().toLowerCase() === 'y';
+      return { name, created };
     };
     adapters.writeWranglerVars = async (vars) => {
       console.log('Set these in wrangler.jsonc (then this script redeploys):');

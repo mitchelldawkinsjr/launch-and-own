@@ -27,14 +27,14 @@ node assistant/setup/provision.mjs --resume assistant/provisioning/state.<runId>
 The script:
 
 1. Prefights Node ≥ 22.12, `wrangler whoami`, and D1 capacity.
-2. Shows a consent/cost screen (no “free forever”).
-3. Creates the private assistant repo, D1 + migrations, and a bootstrap Worker with `KEK`.
-4. **Pauses** for you to create the Cloudflare Access application (email-only policy).
-5. Runs the existing local [`setup/manifest-exchange.mjs`](setup/manifest-exchange.mjs) path for your private GitHub App.
-6. **Pauses** for you to install that App on **only** the website repo.
-7. Runs self-check and writes local `provisioning/state.<runId>.json` (resource IDs and step status; never secrets).
+2. Shows a consent/cost screen (no “free forever”); type `YES` to continue.
+3. Walks you through creating the private assistant repo from the pinned template, then creates D1 + migrations and deploys a bootstrap Worker with `KEK` via wrangler.
+4. **Pauses** for you to create the Cloudflare Access application (email-only policy), then asks you to paste team domain / AUD / sub into `wrangler.jsonc` and redeploys.
+5. Points you at [`setup/manifest-exchange.mjs`](setup/manifest-exchange.mjs) for your private GitHub App, then collects the App id/slug.
+6. **Pauses** for you to install that App on **only** the website repo, then stores installation + repo ids.
+7. Calls `/self-check` and writes local `provisioning/state.<runId>.json` (resource IDs and step status; never secrets).
 
-Rollback deletes only resources this run created. Access and the GitHub App stay manual checklist items — see [`UNINSTALL.md`](UNINSTALL.md).
+Dry-run (`--dry-run`) touches no providers. Rollback deletes only resources this run marked as created. Access and the GitHub App stay manual checklist items — see [`UNINSTALL.md`](UNINSTALL.md). Live provider use needs owner-authorized disposable accounts first.
 
 `npx wrangler login` is still required beforehand. Launch & Own never receives your tokens.
 

@@ -1,6 +1,6 @@
 # Imported-site editing contracts (#165 M0)
 
-**Status: APPROVED, revision 2.** Owner approval recorded on #171 item 7, 2026-11-25. Prepared by Claude Code (Claude Opus 5.5, `claude-opus-5-5`). No code implements these contracts yet. Nothing here changes release status; `distribution/release-matrix.json` stays authoritative.
+**Status: APPROVED, revision 2.** Owner approval recorded on #171 item 7, 2026-11-25. Prepared by Claude Code (Claude Opus 5.5, `claude-opus-5-5`). Hosted and assistant runtimes implement the §2 edit/preview/approval path (including `page_snapshot`); availability still follows `distribution/release-matrix.json`.
 
 Revision 2 addresses the coordinator review and the WS5 security review on #176, plus findings from the corpus pilot (#169) and the provisional fixture schema (#172 comment 7153907192, used by fixture PR #177). See [Changes in revision 2](#changes-in-revision-2).
 
