@@ -17,8 +17,8 @@ const REASON = {
   no_pages: 'No HTML pages were found in your site’s public folder.',
   too_many_pages: 'Your site has more than 1,000 pages. Add a sitemap in your repository.',
   www_redirect_unsupported: 'www/apex redirects need DNS changes and stay manual.',
-  unsafe_rule: 'A saved redirect points outside this site. Save a new redirect request.',
-  no_rules: 'The saved request has no redirect rules. Save a new redirect request.',
+  unsafe_rule: 'Enter two different paths on this site, such as /old and /new.',
+  no_rules: 'Enter a redirect rule in Optional features.',
   approval_digest_mismatch: 'Your site changed since you reviewed the files. Review them again.',
   repository_mismatch: 'The GitHub repository no longer matches this site.',
   credentials_revoked: 'GitHub access changed. Reconnect and try again.'
@@ -29,7 +29,7 @@ export function siteFilesEnabled(env) {
 }
 
 export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf, baseUrl, assertHistoryAccess, limitAttempts, now}) {
-  async function context(env, current, {approvalId, jobId}) {
+  async function context(env, current, {approvalId, jobId, redirectRule}) {
     if (!siteFilesEnabled(env) || !current?.cloudflare_account_id || Boolean(approvalId) === Boolean(jobId)) return null;
     const reviewed = approvalId ? await readOwnedStoredOptionApproval(env, current, approvalId) : null;
     if (approvalId && !KINDS.has(reviewed?.kind)) return null;
@@ -39,7 +39,7 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
         !SHA.test(job.expected_commit_sha || '') || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(job.site_slug || '') ||
         job.github_login?.toLowerCase() !== current.github_login?.toLowerCase() ||
         (reviewed && job.repository_id !== reviewed.currentSite.repositoryId)) return null;
-    const kind = reviewed?.kind ?? 'seo';
+    const kind = reviewed?.kind ?? (redirectRule ? 'redirects' : 'seo');
     const repoName = 'esp-' + job.site_slug;
     // Canonical origin: the custom domain this owner turned on for this site, else the site's own pages.dev address.
     const domain = await env.DB.prepare("SELECT payload_json FROM onboarding_option_executions WHERE job_id = ? AND " +
@@ -47,14 +47,15 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
       .bind(job.id, current.github_user_id).first();
     let host = repoName + '-site.pages.dev';
     try { const h = JSON.parse(domain?.payload_json || 'null')?.hostname; if (/^[a-z0-9.-]+$/.test(h || '')) host = h; } catch {}
+    const payload = redirectRule ? {wwwMode: 'none', pathRules: [redirectRule]} : reviewed?.normalizedPayload;
     const target = {owner: job.github_login, repoName, repositoryId: job.repository_id,
-      propose: paths => buildSiteFilesProposal({kind, payload: reviewed?.normalizedPayload, paths, origin: 'https://' + host})};
-    return {kind, job, target};
+      propose: paths => buildSiteFilesProposal({kind, payload, paths, origin: 'https://' + host})};
+    return {kind, job, target, redirectRule};
   }
   const backToOptions = job => '<p><a class="btn btn-secondary" href="/site-options?id=' + encodeURIComponent(job.id) + '">Back to site options</a></p>';
   const refusedPage = (ctx, code) => view('Could not add ' + LABEL[ctx.kind],
     '<p>' + escape(REASON[code] || 'Reopen your site options and try again.') + '</p>' + backToOptions(ctx.job), 409);
-  const seoTicketContext = current => 'site-files-seo-review:' + current.hash;
+  const ticketContext = (current, redirects) => 'site-files-' + (redirects ? 'redirects' : 'seo') + '-review:' + current.hash;
 
   async function review(env, current, params) {
     if (params.getAll('id').length + params.getAll('approvalId').length !== 1)
@@ -62,6 +63,23 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
     const approvalId = params.get('approvalId');
     const ctx = await context(env, current, {approvalId, jobId: params.get('id')});
     if (!ctx) return fail('Open this option from your site options.', 404);
+    return reviewFiles(env, current, ctx, approvalId);
+  }
+
+  async function reviewRedirects(request, env, current) {
+    await limitAttempts(request, env);
+    const form = await formData(request);
+    assertCsrf(request, form, current, baseUrl(env));
+    const redirectRule = {from: form.get('pathFrom'), to: form.get('pathTo')};
+    if (form.getAll('id').length !== 1 || form.getAll('pathFrom').length !== 1 || form.getAll('pathTo').length !== 1 ||
+        Object.values(redirectRule).some(path => typeof path !== 'string' || !path || path.length > 201))
+      return fail('Enter the old and new paths for your redirect.', 400);
+    const ctx = await context(env, current, {jobId: form.get('id'), redirectRule});
+    if (!ctx) return fail('Open this option from your site options.', 404);
+    return reviewFiles(env, current, ctx);
+  }
+
+  async function reviewFiles(env, current, ctx, approvalId) {
     const grants = await assertHistoryAccess(env, current);
     let baseSha, proposal;
     try { ({baseSha, proposal} = await readSiteFiles(ctx.target, {githubToken: grants.githubAccessToken, fetchFn: ownerFencedFetch(env, current, now)})); }
@@ -73,10 +91,11 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
     if (!proposal.ok) return refusedPage(ctx, proposal.reason);
     const reviewField = approvalId
       ? '<input type="hidden" name="approvalId" value="' + escape(approvalId) + '">'
-      : '<input type="hidden" name="seoTicket" value="' + await seal(env.TOKEN_ENCRYPTION_KEY, JSON.stringify({
+      : '<input type="hidden" name="' + (ctx.redirectRule ? 'redirectTicket' : 'seoTicket') + '" value="' + await seal(env.TOKEN_ENCRYPTION_KEY, JSON.stringify({
         jobId: ctx.job.id, repositoryId: ctx.job.repository_id, baseSha, digest: proposal.digest,
+        redirectRule: ctx.redirectRule,
         epoch: current.authorization_epoch, expiresAt: now() + REVIEW_SECONDS
-      }), seoTicketContext(current)) + '">';
+      }), ticketContext(current, ctx.redirectRule)) + '">';
     return view('Review ' + LABEL[ctx.kind],
       existing + '<p>Review the new files before adding them to your website.</p>' +
       proposal.files.map(f => '<h2><code>' + escape(f.path) + '</code></h2><pre>' + escape(f.content) + '</pre>').join('') +
@@ -96,20 +115,22 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
     const form = await formData(request);
     assertCsrf(request, form, current, baseUrl(env));
     const digest = form.get('digest'), action = form.get('action');
-    const approvalId = form.get('approvalId'), raw = form.get('seoTicket');
+    const approvalId = form.get('approvalId');
+    const redirects = form.has('redirectTicket');
+    const raw = form.get(redirects ? 'redirectTicket' : 'seoTicket');
     if (!/^[a-f0-9]{64}$/.test(digest || '') || (action !== 'publish' && action !== 'pr') ||
-        form.getAll('approvalId').length + form.getAll('seoTicket').length !== 1)
+        form.getAll('approvalId').length + form.getAll('seoTicket').length + form.getAll('redirectTicket').length !== 1)
       return fail('This form is incomplete.', 400);
     let ticket;
     if (raw !== null) {
       if (typeof raw === 'string' && /^[A-Za-z0-9_-]{50,1024}$/.test(raw)) {
-        try { ticket = JSON.parse(await unseal(env.TOKEN_ENCRYPTION_KEY, raw, seoTicketContext(current))); } catch {}
+        try { ticket = JSON.parse(await unseal(env.TOKEN_ENCRYPTION_KEY, raw, ticketContext(current, redirects))); } catch {}
       }
-      if (!ticket || ticket.epoch !== current.authorization_epoch || ticket.digest !== digest ||
+      if (!ticket || Boolean(ticket.redirectRule) !== redirects || ticket.epoch !== current.authorization_epoch || ticket.digest !== digest ||
           !SHA.test(ticket.baseSha || '') || !Number.isSafeInteger(ticket.expiresAt) || ticket.expiresAt <= now())
-        return fail('This SEO review is unavailable. Open SEO starter again to review the current files.', 409);
+        return fail('This review is unavailable. Open Optional features to review the current files.', 409);
     }
-    const ctx = await context(env, current, {approvalId, jobId: ticket?.jobId});
+    const ctx = await context(env, current, {approvalId, jobId: ticket?.jobId, redirectRule: ticket?.redirectRule});
     if (!ctx || (ticket && ticket.repositoryId !== ctx.job.repository_id))
       return fail('Open this option from your site options.', 404);
     const grants = await assertHistoryAccess(env, current);
@@ -133,5 +154,5 @@ export function createSiteFilesRoutes({view, fail, escape, formData, assertCsrf,
         '. Merge it in GitHub to publish.' + link + '</p>';
     return view(result.merged ? 'Files merged' : 'Pull request opened', summary + backToOptions(ctx.job));
   }
-  return {review, publish};
+  return {review, reviewRedirects, publish};
 }

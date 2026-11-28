@@ -1,6 +1,6 @@
 # Post-launch stored option requests — #88
 
-The `/site-options` toolkit page lets a verified owner review and store separate hostname, forwarding-email, forms, visitor-insights (Web Analytics), scoped PR-preview, and same-host redirect requests. Each request recomputes its digest server-side. Email fingerprints include the **exact external mailbox and fixed contact@ alias**. Preview opt-in requires acknowledging that draft links can be public. Turnstile forms require a separate #89 cost/privacy gate before staging. Migrations `0007` and `0009` expand allowed kinds, including the legacy SEO starter request. Provider writes require the corresponding enablement or publication approval.
+The `/site-options` toolkit page lets a verified owner review and turn on optional features. For owner-enabled custom domains, email forwarding, visitor insights, and contact forms, the final action records the reviewed choices and starts the authorized workflow in one submission. The review binds the exact live site revision and settings to the current owner session. Older saved requests and operator-approved workflows retain their existing endpoints.
 
 ## Applying the reviewed domain or email
 
@@ -12,11 +12,11 @@ Domain execution attaches only the approved hostname to the matching currently v
 
 Email execution additionally requires a matching **applied** domain execution, currently active Pages domain, ready Email Routing/DNS on an active owner zone, existing verified forwarding mailbox and nonconflicting `contact@hostname` alias. The app creates only the exact forwarding rule; it never writes MX, offers a sending mailbox, or initiates mailbox verification.
 
-Forms remain review-only until a separate #89 cost/privacy authorization, customer D1 and server-side Siteverify Worker with independent acceptance; a widget is not a working form.
+Contact form setup requires Cloudflare's form permissions and the #89 cost and privacy acknowledgment. After provisioning, the separate site-file review connects the form to the Worker.
 
 **Turn on SEO starter** opens the exact file review directly when site-file activation is enabled. The owner approves the proposed additions against the reviewed GitHub revision. Existing search engine files are listed in the review, and a site with both files needs no publishing action. Previously saved SEO requests still open through their existing links.
 
-Visitor insights and PR preview requests use their separate enablement flows. Preview enablement requires Access review because draft URLs can be public. Same-host redirects need a saved rule for file review. Apex/www redirects require Domain-approved configuration.
+The visitor insights review checks Pages for an existing analytics tag and shows the beacon disclosure before activation. Private preview requests are recorded after the owner acknowledges that draft links can be public. Enabling previews requires separate Access review. Same-site redirects go directly from the two paths to exact `_redirects` file review and explicit approval. Apex/www redirects require separate Cloudflare configuration.
 
 ## Hosted status and release
 
