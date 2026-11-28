@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Embed vendor/launch-and-own-site-editor for hosted assistant upgrades (Workers Static Assets upload).
- * Writes onboarding/site-editor-assets-source.mjs. Re-run when the vendored editor changes.
+ * Writes onboarding/site-editor-assets-source.mjs (UTF-8 text; base64 is computed at upload time so the onboard bundle stays small). Re-run when the vendored editor changes.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, relative, extname } from 'node:path';
@@ -12,7 +12,7 @@ const src = join(root, 'vendor/launch-and-own-site-editor');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
 const files = walk(src).filter(f => TYPES[extname(f)]).sort().map(f => ({
-  path: '/' + relative(src, f).split('\\').join('/'), base64: readFileSync(f).toString('base64'), contentType: TYPES[extname(f)]
+  path: '/' + relative(src, f).split('\\').join('/'), text: readFileSync(f, 'utf8'), contentType: TYPES[extname(f)]
 }));
 const pinned = readFileSync(join(src, 'PINNED_SHA'), 'utf8').trim();
 writeFileSync(join(root, 'onboarding/site-editor-assets-source.mjs'),

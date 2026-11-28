@@ -14,11 +14,14 @@ async function hashFile(base64, path) {
   return [...digest].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
 }
 
-/** files: [{ path: '/index.html', base64, contentType }]. Returns the manifest plus a hash index for uploads. */
+const utf8Base64 = text => { const bytes = new TextEncoder().encode(text); let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
+
+/** files: [{ path: '/index.html', base64 | text, contentType }]. Returns the manifest plus a hash index for uploads. */
 export async function assetManifest(files) {
   if (!Array.isArray(files) || files.length === 0 || files.length > 20_000) throw Error('assets_invalid');
   const manifest = {}, byHash = new Map();
-  for (const f of files) {
+  for (const input of files) {
+    const f = typeof input?.text === 'string' ? { ...input, base64: utf8Base64(input.text) } : input;
     if (typeof f?.path !== 'string' || !/^\/[A-Za-z0-9._\-/]+$/.test(f.path) || f.path.includes('..') || typeof f.base64 !== 'string')
       throw Error('assets_invalid');
     const size = atob(f.base64).length;

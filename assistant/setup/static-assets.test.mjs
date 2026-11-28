@@ -17,6 +17,8 @@ test('manifest uses 32-hex hashes and decoded sizes, and rejects traversal', asy
   assert.equal(manifest['/index.html'].size, 15);
   await assert.rejects(assetManifest([{ path: '/../x.js', base64: '' }]), /assets_invalid/);
   await assert.rejects(assetManifest([{ path: 'x.js', base64: '' }]), /assets_invalid/);
+  const fromText = await assetManifest([{ path: '/index.html', text: '<!doctype html>' }]);
+  assert.deepEqual(fromText.manifest['/index.html'], manifest['/index.html']);
 });
 
 test('uploads only requested buckets with the session JWT and returns the completion JWT', async () => {
@@ -71,4 +73,25 @@ test('site editor loads no CDN code and every editor CSP pins the current import
   }
   for (const spec of Object.values(JSON.parse(importmap).imports))
     assert.ok(SITE_EDITOR_ASSETS.some(f => f.path === spec.replace(/^\./, '')), spec + ' must be bundled');
+});
+
+test('hosted upgrade uploads the site editor and deploys it behind the Worker (run_worker_first)', async () => {
+  const { upgradeAssistantApp } = await import('../../onboarding/assistant-bootstrap.mjs');
+  const access = ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'OWNER_SUB'].map(name => ({ type: 'plain_text', name, text: 'x' }));
+  let metadata = null, sessionManifest = null;
+  const fetchFn = async (url, init = {}) => {
+    if (url.endsWith('/settings')) return ok({ bindings: access });
+    if (url.endsWith('/assets-upload-session')) { sessionManifest = JSON.parse(init.body).manifest; return ok({ jwt: 'complete', buckets: [] }); }
+    if (url.endsWith('/secrets') && init.method === 'GET') return ok([{ name: 'KEK' }]);
+    if (init.method === 'PUT' && /\/workers\/scripts\/acme-assistant$/.test(url)) {
+      metadata = JSON.parse(await init.body.get('metadata').text());
+      return ok({ id: 'acme-assistant' });
+    }
+    throw new Error('unexpected ' + init.method + ' ' + url);
+  };
+  await upgradeAssistantApp({ accountId: 'a'.repeat(32), workerName: 'acme-assistant', d1Id: '00000000-0000-4000-8000-000000000000',
+    cloudflareToken: 'tok', origin: 'https://acme-assistant.example.workers.dev', websiteRepo: 'acme/site', fetchFn });
+  assert.ok(sessionManifest['/index.html'] && sessionManifest['/lib/codemirror.js']);
+  assert.deepEqual(metadata.assets, { jwt: 'complete', config: { run_worker_first: true, html_handling: 'none', not_found_handling: 'none' } });
+  assert.ok(metadata.bindings.some(b => b.type === 'assets' && b.name === 'ASSETS'));
 });

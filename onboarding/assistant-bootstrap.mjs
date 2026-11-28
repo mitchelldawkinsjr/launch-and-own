@@ -4,6 +4,8 @@
  * KEK is written only as a Worker secret and never returned or stored in onboarding D1.
  */
 import { ASSISTANT_BOOTSTRAP_WORKER_MODULE, ASSISTANT_BOOTSTRAP_WORKER_SOURCE } from './assistant-bootstrap-worker-source.mjs';
+import { SITE_EDITOR_ASSETS } from './site-editor-assets-source.mjs';
+import { ASSETS_BINDING, uploadStaticAssets } from '../assistant/setup/static-assets.mjs';
 import {
   ASSISTANT_APP_COMPAT_DATE, ASSISTANT_APP_COMPAT_FLAGS,
   ASSISTANT_APP_WORKER_MODULE, ASSISTANT_APP_WORKER_SOURCE
@@ -150,16 +152,20 @@ async function redeployShell(fetchFn, token, accountRoot, workerName, plainBindi
   moduleName = ASSISTANT_BOOTSTRAP_WORKER_MODULE,
   source = ASSISTANT_BOOTSTRAP_WORKER_SOURCE,
   compatibilityDate = '2026-11-21',
-  compatibilityFlags = []
+  compatibilityFlags = [],
+  assetsJwt = null
 } = {}) {
   const bindings = [
     { type: 'd1', name: 'DB', id: d1Id },
     { type: 'ai', name: 'AI' },
+    ...(assetsJwt ? [{ ...ASSETS_BINDING }] : []),
     ...plainBindings
   ];
   const metadata = {
     main_module: moduleName,
     bindings,
+    // Same as assistant/wrangler.example.jsonc: the Worker (Access + owner check) runs before any asset.
+    ...(assetsJwt ? { assets: { jwt: assetsJwt, config: { run_worker_first: true, html_handling: 'none', not_found_handling: 'none' } } } : {}),
     keep_bindings: ['secret_text'],
     compatibility_date: compatibilityDate,
     ...(compatibilityFlags.length ? { compatibility_flags: compatibilityFlags } : {})
@@ -437,8 +443,8 @@ export async function putGithubAppPrivateKey({
 
 /**
  * Replace the bootstrap shell with the full assistant app (editor + AI_EDITS).
- * Keeps Access / GitHub secrets; turns on plain-language edits.
- * shortcut: no site-editor ASSETS yet — UI falls back to describe + Advanced.
+ * Keeps Access / GitHub secrets; turns on plain-language edits; uploads the vendored site editor as
+ * Workers Static Assets (ASSETS binding) so the visual canvas matches the hosted toolkit (ADR-005).
  */
 export async function upgradeAssistantApp({
   accountId, workerName, d1Id, cloudflareToken,
@@ -478,7 +484,9 @@ export async function upgradeAssistantApp({
   for (const name of ['GH_APP_ID', 'GH_INSTALLATION_ID', 'WEBSITE_REPO_ID']) {
     if (priorByName[name]) plain.push({ type: 'plain_text', name, text: priorByName[name] });
   }
+  const assetsJwt = await uploadStaticAssets({ accountId, workerName, cloudflareToken, files: SITE_EDITOR_ASSETS, fetchFn });
   await redeployShell(fetchFn, cloudflareToken, accountRoot, workerName, plain, d1Id, {
+    assetsJwt,
     moduleName: ASSISTANT_APP_WORKER_MODULE,
     source: ASSISTANT_APP_WORKER_SOURCE,
     compatibilityDate: ASSISTANT_APP_COMPAT_DATE,
