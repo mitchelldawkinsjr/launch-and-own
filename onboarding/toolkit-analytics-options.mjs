@@ -4,6 +4,7 @@ import {readPagesAnalyticsStatus} from '../pipeline/pages-analytics.mjs';
 import {buildPagesAnalyticsEnablementPlan} from '../pipeline/pages-analytics-enablement-plan.mjs';
 import {readManagedSiteBase} from '../pipeline/site-update-read.mjs';
 import {validateStoredOptionApproval} from '../pipeline/stored-option-approval.mjs';
+import {hasCurrentOwnerSession} from './launch-jobs.mjs';
 
 const SITE_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const PROJECT_ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -23,6 +24,16 @@ function siteForJob(job) {
     pagesProjectId: job.pages_project_id,
     pagesProjectName: repositoryName + '-site',
     branch: job.production_branch
+  });
+}
+
+export async function readOwnedAnalyticsConfiguration(env, current, job, cloudflareAccessToken, now) {
+  const site = siteForJob(job);
+  if (!site) return null;
+  const principal = {githubUserId: current.github_user_id, cloudflareAccountId: current.cloudflare_account_id};
+  return readPagesAnalyticsStatus({
+    site, principal, cloudflareAccessToken,
+    assertCurrentAuthorization: () => hasCurrentOwnerSession(env, current, now())
   });
 }
 

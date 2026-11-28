@@ -116,12 +116,12 @@ export function historyToolkitCapabilities({
       'Pages PR previews need verified private access and separate approval. Use the exact Launch & Own review to inspect updates.'),
     custom_domains: domainOn
       ? cap('available_opt_in', 'owner_domain_activation_ready',
-        'Open Optional features, save your hostname, then Turn on custom domain.')
+        'Open Optional features to enter, review and connect your custom domain.')
       : cap('manual_setup', 'verified_domain_setup_required',
         'Add your own domain name in your Cloudflare Pages project when you are ready.'),
     email_routing: emailOn
       ? cap('available_opt_in', 'owner_email_activation_ready',
-        'Save a custom domain request first, then open Optional features to Turn on email forwarding.')
+        'After your custom domain is active, open Optional features to review and turn on email forwarding.')
       : cap('not_available', 'owned_custom_domain_needed',
         'Needs a domain name and inbox you control.'),
     seo_bundle: filesOn
@@ -131,7 +131,7 @@ export function historyToolkitCapabilities({
         'Extra search-listing setup is a separate reviewed update.'),
     contact_forms: formsOn
       ? cap('available_opt_in', 'owner_forms_activation_ready',
-        'Open Optional features, review the form plan, then Turn on contact form.')
+        'Open Optional features to review and set up your contact form.')
       : cap('not_available', 'verified_server_form_integration_needed',
         'Contact forms need a separate approved setup.'),
     advanced_services: cap('not_available', 'separate_usage_and_approval_review_needed',

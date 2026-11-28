@@ -828,9 +828,12 @@ test('incremental consent: sign-in never asks for forms scopes; only the forms c
   assert.equal(scopesOf(signIn).some(s=>s==='workers-scripts.admin'||s==='d1.write'),false,'no forms scopes at sign-in');
   await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(signIn.headers.get('location')).searchParams.get('state'),{cookie});
   assert.equal(grant(),0);
-  const forms=await h.request('/connect/cloudflare?purpose=forms',{cookie});
+  const jobId='11111111-2222-4333-8444-555555555555';
+  const forms=await h.request('/connect/cloudflare?purpose=forms&job='+jobId,{cookie});
   assert.ok(scopesOf(forms).includes('workers-scripts.admin')&&scopesOf(forms).includes('d1.write'),'forms consent asks for forms scopes');
-  await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(forms.headers.get('location')).searchParams.get('state'),{cookie});
+  const returnCookie=forms.headers.getSetCookie()[0].split(';')[0];
+  const resumed=await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(forms.headers.get('location')).searchParams.get('state'),{cookie:cookie+'; '+returnCookie});
+  assert.equal(resumed.headers.get('location'),'/site-options?id='+jobId);
   assert.equal(grant(),1,'forms consent marks the session');
   const again=await h.request('/connect/cloudflare',{cookie});
   await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(again.headers.get('location')).searchParams.get('state'),{cookie});

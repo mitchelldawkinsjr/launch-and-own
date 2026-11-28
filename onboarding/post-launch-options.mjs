@@ -1,6 +1,5 @@
-// Post-launch options screen: store digest-bound domain / email / forms /
-// analytics / PR-preview / SEO / redirect approvals. Store-only unless an
-// operator grant exists.
+// Post-launch options and digest-bound reviews. Owner turn-on records consent
+// at confirmation and uses the same execution grant as the existing flow.
 import {readCurrentRevision} from '../imported/revision.mjs';
 import {contactFormSummary, detectContactForm} from './form-detection.mjs';
 import {readFormService} from './form-service.mjs';
@@ -14,13 +13,21 @@ import {
 } from '../pipeline/option-feature-review.mjs';
 import { planCustomer } from '../pipeline/plan-customer.mjs';
 import { getOwnedJob, hasCurrentOwnerSession, isLaunchId } from './launch-jobs.mjs';
+import { seal, unseal } from './crypto.mjs';
 import { createD1OptionExecutionStore, isOptionExecutionConfigured, optionExecutionSchemaReady } from './option-execution-store.mjs';
-import { currentAnalyticsRequestFingerprint, reviewAnalyticsOptions } from './toolkit-analytics-options.mjs';
+import { buildFormsCostPrivacyReview } from '../pipeline/forms-cost-privacy-approval.mjs';
+import { currentAnalyticsRequestFingerprint, readOwnedAnalyticsConfiguration, reviewAnalyticsOptions } from './toolkit-analytics-options.mjs';
 import { ownerSelfActivationEnabled } from './owner-option-activation.mjs';
 import { siteFilesEnabled } from './site-files-flow.mjs';
 
 const DIGEST = /^[a-f0-9]{64}$/i;
 const ANALYTICS_REVIEW = 'analytics-enablement-review';
+const TURN_ON = 'turn-on';
+const TURN_ON_LABEL = {
+  domain: 'Turn on custom domain', email: 'Turn on email forwarding',
+  forms: 'Turn on contact form', analytics: 'Turn on visitor insights'
+};
+const REVIEW_SECONDS = 15 * 60;
 const KINDS = new Set([
   'domain', 'email', 'forms', 'analytics', 'pr_previews', 'seo', 'redirects'
 ]);
@@ -55,8 +62,8 @@ export async function listOptionApprovals(env, jobId) {
   return result.results || [];
 }
 
-async function storeOptionApproval(env, { job, session, kind, digest, payload, time }) {
-  if (!KINDS.has(kind) || !DIGEST.test(digest)) return false;
+async function storeOptionApproval(env, { job, session, kind, digest, payload, time, activate = false }) {
+  if (!KINDS.has(kind) || !DIGEST.test(digest)) return null;
   const id = crypto.randomUUID();
   const body = JSON.stringify(payload);
   const result = await env.DB.prepare(
@@ -67,23 +74,40 @@ async function storeOptionApproval(env, { job, session, kind, digest, payload, t
      FROM onboarding_launch_jobs j
      WHERE j.id = ? AND j.github_user_id = ? AND j.cloudflare_account_id = ?
        AND j.status = 'live' AND j.expires_at > ?
+       AND (? = 0 OR (j.repository_id = ? AND j.pages_project_id = ? AND j.expected_commit_sha = ?))
        AND EXISTS (
          SELECT 1 FROM onboarding_sessions s WHERE s.id_hash = ? AND s.authorization_epoch = ?
            AND s.github_user_id = j.github_user_id AND s.cloudflare_account_id = j.cloudflare_account_id
            AND s.github_token_ct IS NOT NULL AND s.cloudflare_token_ct IS NOT NULL AND s.expires_at > ?
        )
      ON CONFLICT(job_id, kind) DO UPDATE SET
-       id = excluded.id,
+       id = CASE WHEN ? = 1 AND onboarding_option_approvals.approval_digest = excluded.approval_digest
+         AND NOT EXISTS (SELECT 1 FROM onboarding_option_executions x
+           WHERE x.option_approval_id = onboarding_option_approvals.id AND (
+             (x.status = 'approved' AND (x.expires_at <= ? OR x.authorization_epoch != ? OR x.expected_commit_sha != ?))
+             OR (x.kind = 'domain' AND x.status = 'applied' AND (x.authorization_epoch != ? OR x.expected_commit_sha != ?))
+             OR (x.kind = 'email' AND x.status = 'needs_reconciliation' AND x.error_code IN (
+               'applied_domain_row_required', 'domain_not_active_on_owned_pages', 'owned_zone_required',
+               'email_routing_dns_not_ready', 'email_hostname_mx_not_ready', 'verified_existing_destination_required'))))
+         THEN onboarding_option_approvals.id ELSE excluded.id END,
        approval_digest = excluded.approval_digest,
        payload_json = excluded.payload_json,
        status = 'stored',
        updated_at = excluded.updated_at
      WHERE onboarding_option_approvals.github_user_id = excluded.github_user_id
-       AND onboarding_option_approvals.cloudflare_account_id = excluded.cloudflare_account_id`)
+       AND onboarding_option_approvals.cloudflare_account_id = excluded.cloudflare_account_id
+       AND (? = 0 OR onboarding_option_approvals.approval_digest = excluded.approval_digest
+         OR NOT EXISTS (SELECT 1 FROM onboarding_option_executions x
+           WHERE x.option_approval_id = onboarding_option_approvals.id
+             AND x.status IN ('applying', 'needs_reconciliation')))
+     RETURNING id`)
     .bind(id, kind, digest.toLowerCase(), body, time, time,
       job.id, session.github_user_id, session.cloudflare_account_id, time,
-      session.hash, session.authorization_epoch, time).run();
-  return result.meta.changes === 1;
+      Number(activate), job.repository_id, job.pages_project_id, job.expected_commit_sha,
+      session.hash, session.authorization_epoch, time,
+      Number(activate), time, session.authorization_epoch, job.expected_commit_sha,
+      session.authorization_epoch, job.expected_commit_sha, Number(activate)).first();
+  return result?.id;
 }
 
 function domainReview(job, session, hostname) {
@@ -300,7 +324,8 @@ function buildReview(job, current, kind, form, rows) {
 }
 
 export function createSiteOptionsRoutes({
-  view, fail, button, escape, formData, assertCsrf, baseUrl, limitAttempts, assertHistoryAccess, now
+  view, fail, button, escape, formData, assertCsrf, baseUrl, limitAttempts, assertHistoryAccess, now,
+  renderFormsTurnOn, formsConsent, finishOwnerOption, readFormsChoices
 }) {
   async function requireReady(env) {
     if (!await optionApprovalsReady(env.DB))
@@ -347,26 +372,19 @@ export function createSiteOptionsRoutes({
       ? button('/site-options-execute', label, current.csrf,
           '<input type="hidden" name="id" value="' + escape(activations[kind]) + '">')
       : '';
-    const turnOn = (kind, label, row) => row && !activations[kind] && ownerSelfActivationEnabled(env, kind)
-      ? button('/site-options-activate', label, current.csrf,
-          '<input type="hidden" name="approvalId" value="' + escape(row.id) + '">')
-      : '';
+    const canTurnOn = kind => ownerSelfActivationEnabled(env, kind);
+    const turnOnIntent = kind => canTurnOn(kind) ? '<input type="hidden" name="intent" value="turn-on">' : '';
     const filesEnabled = siteFilesEnabled(env);
     const domainHost = storedDomainHostname(rows);
     const mailboxDefault = onboardingMailbox(job, current, domainHost);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const storedCount = Object.keys(byKind).filter(kind => kind !== 'seo').length;
     const notice = '<header class="lo-hero" aria-labelledby="opt-hero-title">' +
       '<p class="eyebrow"><span class="lo-badge lo-badge-lo">Optional features</span>' +
       '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>' +
       '<h1 id="opt-hero-title">Optional features for ' + escape(job.customer_name) + '</h1>' +
-      '<p>Review each feature before you turn it on. Some features need a saved request with details such as your hostname or forwarding address.</p>' +
+      '<p>Choose a feature to review its settings and confirm the change.</p>' +
       '<div class="lo-toolbar"><a class="btn-secondary btn" href="' + website + '">View live site</a>' +
-      '<a class="btn-secondary btn" href="/toolkit">Back to toolkit</a></div></header>' +
-      '<div class="lo-stat-grid" role="group" aria-label="Optional features summary">' +
-      '<div class="lo-stat"><span>Site</span><strong><code>' + website + '</code></strong><p>Live managed address</p></div>' +
-      '<div class="lo-stat"><span>Stored requests</span><strong>' + storedCount + '</strong><p>Open loops to finish</p></div>' +
-      '<div class="lo-stat"><span>Impact</span><strong>Staged</strong><p>Nothing live until you turn it on</p></div></div>';
+      '<a class="btn-secondary btn" href="/toolkit">Back to toolkit</a></div></header>';
     const stored = (row, label) => row
       ? '<div class="lo-callout lo-callout-warn" role="status">Stored ' + label +
         ' request — not turned on yet. Fingerprint <code>' +
@@ -374,32 +392,30 @@ export function createSiteOptionsRoutes({
       : '';
     const domainSection =
       '<section class="opt-module"><h3>Custom domain <span class="tag tag-safe">Safe · no live change yet</span></h3>' +
-      '<p>Enter a web address you own. We connect it after a review. Your DNS does not change until you approve that step.</p>' +
-      stored(byKind.domain, 'domain') +
-      (domainHost ? '<p>Current request: <code>' + escape(domainHost) + '</code></p>' : '') +
-      button('/site-options-prepare', 'Review domain request', current.csrf,
-        hidden(job.id, 'domain') +
+      '<p>Connect a web address you own to this site.</p>' +
+      (!canTurnOn('domain') ? stored(byKind.domain, 'domain') : '') +
+      button('/site-options-prepare', canTurnOn('domain') ? 'Review custom domain' : 'Review domain request', current.csrf,
+        hidden(job.id, 'domain') + turnOnIntent('domain') +
         '<label for="opt-hostname">Hostname</label>' +
         '<input id="opt-hostname" name="hostname" required maxlength="253" ' +
         'placeholder="www.example.com" value="' + escape(domainHost || '') + '">') +
       activate('domain', 'Apply operator-approved domain') +
-      turnOn('domain', 'Turn on custom domain', byKind.domain) +
       '</section>';
     const emailSection =
       '<section class="opt-module"><h3>Email forwarding <span class="tag tag-safe">MX staging</span></h3>' +
       (domainHost
         ? '<p>Forward mail for <code>' + escape(domainHost) +
-          '</code> to a mailbox you already have. We set it up after a review. No new mailbox is created, and your mail settings stay the same until you approve.</p>' +
-          stored(byKind.email, 'email') +
-          button('/site-options-prepare', 'Review email request', current.csrf,
-            hidden(job.id, 'email') +
+          '</code> to a mailbox you already have.</p>' +
+          (!canTurnOn('email') ? stored(byKind.email, 'email') : '') +
+          button('/site-options-prepare', canTurnOn('email') ? 'Review email forwarding' : 'Review email request', current.csrf,
+            hidden(job.id, 'email') + turnOnIntent('email') +
             '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
             '<label for="opt-mailbox">Existing mailbox</label>' +
             '<input id="opt-mailbox" name="mailbox" type="email" required maxlength="254" ' +
             'placeholder="you@elsewhere.com" value="' + escape(mailboxDefault) + '">')
-        : '<p>Save a custom domain request first. Email forwarding needs that hostname.</p>') +
+        : '<p>' + (canTurnOn('email') ? 'Turn on a custom domain first. Email forwarding needs that hostname.'
+          : 'Save a custom domain request first. Email forwarding needs that hostname.') + '</p>') +
       activate('email', 'Apply operator-approved email routing') +
-      turnOn('email', 'Turn on email forwarding', byKind.email) +
       '</section>';
     // Read-only look at the current files so the request names the form it will connect.
     let formNote = '';
@@ -416,31 +432,35 @@ export function createSiteOptionsRoutes({
         '">Connect your contact form</a> to start receiving messages. <a href="/form-messages?id=' + encodeURIComponent(job.id) +
         '">Read your messages</a></p>'
       : '';
+    const formsOn = canTurnOn('forms');
+    let ownerEmail = '';
+    try { ownerEmail = JSON.parse(byKind.forms?.payload_json || 'null')?.ownerEmail || ''; } catch {}
     const formsSection =
       '<section class="opt-module"><h3>Contact form <span class="tag tag-safe">Form endpoint</span></h3>' + formNote + connectLink +
-      '<p>Connect your site\'s contact form so messages are saved in your own Cloudflare account, with spam protection. We set it up after a cost and privacy review.</p>' +
-      stored(byKind.forms, 'form') +
-      (byKind.forms && !activations.forms && ownerSelfActivationEnabled(env, 'forms')
-        ? '<p><a class="btn" href="/site-options-forms-turn-on?approvalId=' + encodeURIComponent(byKind.forms.id) + '">Turn on contact form</a></p>' : '') +
-      button('/site-options-prepare', 'Review form request', current.csrf,
-        hidden(job.id, 'forms') +
+      (formService ? '' : '<p>Store contact messages in your Cloudflare account and protect the form with Turnstile.</p>' +
+      (!formsOn ? stored(byKind.forms, 'form') : '') +
+      (formsOn && current.cloudflare_forms_grant !== 1
+        ? '<p><a class="btn" href="/connect/cloudflare?purpose=forms&amp;job=' + encodeURIComponent(job.id) + '">Allow form setup in Cloudflare</a></p>'
+        : button('/site-options-prepare', formsOn ? 'Review contact form setup' : 'Review form request', current.csrf,
+        hidden(job.id, 'forms') + turnOnIntent('forms') +
         '<label for="opt-owner-email">Owner email for the form plan</label>' +
-        '<input id="opt-owner-email" name="ownerEmail" type="email" required maxlength="254">' +
-        '<label><input type="checkbox" name="formsConsent" value="true" required> ' +
-        'Save this request for review. The form starts saving messages once it is set up and you approve it.</label>') +
+        '<input id="opt-owner-email" name="ownerEmail" type="email" required maxlength="254" value="' + escape(ownerEmail) + '">' +
+        (formsOn ? '<input type="hidden" name="formsConsent" value="true">'
+          : '<label><input type="checkbox" name="formsConsent" value="true" required> Save this request for review.</label>')))) +
       '</section>';
-    const analyticsRequest = byKind.analytics?.status === 'stored'
+    const analyticsOn = canTurnOn('analytics');
+    const analyticsRequest = !analyticsOn && byKind.analytics?.status === 'stored'
       ? await currentAnalyticsRequestFingerprint(env, current, job, now())
       : null;
     const analyticsSection =
       '<section class="opt-module"><h3>Visitor insights <span class="tag tag-edge">Next deploy</span></h3>' +
-      '<p>New sites launch with visitor insights on. If this site launched without them, save a request to turn them on.</p>' +
-      stored(byKind.analytics, 'visitor insights') +
-      turnOn('analytics', 'Turn on visitor insights', byKind.analytics) +
-      button('/site-options-prepare', 'Review visitor insights request', current.csrf,
+      '<p>See visits and site performance in Cloudflare Web Analytics.</p>' +
+      (analyticsOn ? button('/site-options-prepare', 'Review visitor insights', current.csrf,
+        hidden(job.id, 'analytics') + turnOnIntent('analytics') + '<input type="hidden" name="analyticsConsent" value="true">') :
+        stored(byKind.analytics, 'visitor insights') + button('/site-options-prepare', 'Review visitor insights request', current.csrf,
         hidden(job.id, 'analytics') +
         '<label><input type="checkbox" name="analyticsConsent" value="true" required> ' +
-        'Save this request for review. Visitor insights start after you approve the change.</label>') +
+        'Save this request for review.</label>')) +
       (analyticsRequest
         ? '<p>Review Web Analytics separately. Enabling it can add a browser beacon on the next deployment.</p>' +
           button('/site-options-prepare', 'Review Web Analytics enablement', current.csrf,
@@ -454,14 +474,13 @@ export function createSiteOptionsRoutes({
       '</section>';
     const previewSection =
       '<section class="opt-module"><h3>Private update previews <span class="tag tag-edge">Edge control</span></h3>' +
-      '<p>Save a request for scoped GitHub PR preview builds. Draft preview links can be public, so Access must be reviewed before enablement.</p>' +
-      stored(byKind.pr_previews, 'preview') +
-      button('/site-options-prepare', 'Review preview request', current.csrf,
-        hidden(job.id, 'pr_previews') +
-        '<label><input type="checkbox" name="previewConsent" value="true" required> ' +
-        'Save this request for review. Previews start after setup and your approval.</label>' +
+      '<p>Request scoped GitHub pull request previews. Cloudflare Access needs a separate review before previews can be enabled.</p>' +
+      (byKind.pr_previews ? '<p role="status">Preview request saved.</p>' :
+      button('/site-options-prepare', 'Request private update previews', current.csrf,
+        hidden(job.id, 'pr_previews') + '<input type="hidden" name="intent" value="request-preview">' +
+        '<input type="hidden" name="previewConsent" value="true">' +
         '<label><input type="checkbox" name="acknowledgePublicPreviews" value="true" required> ' +
-        'I understand draft preview links can be public until Access protects them.</label>') +
+        'I understand draft preview links can be public until Access protects them.</label>')) +
       '</section>';
     const seoSection =
       '<section class="opt-module"><h3>SEO starter <span class="tag tag-safe">Files only</span></h3>' +
@@ -469,13 +488,32 @@ export function createSiteOptionsRoutes({
       (filesEnabled ? '<p><a class="btn" href="/site-options-files-turn-on?id=' + encodeURIComponent(job.id) + '">Turn on SEO starter</a></p>'
         : '<p>SEO starter is currently unavailable.</p>') +
       '</section>';
+    let savedRedirects;
+    try { savedRedirects = JSON.parse(byKind.redirects?.payload_json || 'null')?.plan?.proposed; } catch {}
+    const savedRedirect = savedRedirects?.pathRules?.[0];
+    const hostnameRedirectSaved = savedRedirects?.wwwMode === 'apex_to_www' || savedRedirects?.wwwMode === 'www_to_apex';
     const redirectsSection =
       '<section class="opt-module"><h3>Redirects <span class="tag tag-safe">URL rules</span></h3>' +
-      (domainHost
+      (filesEnabled
+        ? '<p>Send visitors from an old path to another path on this site.</p>' +
+          button('/site-options-redirects-review', 'Review redirect', current.csrf,
+            '<input type="hidden" name="id" value="' + escape(job.id) + '">' +
+            '<label for="opt-path-from">Old path</label>' +
+            '<input id="opt-path-from" name="pathFrom" required maxlength="200" placeholder="/old" value="' + escape(savedRedirect?.from || '') + '">' +
+            '<label for="opt-path-to">New path</label>' +
+            '<input id="opt-path-to" name="pathTo" required maxlength="200" placeholder="/new" value="' + escape(savedRedirect?.to || '') + '">') +
+          '<details' + (hostnameRedirectSaved ? ' open' : '') + '><summary>Apex and www redirects</summary><p>These redirects need separate Cloudflare configuration.</p>' +
+          (hostnameRedirectSaved ? '<p role="status">Hostname redirect request saved.</p>' : '') +
+          (domainHost ? button('/site-options-prepare', 'Review hostname redirect request', current.csrf,
+            hidden(job.id, 'redirects') + '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
+            '<input type="hidden" name="redirectConsent" value="true">' +
+            '<label for="opt-www-direct">Preferred hostname</label><select id="opt-www-direct" name="wwwMode">' +
+            '<option value="apex_to_www">Prefer www</option><option value="www_to_apex">Prefer apex</option></select>')
+            : '<p>Start by entering your custom domain above.</p>') + '</details>'
+        : domainHost
         ? '<p>Same-host redirects for <code>' + escape(domainHost) +
           '</code>. We set them up after a review and your approval.</p>' +
           stored(byKind.redirects, 'redirect') +
-          (filesEnabled && byKind.redirects ? '<p><a class="btn" href="/site-options-files-turn-on?approvalId=' + escape(byKind.redirects.id) + '">Turn on redirects</a></p>' : '') +
           button('/site-options-prepare', 'Review redirect request', current.csrf,
             hidden(job.id, 'redirects') +
             '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
@@ -493,31 +531,73 @@ export function createSiteOptionsRoutes({
         : '<p>Save a custom domain request first. Redirects need that hostname.</p>') +
       '</section>';
     const phaseA = '<div class="opt-group" aria-labelledby="opt-phase-a">' +
-      '<div class="opt-phase-head"><h2 id="opt-phase-a">Phase A: Staged requests ' +
-      '<span class="tag tag-safe">Safe · no live site changes</span></h2>' +
-      '<p class="muted">Safe to save now. Nothing changes on the live site until you turn a feature on or approve the provider step.</p></div>' +
+      '<div class="opt-phase-head"><h2 id="opt-phase-a">Website settings</h2></div>' +
       '<div class="opt-grid">' + domainSection + emailSection + formsSection + seoSection + redirectsSection + '</div></div>';
     const phaseB = '<div class="opt-group" aria-labelledby="opt-phase-b">' +
-      '<div class="opt-phase-head"><h2 id="opt-phase-b">Phase B: Edge runtime controls ' +
-      '<span class="tag tag-edge">May change the next deployment</span></h2>' +
-      '<p class="muted">These touch how the edge serves or measures your site. Review carefully before enabling.</p></div>' +
+      '<div class="opt-phase-head"><h2 id="opt-phase-b">Analytics and previews</h2></div>' +
       '<div class="opt-grid">' + analyticsSection + previewSection + '</div></div>';
-    const ribbon = '<div class="opt-ribbon" role="region" aria-label="Stored requests">' +
-      '<div><h3>Stored requests stay with this site</h3>' +
-      '<p>Continue saved requests from their feature cards.</p></div>' +
-      '<div class="opt-ribbon-actions"><span class="lo-badge">' + storedCount + ' stored</span>' +
-      '<a class="btn-secondary btn" href="/toolkit">Back to toolkit</a>' +
-      '<a class="btn-secondary btn" href="/history">Launch history</a></div></div>';
     if (!await hasCurrentOwnerSession(env, current, now()))
       return fail('Reconnect GitHub and Cloudflare to view your site options.', 403);
     return view('Optional features for ' + job.customer_name,
-      '<div class="lo-page">' + notice + phaseA + phaseB + ribbon + '</div>',
+      '<div class="lo-page">' + notice + phaseA + phaseB + '</div>',
       200, null, {wide: true, omitTitle: true});
   }
 
   function hidden(id, kind) {
     return '<input type="hidden" name="id" value="' + escape(id) + '">' +
       '<input type="hidden" name="kind" value="' + escape(kind) + '">';
+  }
+
+  const backToOptions = job => '<p><a href="/site-options?id=' + encodeURIComponent(job.id) + '">Back to site options</a></p>';
+  const turnOnBinding = (job, current, kind, digest) => [job.id, kind, digest, job.repository_id,
+    job.pages_project_id, job.expected_commit_sha, current.authorization_epoch];
+  const turnOnContext = current => 'option-turn-on:' + current.hash;
+
+  async function checkAnalytics(env, current, job, grants) {
+    let evidence;
+    try { evidence = await readOwnedAnalyticsConfiguration(env, current, job, grants.cloudflareAccessToken, now); }
+    catch { return fail('The Cloudflare Pages project could not be verified.', 409); }
+    if (evidence?.configuration === 'not_observed') return null;
+    if (evidence?.configuration === 'tag_reported_activation_unverified')
+      return view('Web Analytics is configured', '<p>Open Metrics in your Cloudflare project to check the beacon and traffic.</p>' +
+        '<p><a class="btn" href="' + escape(evidence.projectDashboardUrl) + '">Open Cloudflare project</a></p>' + backToOptions(job));
+    return fail('Could not check Web Analytics for this site. Reconnect Cloudflare and try again.', 409);
+  }
+
+  async function directReview(env, current, job, kind, built, grants) {
+    if (kind === 'forms' && current.cloudflare_forms_grant !== 1) return formsConsent();
+    if (kind === 'email') {
+      const applied = await createD1OptionExecutionStore(env, current).approvalStore.readAppliedDomain({
+        jobId: job.id, githubUserId: job.github_user_id, cloudflareAccountId: job.cloudflare_account_id,
+        hostname: built.review.plan.hostname
+      });
+      if (!applied) return view('Connect your custom domain first',
+        '<p>Email forwarding needs an active custom domain on this site.</p>' + backToOptions(job), 409);
+    }
+    if (kind === 'analytics') {
+      const stop = await checkAnalytics(env, current, job, grants);
+      if (stop) return stop;
+    }
+    const ticket = await seal(env.TOKEN_ENCRYPTION_KEY, JSON.stringify({
+      binding: turnOnBinding(job, current, kind, built.review.approvalDigest), expiresAt: now() + REVIEW_SECONDS
+    }), turnOnContext(current));
+    const fields = hidden(job.id, kind) + '<input type="hidden" name="intent" value="turn-on">' +
+      '<input type="hidden" name="ticket" value="' + escape(ticket) + '">' +
+      '<input type="hidden" name="digest" value="' + escape(built.review.approvalDigest) + '">' +
+      Object.entries(built.fields).map(([name, value]) =>
+        '<input type="hidden" name="' + escape(name) + '" value="' + escape(value) + '">').join('');
+    if (kind === 'forms') return renderFormsTurnOn(current, {jobId: job.id, pagesProjectName: pagesProjectName(job)},
+      {action: '/site-options-approve', fields, ownerEmail: built.review.ownerEmail});
+    const {plan} = built.review;
+    const details = {
+      domain: () => '<p>Connect <strong>' + escape(plan.hostname) + '</strong> to this site. Cloudflare Pages may add DNS records for this hostname in your zone.</p>',
+      email: () => '<p>Forward <strong>' + escape(plan.alias) + '</strong> to <strong>' + escape(plan.mailbox) + '</strong>. The destination must already be verified in Cloudflare.</p>',
+      analytics: () => '<p>Enable Web Analytics for <strong>' + escape(pagesProjectName(job)) + '</strong>. The next site deployment may add a beacon that collects visitor and performance data.</p>'
+    }[kind]();
+    const privacy = kind === 'analytics'
+      ? '<label><input type="checkbox" name="privacyBeaconConsent" value="true" required> I have reviewed my privacy notice and understand what the beacon collects.</label>' : '';
+    return view({domain: 'Review custom domain', email: 'Review email forwarding', analytics: 'Review visitor insights'}[kind],
+      details + button('/site-options-approve', TURN_ON_LABEL[kind], current.csrf, fields + privacy) + backToOptions(job));
   }
 
   async function prepare(request, env, current) {
@@ -533,18 +613,28 @@ export function createSiteOptionsRoutes({
       return fail('This options form is incomplete.');
     const job = await ownedLiveJob(env, current, id, time);
     if (!job) return fail('Open an owned, verified live website from your toolkit.', 404);
-    if (form.has('intent')) {
-      if (kind !== 'analytics' || form.getAll('intent').length !== 1 ||
-          form.get('intent') !== ANALYTICS_REVIEW)
-        return fail('This options form is incomplete.');
+    const intent = form.get('intent');
+    const activate = intent === TURN_ON;
+    const requestPreview = intent === 'request-preview' && kind === 'pr_previews';
+    if (form.getAll('intent').length > 1) return fail('This options form is incomplete.');
+    if (intent === ANALYTICS_REVIEW && kind === 'analytics')
       return analyticsEnablementReview(env, current, job, form);
-    }
-    await assertHistoryAccess(env, current);
+    if (intent !== null && !activate && !requestPreview) return fail('This options form is incomplete.');
+    if (activate && !ownerSelfActivationEnabled(env, kind)) return fail('This feature is unavailable.', 403);
+    const grants = await assertHistoryAccess(env, current);
     const rows = await listOptionApprovals(env, job.id);
     const built = buildReview(job, current, kind, form, rows);
     if (built.error) return fail(built.error);
     if (!await hasCurrentOwnerSession(env, current, now()))
       return fail('Reconnect to review this options request.', 401);
+    if (activate) return directReview(env, current, job, kind, built, grants);
+    if (requestPreview) {
+      const saved = await storeOptionApproval(env, {
+        job, session: current, kind, digest: built.review.approvalDigest, payload: built.review, time: now()
+      });
+      if (!saved) return fail('Could not store this preview request. Reload and try again.', 409);
+      return Response.redirect(baseUrl(env) + '/site-options?id=' + encodeURIComponent(job.id), 303);
+    }
     const extras = Object.entries(built.fields).map(([name, value]) =>
       '<input type="hidden" name="' + escape(name) + '" value="' + escape(value) + '">').join('');
     return view('Confirm optional feature request',
@@ -595,23 +685,55 @@ export function createSiteOptionsRoutes({
     const id = form.get('id');
     const kind = form.get('kind');
     const posted = form.get('digest');
-    if (form.has('intent') || !KINDS.has(kind) || form.getAll('kind').length !== 1 ||
+    const activate = form.get('intent') === TURN_ON && form.getAll('intent').length === 1;
+    if ((!activate && form.has('intent')) || !KINDS.has(kind) || form.getAll('kind').length !== 1 ||
         form.getAll('id').length !== 1 || form.getAll('digest').length !== 1 ||
         !DIGEST.test(posted || ''))
       return fail('This options form is incomplete.');
     const job = await ownedLiveJob(env, current, id, time);
     if (!job) return fail('Open an owned, verified live website from your toolkit.', 404);
-    await assertHistoryAccess(env, current);
+    if (activate && !ownerSelfActivationEnabled(env, kind)) return fail('This feature is unavailable.', 403);
+    const grants = await assertHistoryAccess(env, current);
     const rows = await listOptionApprovals(env, job.id);
     const built = buildReview(job, current, kind, form, rows);
     if (built.error) return fail(built.error);
     if (posted.toLowerCase() !== built.review.approvalDigest)
       return fail('This options request changed. Reload and try again.');
+    let choices = null;
+    if (activate) {
+      const raw = form.get('ticket');
+      let ticket;
+      if (typeof raw === 'string' && /^[A-Za-z0-9_-]{50,2048}$/.test(raw) && form.getAll('ticket').length === 1) {
+        try { ticket = JSON.parse(await unseal(env.TOKEN_ENCRYPTION_KEY, raw, turnOnContext(current))); } catch {}
+      }
+      if (!ticket || !Number.isSafeInteger(ticket.expiresAt) || ticket.expiresAt <= now() ||
+          JSON.stringify(ticket.binding) !== JSON.stringify(turnOnBinding(job, current, kind, posted.toLowerCase())))
+        return fail('This review expired or the site changed. Open Optional features to review it again.', 409);
+      if (kind === 'analytics') {
+        if (form.getAll('privacyBeaconConsent').length !== 1 || form.get('privacyBeaconConsent') !== 'true')
+          return fail('Confirm the privacy and beacon acknowledgment.');
+        const stop = await checkAnalytics(env, current, job, grants);
+        if (stop) return stop;
+      }
+      if (kind === 'forms') {
+        if (current.cloudflare_forms_grant !== 1) return formsConsent();
+        if (await readFormService(env, current, job.id)) return view('Contact form service already set up',
+          '<p><a class="btn" href="/form-connect?id=' + encodeURIComponent(job.id) + '">Connect your contact form</a></p>' + backToOptions(job));
+        choices = readFormsChoices(form);
+        const costs = buildFormsCostPrivacyReview({
+          jobId: job.id, githubUserId: job.github_user_id, cloudflareAccountId: job.cloudflare_account_id,
+          pagesProjectId: job.pages_project_id, formsDigest: built.review.approvalDigest, ...choices
+        });
+        if (costs.status !== 'awaiting_cost_privacy_storage')
+          return fail('Review the contact form limits and confirm the cost and privacy acknowledgments.', 400);
+      }
+    }
     const saved = await storeOptionApproval(env, {
       job, session: current, kind, digest: built.review.approvalDigest,
-      payload: built.review, time: now()
+      payload: built.review, time: now(), activate
     });
     if (!saved) return fail('Could not store this options request. Reload and try again.', 409);
+    if (activate) return finishOwnerOption(env, current, saved, choices);
     return Response.redirect(baseUrl(env) + '/site-options?id=' + encodeURIComponent(job.id), 303);
   }
 

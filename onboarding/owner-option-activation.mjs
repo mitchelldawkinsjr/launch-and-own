@@ -101,7 +101,9 @@ export async function storeOwnerFormsCostPrivacy(env, current, approvalId, choic
       max_body_bytes = excluded.max_body_bytes, approved_at = excluded.approved_at, expires_at = excluded.expires_at,
       status = 'approved', updated_at = excluded.updated_at
     WHERE onboarding_forms_cost_privacy_approvals.operator_grant_id = excluded.operator_grant_id
-      AND onboarding_forms_cost_privacy_approvals.github_user_id = excluded.github_user_id`
+      AND onboarding_forms_cost_privacy_approvals.github_user_id = excluded.github_user_id
+      AND NOT EXISTS (SELECT 1 FROM onboarding_option_executions x
+        WHERE x.option_approval_id = excluded.forms_option_approval_id AND x.status != 'approved')`
   ).bind(
     crypto.randomUUID(), reviewed.id, site.jobId, site.githubUserId, site.cloudflareAccountId, site.pagesProjectId,
     reviewed.digest, review.approvalDigest, JSON.stringify(plan), plan.retentionDays, plan.maxSubmissionsPerDay, plan.maxBodyBytes,

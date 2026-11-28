@@ -41,6 +41,18 @@ async function store(h,tenant,jobId,kind,values){
   return h.sqlite.prepare('SELECT * FROM onboarding_option_approvals WHERE job_id = ? AND kind = ?')
     .get(jobId,kind);
 }
+async function reviewTurnOn(h,tenant,jobId,kind,values){
+  const fields={csrf:tenant.csrf,id:jobId,kind,intent:'turn-on',...values};
+  const res=await post(h,'/site-options-prepare',tenant.cookie,fields);
+  const html=await res.text();
+  assert.equal(res.status,200,html.slice(-1000));
+  const digest=html.match(/name="digest" value="([a-f0-9]{64})"/)?.[1];
+  const ticket=html.match(/name="ticket" value="([A-Za-z0-9_-]+)"/)?.[1];
+  assert.ok(digest && ticket,html.slice(-1000));
+  assert.doesNotMatch(html,/Store this request/);
+  return {html,approve:{...fields,digest,ticket}};
+}
+const currentOption=(h,jobId,kind)=>h.sqlite.prepare('SELECT * FROM onboarding_option_approvals WHERE job_id = ? AND kind = ?').get(jobId,kind);
 function ownerSession(h){
   const s=h.sqlite.prepare('SELECT * FROM onboarding_sessions ORDER BY created_at LIMIT 1').get();
   return {...s,hash:s.id_hash};
@@ -85,27 +97,31 @@ test('stored approval without owner or operator grant cannot execute',async t=>{
   assert.equal(providerWrites(h).length,before);
 });
 
-test('owner self-activation turns on domain after a stored request',async t=>{
+test('owner reviews a custom domain and turns it on without a separate save',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const {tenant,jobId}=await live(h,t);
-  const row=await store(h,tenant,jobId,'domain',{hostname:host});
   h.env.OPTION_OWNER_ACTIVATION_ENABLED='true';
   const page=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
-  assert.match(page,/Turn on custom domain/);
+  assert.match(page,/Review custom domain/);
   assert.doesNotMatch(page,/Apply operator-approved domain/);
-  // Post what the button actually carries, as a browser would.
-  const fromButton=page.match(/action="\/site-options-activate"[\s\S]*?name="approvalId" value="([^"]+)"/)?.[1];
-  assert.equal(fromButton,row.id);
-  const applied=await post(h,'/site-options-activate',tenant.cookie,{
-    csrf:tenant.csrf,approvalId:fromButton
-  });
+  const {html,approve}=await reviewTurnOn(h,tenant,jobId,'domain',{hostname:host});
+  assert.match(html,/Turn on custom domain/);
+  assert.match(html,/may add DNS records/);
+  assert.equal(currentOption(h,jobId,'domain'),undefined);
+  assert.deepEqual(providerWrites(h),[]);
+  assert.equal((await post(h,'/site-options-approve',tenant.cookie,{...approve,ticket:''})).status,409);
+  const applied=await post(h,'/site-options-approve',tenant.cookie,approve);
   assert.equal(applied.status,200);
   assert.match(await applied.text(),/custom hostname is attached/);
   assert.equal(providerWrites(h).length,1);
+  const row=currentOption(h,jobId,'domain');
   const done=h.sqlite.prepare('SELECT status,operator_grant_id FROM onboarding_option_executions '+
     'WHERE option_approval_id = ?').get(row.id);
   assert.equal(done.status,'applied');
   assert.match(done.operator_grant_id,/^owner-self:/);
+  await post(h,'/site-options-approve',tenant.cookie,approve);
+  assert.equal(currentOption(h,jobId,'domain').id,row.id);
+  assert.equal(providerWrites(h).length,1,'resubmission does not run a second provider write');
 });
 
 test('feature release switch is fail-closed even when an approved execution row exists',async t=>{
@@ -286,6 +302,31 @@ test('ready parent zone cannot create subdomain forwarding without exact-host MX
   ).get(otherId).status,'needs_reconciliation');
 });
 
+test('owner reviews the forwarding mailbox and turns on email without a separate save',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId}=await live(h,t);
+  const domain=await store(h,tenant,jobId,'domain',{hostname:host});
+  operatorGrant(h,domain);
+  assert.equal((await post(h,'/site-options-execute',tenant.cookie,{csrf:tenant.csrf,id})).status,200);
+  h.resourceState.customDomain.status='active';
+  h.env.OPTION_OWNER_ACTIVATION_ENABLED='true';
+  const {html,approve}=await reviewTurnOn(h,tenant,jobId,'email',{hostname:host,mailbox:'existing@example.net'});
+  assert.match(html,/Turn on email forwarding/);
+  assert.match(html,/existing@example\.net/);
+  assert.equal(currentOption(h,jobId,'email'),undefined);
+  assert.equal((await post(h,'/site-options-approve',tenant.cookie,{...approve,mailbox:'different@example.net'})).status,400);
+  assert.equal(h.resourceState.emailRules?.length || 0,0);
+  h.resourceState.routingMxRecords=[];
+  const missingMx=await post(h,'/site-options-approve',tenant.cookie,approve);
+  assert.match(await missingMx.text(),/email_hostname_mx_not_ready/);
+  assert.equal(h.resourceState.emailRules?.length || 0,0);
+  delete h.resourceState.routingMxRecords;
+  const retry=await reviewTurnOn(h,tenant,jobId,'email',{hostname:host,mailbox:'existing@example.net'});
+  const applied=await post(h,'/site-options-approve',tenant.cookie,retry.approve);
+  assert.equal(applied.status,200);
+  assert.deepEqual(h.resourceState.emailRules[0].actions,[{type:'forward',value:['existing@example.net']}]);
+});
+
 test('forms cannot activate even with stored consent and an operator execution row (#89)',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const {tenant,jobId}=await live(h,t);
@@ -436,26 +477,37 @@ const gateRows=h=>h.sqlite.prepare('SELECT operator_grant_id, retention_days, ma
 
 test('owner turns on the contact form after the cost/privacy review: gate row from the owner, then the real setup',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
-  const {tenant,jobId,row,writes,choices}=await storedFormsForOwner(h,t);
+  const writes=[];
+  formsCloudflareMock(h,writes);
+  Object.assign(h.env,{OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_FORMS_ENABLED:'true'});
+  const {tenant,jobId}=await live(h,t);
   const options=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
-  assert.ok(options.includes('href="/site-options-forms-turn-on?approvalId='+row.id+'">Turn on contact form<'),'the link carries the stored request id');
-  // Without the Cloudflare forms permission: consent page, nothing written.
-  assert.match(await (await h.request('/site-options-forms-turn-on?approvalId='+row.id,{cookie:tenant.cookie})).text(),/Allow form setup in Cloudflare/);
-  const early=await post(h,'/site-options-activate',tenant.cookie,choices);
+  assert.ok(options.includes('purpose=forms&amp;job='+jobId+'">Allow form setup in Cloudflare<'));
+  const fields={ownerEmail:'owner@example.net',formsConsent:'true'};
+  const early=await post(h,'/site-options-prepare',tenant.cookie,{csrf:tenant.csrf,id:jobId,kind:'forms',intent:'turn-on',...fields});
   assert.equal(early.status,403);
   assert.deepEqual(gateRows(h),[]);
   assert.equal(writes.length,0);
   h.sqlite.prepare('UPDATE onboarding_sessions SET cloudflare_forms_grant=1').run();
-  const review=await (await h.request('/site-options-forms-turn-on?approvalId='+row.id,{cookie:tenant.cookie})).text();
+  const {html:review,approve}=await reviewTurnOn(h,tenant,jobId,'forms',fields);
   assert.match(review,/personal data/);
+  assert.match(review,/Owner email <strong>owner@example.net<\/strong>/);
   assert.match(review,/name="costApproved" value="true" required/);
   assert.match(review,/name="privacyApproved" value="true" required/);
-  const on=await post(h,'/site-options-activate',tenant.cookie,choices);
+  const choices={retentionDays:'30',maxSubmissionsPerDay:'50',maxBodyBytes:'8192',costApproved:'true',privacyApproved:'true'};
+  const denied=await post(h,'/site-options-approve',tenant.cookie,{...approve,...choices,privacyApproved:'false'});
+  assert.equal(denied.status,400);
+  assert.equal(currentOption(h,jobId,'forms'),undefined);
+  assert.equal(writes.length,0);
+  const on=await post(h,'/site-options-approve',tenant.cookie,{...approve,...choices});
   const html=await on.text();
   assert.equal(on.status,200,html);
   assert.match(html,/Connect your contact form/);
-  assert.deepEqual(gateRows(h).map(r=>({...r})),[{operator_grant_id:'owner-self-cost-privacy:'+row.id,retention_days:30,max_submissions_per_day:50}]);
+  assert.deepEqual(gateRows(h).map(r=>({...r})),[{operator_grant_id:'owner-self-cost-privacy:'+currentOption(h,jobId,'forms').id,retention_days:30,max_submissions_per_day:50}]);
   assert.equal(writes.length,7,'widget, D1, schema, secret rotation, Worker, subdomain, schedule');
+  await post(h,'/site-options-approve',tenant.cookie,{...approve,...choices,retentionDays:'90'});
+  assert.equal(gateRows(h)[0].retention_days,30);
+  assert.equal(writes.length,7,'resubmission leaves the provisioned form and its limits alone');
 });
 
 test('owner forms turn-on refuses missing confirmations or out-of-range limits with no provider writes',async t=>{
@@ -517,11 +569,26 @@ async function storedAnalyticsForOwner(h,t,state){
 test('owner turns on visitor insights: creates the Web Analytics site and sets it on the managed Pages project only',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   const state={writes:[],buildConfig:{build_command:'',destination_dir:'public',root_dir:'/'}};
-  const {tenant,jobId,row}=await storedAnalyticsForOwner(h,t,state);
+  const {tenant,jobId}=await live(h,t);
+  Object.assign(h.env,{OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_ANALYTICS_ENABLED:'true'});
+  analyticsCloudflareMock(h,state);
+  globalThis.fetch=h.fetchFn;
+  state.host='esp-'+jobRow(h).site_slug+'-site.pages.dev';
   const options=await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
-  assert.match(options,/Turn on visitor insights/);
-  assert.ok(options.includes('name="approvalId" value="'+row.id+'"'),'the button posts the stored request id');
-  const on=await post(h,'/site-options-activate',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id});
+  assert.match(options,/Review visitor insights/);
+  state.buildConfig.web_analytics_tag='a'.repeat(32);
+  const fields={csrf:tenant.csrf,id:jobId,kind:'analytics',intent:'turn-on',analyticsConsent:'true'};
+  const existing=await post(h,'/site-options-prepare',tenant.cookie,fields);
+  assert.match(await existing.text(),/Web Analytics is configured/);
+  assert.deepEqual(state.writes,[]);
+  delete state.buildConfig.web_analytics_tag;
+  const {html:review,approve}=await reviewTurnOn(h,tenant,jobId,'analytics',{analyticsConsent:'true'});
+  assert.match(review,/Turn on visitor insights/);
+  assert.match(review,/privacyBeaconConsent/);
+  assert.equal((await post(h,'/site-options-approve',tenant.cookie,approve)).status,400);
+  assert.equal(currentOption(h,jobId,'analytics'),undefined);
+  assert.deepEqual(state.writes,[]);
+  const on=await post(h,'/site-options-approve',tenant.cookie,{...approve,privacyBeaconConsent:'true'});
   const html=await on.text();
   assert.equal(on.status,200,html);
   assert.match(html,/Visitor insights are turned on/);
@@ -565,7 +632,7 @@ test('SEO has one direct action when site files are enabled',async t=>{
   assert.equal(res.status,404,'publishing is refused while the flag is off');
 });
 
-test('direct SEO review preserves existing robots.txt and adds the missing sitemap after approval',async t=>{
+test('direct file reviews add only the approved missing sitemap or same-site redirect',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   Object.assign(h.env,{OPTION_EXECUTION_ENABLED:'true',OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_SITE_FILES_ENABLED:'true'});
   const {tenant,jobId}=await live(h,t);
@@ -574,7 +641,7 @@ test('direct SEO review preserves existing robots.txt and adds the missing sitem
   const {gitBlobSha}=await import('../imported/bytes.mjs');
   const repo='/repos/'+job.github_login+'/esp-'+job.site_slug, BASE='a'.repeat(40), HEAD='d'.repeat(40);
   const writes=[];
-  let blobSha;
+  let blobSha, filename='public/sitemap.xml';
   const paths=['public/index.html','public/menu.html','public/robots.txt'];
   const real=h.fetchFn;
   h.fetchFn=globalThis.fetch=async(url,init={})=>{
@@ -589,12 +656,12 @@ test('direct SEO review preserves existing robots.txt and adds the missing sitem
     if(r.startsWith('/git/trees/'))return ok({truncated:false,tree:paths.map(path=>({path,type:'blob'}))});
     if(r==='/git/blobs'){blobSha=await gitBlobSha(Uint8Array.from(atob(body.content),c=>c.charCodeAt(0)));return ok({sha:blobSha});}
     if(r==='/git/trees'){
-      assert.deepEqual(body.tree,[{path:'public/sitemap.xml',mode:'100644',type:'blob',sha:blobSha}]);
+      assert.deepEqual(body.tree,[{path:filename,mode:'100644',type:'blob',sha:blobSha}]);
       return ok({sha:'c'.repeat(40)});
     }
     if(r==='/git/commits')return ok({sha:HEAD});
     if(r==='/git/refs')return ok({});
-    if(r==='/commits/'+HEAD)return ok({parents:[{sha:BASE}],files:[{filename:'public/sitemap.xml',status:'added',sha:blobSha}]});
+    if(r==='/commits/'+HEAD)return ok({parents:[{sha:BASE}],files:[{filename,status:'added',sha:blobSha}]});
     if(r==='/pulls')return ok({number:3,html_url:'https://github.com'+repo+'/pull/3',head:{sha:HEAD}});
     if(r==='/pulls/3/merge')return ok({merged:true,sha:'9'.repeat(40)});
     throw new Error('unexpected '+m+' '+r);
@@ -644,4 +711,33 @@ test('direct SEO review preserves existing robots.txt and adds the missing sitem
   assert.doesNotMatch(existing,/action="\/site-options-files-publish"/);
   assert.equal((await publish()).status,409);
   assert.deepEqual(writes,[],'existing files cause no writes');
+
+  const redirectFields={csrf:tenant.csrf,id:jobId,pathFrom:'/old',pathTo:'/menu'};
+  const redirects=await post(h,'/site-options-redirects-review',tenant.cookie,redirectFields);
+  const redirectReview=await redirects.text();
+  assert.equal(redirects.status,200,redirectReview.slice(-1000));
+  assert.match(redirectReview,/<pre>\/old \/menu 301/);
+  assert.equal(currentOption(h,jobId,'redirects'),undefined);
+  assert.equal(currentOption(h,jobId,'domain'),undefined,'same-site redirects need no custom domain request');
+  assert.deepEqual(writes,[]);
+  const redirectTicket=redirectReview.match(/name="redirectTicket" value="([A-Za-z0-9_-]+)"/)[1];
+  const redirectDigest=redirectReview.match(/name="digest" value="([a-f0-9]{64})"/)[1];
+  const badRedirect=await post(h,'/site-options-redirects-review',tenant.cookie,{...redirectFields,pathTo:'//example.net'});
+  assert.equal(badRedirect.status,409);
+  filename='public/_redirects';
+  const redirectDone=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,redirectTicket,digest:redirectDigest,action:'publish'});
+  assert.equal(redirectDone.status,200,(await redirectDone.text()).slice(-1000));
+  assert.deepEqual(writes,['POST /git/blobs','POST /git/trees','POST /git/commits','POST /git/refs','POST /pulls','PUT /pulls/3/merge']);
+});
+
+test('private preview request stores on the first submit only after acknowledging exposure',async t=>{
+  const h=harness();t.after(()=>h.sqlite.close());
+  const {tenant,jobId}=await live(h,t);
+  const fields={csrf:tenant.csrf,id:jobId,kind:'pr_previews',intent:'request-preview',previewConsent:'true'};
+  const count=h.calls.length;
+  assert.equal((await post(h,'/site-options-prepare',tenant.cookie,fields)).status,400);
+  assert.equal(currentOption(h,jobId,'pr_previews'),undefined);
+  assert.equal((await post(h,'/site-options-prepare',tenant.cookie,{...fields,acknowledgePublicPreviews:'true'})).status,303);
+  assert.ok(currentOption(h,jobId,'pr_previews'));
+  assert.ok(h.calls.slice(count).every(call=>call.method==='GET'));
 });
