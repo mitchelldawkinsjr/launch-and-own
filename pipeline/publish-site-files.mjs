@@ -42,13 +42,19 @@ export async function readSiteFiles({owner, repoName, repositoryId, propose}, {g
   const tree = await gh(root + '/git/trees/' + treeSha + '?recursive=1');
   if (tree?.truncated !== false || !Array.isArray(tree.tree)) refuse('tree_unreadable');
   const paths = tree.tree.filter(e => e?.type === 'blob').map(e => e.path);
-  return {gh, root, baseSha, treeSha, proposal: await propose(paths)};
+  const proposal = await propose(paths);
+  if (proposal?.ok) {
+    const occupied = new Set(tree.tree.filter(e => typeof e?.path === 'string').map(e => e.path.toLowerCase()));
+    if (proposal.files.some(file => occupied.has(file.path.toLowerCase()))) refuse('file_exists');
+  }
+  return {gh, root, baseSha, treeSha, proposal};
 }
 
-export async function publishSiteFiles({owner, repoName, repositoryId, propose, approvedDigest, merge}, {githubToken, fetchFn = fetch} = {}) {
+export async function publishSiteFiles({owner, repoName, repositoryId, propose, approvedDigest, approvedBaseSha, merge}, {githubToken, fetchFn = fetch} = {}) {
   const {gh, root, baseSha, treeSha, proposal} = await readSiteFiles({owner, repoName, repositoryId, propose}, {githubToken, fetchFn});
   if (!proposal?.ok) refuse(proposal?.reason || 'proposal_refused');
-  if (proposal.digest !== approvedDigest) refuse('approval_digest_mismatch');
+  if (proposal.digest !== approvedDigest || (approvedBaseSha != null && baseSha !== approvedBaseSha))
+    refuse('approval_digest_mismatch');
   const blobs = [];
   for (const file of proposal.files) {
     const bytes = new TextEncoder().encode(file.content);

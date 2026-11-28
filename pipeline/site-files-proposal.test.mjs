@@ -21,10 +21,21 @@ test('redirects add one _redirects file with 301 lines', async () => {
   assert.deepEqual(r.files, [{path: 'public/_redirects', content: '/old /about/ 301\n'}]);
 });
 
+test('SEO proposes only missing files and reports an already complete set', async () => {
+  const origin = 'https://example.com';
+  const withRobots = await build({kind: 'seo', paths: [...paths, 'public/Robots.txt'], origin});
+  assert.deepEqual(withRobots.existingFiles, ['public/Robots.txt']);
+  assert.deepEqual(withRobots.files.map(f => f.path), ['public/sitemap.xml']);
+  const withSitemap = await build({kind: 'seo', paths: ['public/Sitemap.xml'], origin});
+  assert.deepEqual(withSitemap.existingFiles, ['public/Sitemap.xml']);
+  assert.deepEqual(withSitemap.files.map(f => f.path), ['public/robots.txt']);
+  assert.match(withSitemap.files[0].content, /Sitemap: https:\/\/example\.com\/Sitemap\.xml/);
+  assert.deepEqual(await build({kind: 'seo', paths: ['public/robots.txt', 'public/sitemap.xml'], origin}),
+    {ok: false, reason: 'already_present', existingFiles: ['public/robots.txt', 'public/sitemap.xml']});
+});
+
 test('never replaces an existing file and refuses unsafe input', async () => {
   for (const [input, reason] of [
-    [{kind: 'seo', paths: [...paths, 'public/Robots.txt'], origin: 'https://example.com'}, 'file_exists'],
-    [{kind: 'seo', paths: [...paths, 'public/sitemap.xml'], origin: 'https://example.com'}, 'file_exists'],
     [{kind: 'redirects', paths: [...paths, 'public/_redirects'], payload: {wwwMode: 'none', pathRules: [{from: '/a', to: '/b'}]}}, 'file_exists'],
     [{kind: 'seo', paths, origin: 'http://example.com'}, 'origin_unverified'],
     [{kind: 'seo', paths: ['public/a.css'], origin: 'https://example.com'}, 'no_pages'],

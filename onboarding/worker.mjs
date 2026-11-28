@@ -1104,7 +1104,7 @@ async function handleFetch(request,env,context){
         if(url.pathname==='/toolkit')return await toolkit(env,current,request);
         if(url.pathname==='/toolkit/source')return await toolkitSource(env,current,request);
         if(url.pathname==='/form-messages')return await formMessages(env,current,url.searchParams.get('id'));
-        if(url.pathname==='/site-options-files-turn-on')return await siteFiles.review(env,current,url.searchParams.get('approvalId'));
+        if(url.pathname==='/site-options-files-turn-on')return await siteFiles.review(env,current,url.searchParams);
         if(url.pathname==='/site-options-forms-turn-on')return await formsTurnOnPage(env,current,url.searchParams.get('approvalId'));
         if(url.pathname===pagesAccessPath)return await pagesAccessPage(env,current);
         if(url.pathname==='/site-preview')return await sitePreview(env,current,url.searchParams.get('id'));
