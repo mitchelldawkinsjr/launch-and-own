@@ -83,7 +83,8 @@ export function assistantPromptMarkup({ csrf, action, id } = {}) {
 }
 
 export function visualEditorMarkup({
-  jobId, page, pages, iframeSrc, previewView = 'mirror', liveSiteSrc, targets, picked, csrf, previewAction, editorPath, aiBlock = '', notes = '', meta = '', siteSlug = ''
+  jobId, page, pages, iframeSrc, previewView = 'mirror', liveSiteSrc, targets, picked, csrf, previewAction, editorPath, aiBlock = '', notes = '', meta = '', siteSlug = '',
+  canvas = true
 } = {}) {
   if (!pages?.length || !Array.isArray(targets) || typeof jobId !== 'string' || typeof page !== 'string' || typeof iframeSrc !== 'string') {
     throw new TypeError('visual editor shape');
@@ -140,6 +141,10 @@ export function visualEditorMarkup({
 
   const ask = aiBlock ? '<div class="ve-ask">' + aiBlock + '</div>' : '';
   const metaLine = meta ? '<p class="ve-repo">' + escape(meta) + '</p>' : '';
+  const previewPane = canvas
+    ? '<div class="ve-wrap"><div class="ve-preview"><iframe title="Visual page editor" src="' + escape(visualSrc) + '"></iframe></div></div>'
+    : '<p class="muted">Visual canvas is not on this Worker yet. Describe a change above, or use Advanced below. ' +
+      '<a href="' + escape(iframeSrc) + '" target="_blank" rel="noopener">Open a read-only page preview</a>.</p>';
   return '<div class="ve-stage"><div class="ve-bar"><div class="ve-title">' + metaLine + '<h1>Edit this page</h1>' +
     (notes ? notes : '<p class="muted">Choose Preview in the editor. Nothing is published until you approve.</p>') +
     '</div><form class="ve-page" method="GET" action="' + escape(editorBase) + '">' +
@@ -147,6 +152,6 @@ export function visualEditorMarkup({
     '<label for="ve-page">Page</label><select id="ve-page" name="page">' + pageOptions + '</select> ' +
     '<button type="submit" class="btn-secondary">Show this page</button></form></div>' +
     ask +
-    '<div class="ve-wrap"><div class="ve-preview"><iframe title="Visual page editor" src="' + escape(visualSrc) + '"></iframe></div></div>' +
+    previewPane +
     advanced + '</div>';
 }

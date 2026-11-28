@@ -28,9 +28,10 @@ const CAP_LABELS = Object.freeze({
 // Per-site sections: CSS-only tabs (native radios + :has()); without :has() every section stays visible.
 const SECTIONS = [['overview', 'Overview'], ['updates', 'Updates'], ['services', 'Services'], ['settings', 'Settings']];
 const toolkitTabsCss = `
-.tk-site{background:var(--card,#fff);border:1px solid var(--line);border-radius:16px;padding:clamp(16px,3vw,26px);margin:0 0 22px;min-width:0}
+.tk-site{background:var(--card,#fff);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(15,23,42,.04);padding:clamp(16px,2.5vw,24px);margin:0 0 22px;min-width:0;display:grid;gap:16px}
 .tk-site>h2{margin:0 0 6px}
-.tk-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:14px 0 18px;padding:5px;border:1px solid var(--line);border-radius:14px;min-width:0}
+.tk-site-head{padding:0;background:transparent;border:0;box-shadow:none}
+.tk-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:0;padding:5px;border:1px solid var(--line);border-radius:14px;background:var(--surface-low,#F8FAFC);min-width:0;box-shadow:none}
 .tk-tab{position:relative;padding:9px 10px;border-radius:10px;text-align:center;font-weight:750;cursor:pointer;min-width:0}
 .tk-tab:hover{background:#f0f4fa}
 .tk-radio{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
@@ -38,7 +39,9 @@ const toolkitTabsCss = `
 .tk-tab:has(.tk-radio:focus-visible){outline:3px solid var(--blue);outline-offset:3px}
 .tk-site:has(.tk-radio:checked) .tk-panel{display:none}
 ${SECTIONS.map(([id]) => `.tk-site:has(.tk-radio[value="${id}"]:checked) .tk-p-${id}`).join(',')}{display:block}
+.tk-panel{padding:0;border:0;margin:0;display:grid;gap:16px}
 .tk-panel>h3{margin:0 0 8px;font-size:1.05rem}
+.tk-block{padding:0;border:0;background:transparent;box-shadow:none;display:grid;gap:12px}
 @media(max-width:520px){.tk-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;
 

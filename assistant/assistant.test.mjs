@@ -124,17 +124,33 @@ test('malformed token segments return 403, never a 500', async () => {
   }
 });
 
-test('T-ACC-7: POSTs need the exact origin and the per-owner CSRF token', async () => {
+test('T-ACC-7: POSTs need the per-owner CSRF token; cross-site Origin is refused', async () => {
   const { k1, env, req } = await setup();
   const token = await jwt(k1, goodClaims());
   const csrf = await csrfToken(env, OWNER);
-  assert.equal((await req('/self-check', { token, method: 'POST', form: { csrf } })).status, 403, 'no origin');
+  // Missing Origin is OK (Access often omits it); CSRF still required.
+  assert.equal((await req('/self-check', { token, method: 'POST', form: { csrf } })).status, 200, 'no origin');
   assert.equal((await req('/self-check', { token, method: 'POST', origin: 'https://evil.example', form: { csrf } })).status, 403);
   assert.equal((await req('/self-check', { token, method: 'POST', origin: ORIGIN, form: { csrf: 'x'.repeat(64) } })).status, 403);
   assert.notEqual(await csrfToken(env, 'someone-else'), csrf);
   const ok = await req('/self-check', { token, method: 'POST', origin: ORIGIN, form: { csrf } });
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { github: 'ok' });
+});
+
+test('Access JWT may arrive only as CF_Authorization cookie on POSTs', async () => {
+  const { k1, env, opts } = await setup();
+  const token = await jwt(k1, goodClaims());
+  const csrf = await csrfToken(env, OWNER);
+  const res = await handle(new Request(ORIGIN + '/self-check', {
+    method: 'POST',
+    headers: {
+      origin: ORIGIN,
+      cookie: 'CF_Authorization=' + encodeURIComponent(token)
+    },
+    body: new URLSearchParams({ csrf })
+  }), env, opts);
+  assert.equal(res.status, 200);
 });
 
 test('GitHub App JWT: PKCS#1 key is wrapped, RS256 signed, iat -60 s, exp within 10 minutes', async () => {

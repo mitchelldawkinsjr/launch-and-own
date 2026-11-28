@@ -3,7 +3,9 @@ import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app
 import {
   CLOUDFLARE_WORKERS_PAGES_APP_SLUG,
   githubAppCanCreateRepositories,
-  githubAppInstallUrl
+  githubAppInstalledOnUser,
+  githubAppInstallUrl,
+  listUserGithubAppInstallations
 } from '../pipeline/github-app-installation.mjs';
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,verifyCloudflarePagesAccess} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
@@ -55,6 +57,7 @@ import {
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
+const COOKIE_ASSISTANT_JOB='__Host-esp_asst_job';
 // Cloudflare Web Analytics only (cookieless). No Google/third-party ad trackers.
 const textHeaders={
   'content-type':'text/html; charset=utf-8','cache-control':'no-store',
@@ -69,7 +72,7 @@ const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const cookie=(name,value,maxAge)=>`${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 const redirect=(path,setCookie)=>{
   const headers=new Headers({'location':path,'cache-control':'no-store','referrer-policy':'same-origin'});
-  if(setCookie)headers.append('set-cookie',setCookie);
+  for(const c of [].concat(setCookie||[]).filter(Boolean))headers.append('set-cookie',c);
   return new Response(null,{status:303,headers});
 };
 // opts are UI-only (pageShell); never pass them as the headers argument.
@@ -221,7 +224,15 @@ async function cloudflareStart(request,env,current){
   const {authorizationUrl,session:flow}=beginCloudflareOAuth({clientId:env.CF_CLIENT_ID,redirectUri:origin+'/oauth/cloudflare/callback',scopes});
   await saveFlow(env,{provider:'cloudflare',binding:current.hash,...flow,purpose});
   if(purpose==='sign_in')recordFunnel(env,'start_cloudflare',{country:countryFromRequest(request),path:'/connect/cloudflare'});
-  return redirect(authorizationUrl);
+  // Remember which live site to resume after purpose=assistant consent.
+  let extraCookie=null;
+  if(purpose==='assistant'){
+    const jobId=new URL(request.url).searchParams.get('job');
+    extraCookie=isLaunchId(jobId)
+      ?cookie(COOKIE_ASSISTANT_JOB,jobId,600)
+      :cookie(COOKIE_ASSISTANT_JOB,'',0);
+  }
+  return redirect(authorizationUrl,extraCookie);
 }
 async function cloudflareCallback(request,env,current){
   if(!current)return fail('Your session expired. Connect GitHub again.',401);
@@ -232,17 +243,23 @@ async function cloudflareCallback(request,env,current){
   const encrypted=await encryptGrant({grant:token,provider:'cloudflare',sessionHash:current.hash,encryptionKey:env.TOKEN_ENCRYPTION_KEY});
   const formsGrant=purpose==='forms'&&formsScopesGranted(env,token.scope)?1:0;
   const assistantGrant=purpose==='assistant'&&assistantScopesGranted(env,token.scope)?1:0;
+  // Incremental consent keeps the selected account; only a full Cloudflare reconnect clears it.
+  const keepAccount=purpose==='forms'||purpose==='assistant';
   const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET cloudflare_token_ct=?, cloudflare_refresh_token_ct=?,
     cloudflare_token_expires_at=?, cloudflare_refresh_expires_at=?, cloudflare_refresh_locked_until=NULL,
-    cloudflare_account_id=NULL, cloudflare_forms_grant=?, cloudflare_assistant_grant=?,
+    cloudflare_account_id=${keepAccount?'cloudflare_account_id':'NULL'}, cloudflare_forms_grant=?, cloudflare_assistant_grant=?,
     authorization_epoch=authorization_epoch+1
     WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
     .bind(encrypted.accessCipher,encrypted.refreshCipher,encrypted.accessExpiresAt,encrypted.refreshExpiresAt,
       formsGrant,assistantGrant,current.hash,current.authorization_epoch,now()).first();
   if(!updated)throw Error('Cloudflare authorization changed while connecting');
   if(purpose==='sign_in')recordFunnel(env,'cloudflare_ok',{country:countryFromRequest(request),path:'/oauth/cloudflare/callback'});
-  // Assistant grant returns to the toolkit; the owner reopens Set up private assistant for the live site.
-  if(purpose==='assistant')return redirect('/toolkit');
+  if(purpose==='assistant'){
+    const jobId=cookies(request)[COOKIE_ASSISTANT_JOB];
+    const clear=cookie(COOKIE_ASSISTANT_JOB,'',0);
+    if(isLaunchId(jobId))return redirect('/assistant-setup?id='+encodeURIComponent(jobId),clear);
+    return redirect('/toolkit',clear);
+  }
   return redirect('/');
 }
 async function accountOptions(env,current){
@@ -263,15 +280,23 @@ async function home(env,current,notice,request){
       {css:providerHelpCss+landingCss,wide:true,omitTitle:true,nav:'marketing'});
   }
   let appInstalled=false;
+  let pagesAppInstalled=false;
   try{
     const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    const installations=await listUserGithubAppInstallations({accessToken:githubToken});
     appInstalled=await githubAppCanCreateRepositories({
-      accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login
+      accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login,installations
     });
-  }catch{appInstalled=false;}
-  // Launch & Own's user token cannot see Cloudflare's separate app install, so this is guidance only.
-  const pagesHint=appInstalled
-    ?`<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> on this account (separate from Launch &amp; Own). Install once with access to each site folder, then continue here.</p>`
+    pagesAppInstalled=githubAppInstalledOnUser({
+      installations,appSlug:CLOUDFLARE_WORKERS_PAGES_APP_SLUG,githubLogin:current.github_login
+    });
+  }catch{appInstalled=false;pagesAppInstalled=false;}
+  // Required callout only when the Workers & Pages app is missing. Once installed, stay quiet.
+  const pagesHint=appInstalled&&!pagesAppInstalled
+    ?`<div class="lo-callout lo-callout-warn" role="status"><p class="eyebrow"><span class="lo-badge">Required</span></p>`+
+      `<p><strong>Install Cloudflare's Workers &amp; Pages GitHub app</strong> on this account (separate from Launch &amp; Own). Without it, Pages cannot publish your site.</p>`+
+      `<p class="tk-actions"><a class="btn" href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Install Workers &amp; Pages app</a></p>`+
+      `<p class="muted">Install once with access to each site folder, then refresh this page.</p></div>`
     :'';
   const installHtml=appInstalled?'':`<p role="alert">One more GitHub step: install the Launch &amp; Own app so it can create a private place for your website files. Signing in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install Launch &amp; Own on GitHub</a></p><p>After you install it, come back here and refresh the page.</p>`;
   const connected=!!current.cloudflare_token_ct;
@@ -708,6 +733,14 @@ async function review(env,current,id){
   const website='https://esp-'+slug+'-site.pages.dev';
   const pagesAccess=item.status==='preview'?await getPagesAccess(env,current):null;
   const verifyExisting=pagesAccess?.mode==='read';
+  let pagesAppInstalled=false;
+  try{
+    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    const installations=await listUserGithubAppInstallations({accessToken:githubToken});
+    pagesAppInstalled=githubAppInstalledOnUser({
+      installations,appSlug:CLOUDFLARE_WORKERS_PAGES_APP_SLUG,githubLogin:current.github_login
+    });
+  }catch{pagesAppInstalled=false;}
   const statusLabel={
     preview:'Ready for your approval',
     queued:'Creating your site',
@@ -717,6 +750,11 @@ async function review(env,current,id){
     needs_reauthorization:'Reconnect required'
   };
   const analyticsOn=JSON.parse(item.plan_json).analytics===true;
+  const pagesAppHint=pagesAppInstalled?'':
+    `<div class="lo-callout lo-callout-warn" role="status"><p class="eyebrow"><span class="lo-badge">Required</span></p>`+
+    `<p><strong>Install Cloudflare's Workers &amp; Pages GitHub app</strong> with access to that private folder. Without it, Pages cannot publish.</p>`+
+    `<p class="tk-actions"><a class="btn" href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Install Workers &amp; Pages app</a> `+
+    `<a class="btn-secondary btn" href="https://github.com/settings/installations">Review GitHub app installs</a></p></div>`;
   const details=`<p><strong>Website name:</strong> ${escape(item.customer_name)}</p>`+
     `<p><strong>GitHub account:</strong> ${escape(item.github_login)}</p>`+
     `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
@@ -725,7 +763,7 @@ async function review(env,current,id){
     (verifyExisting
       ? '<p>With your approval, Launch &amp; Own will check the existing Pages project and verify that it published the exact version you reviewed.</p>'
       : '<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>')+
-    `<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> installed with access to that private folder. <a href="https://github.com/settings/installations">Review your GitHub app installs</a> if publishing gets stuck.</p>`;
+    pagesAppHint;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open the exact preview</a> (new tab)</p>';
   let status=item.status;
   let controls='';
@@ -1119,6 +1157,7 @@ async function handleFetch(request,env,context){
         if(url.pathname==='/assistant-setup/access')return await assistantSetup.access(request,env,current);
         if(url.pathname==='/assistant-setup/github-app')return await assistantSetup.githubApp(request,env,current);
         if(url.pathname==='/assistant-setup/install')return await assistantSetup.install(request,env,current);
+        if(url.pathname==='/assistant-setup/deploy-app')return await assistantSetup.deployApp(request,env,current);
       }
       return fail('Page not found',404);
     }catch(error){

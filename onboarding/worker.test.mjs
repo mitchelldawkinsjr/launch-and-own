@@ -845,18 +845,21 @@ test('incremental consent: purpose=assistant asks only when bootstrap flag is on
  const h=harness();globalThis.fetch=h.fetchFn;
  try{
   Object.assign(h.env,{OPTION_ASSISTANT_BOOTSTRAP_ENABLED:'true',CF_ASSISTANT_SCOPES:'d1.write workers-scripts.admin ai.write'});
-  const {sessionCookie:cookie}=await bootstrap(h);
+  const {cookie}=await connectTenant(h);
   const scopesOf=res=>new URL(res.headers.get('location')).searchParams.get('scope').split(' ');
-  const grant=()=>h.sqlite.prepare('SELECT cloudflare_assistant_grant AS g FROM onboarding_sessions').get().g;
-  const signIn=await h.request('/connect/cloudflare',{cookie});
-  assert.equal(scopesOf(signIn).includes('workers-scripts.admin'),false,'no assistant scopes at sign-in');
-  await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(signIn.headers.get('location')).searchParams.get('state'),{cookie});
-  assert.equal(grant(),0);
-  const assistant=await h.request('/connect/cloudflare?purpose=assistant',{cookie});
+  const row=()=>h.sqlite.prepare('SELECT cloudflare_assistant_grant AS g, cloudflare_account_id AS a FROM onboarding_sessions').get();
+  assert.equal(row().a,accountId);
+  assert.equal(row().g,0);
+  const job='11111111-1111-1111-1111-111111111111';
+  const assistant=await h.request('/connect/cloudflare?purpose=assistant&job='+job,{cookie});
   assert.ok(scopesOf(assistant).includes('workers-scripts.admin')&&scopesOf(assistant).includes('d1.write'));
-  const done=await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(assistant.headers.get('location')).searchParams.get('state'),{cookie});
-  assert.equal(done.headers.get('location'),'/toolkit');
-  assert.equal(grant(),1);
+  const jobCookie=assistant.headers.getSetCookie().find(x=>x.startsWith('__Host-esp_asst_job='));
+  assert.ok(jobCookie&&jobCookie.includes(job),'assistant start remembers the live job');
+  const done=await h.request('/oauth/cloudflare/callback?code=valid&state='+new URL(assistant.headers.get('location')).searchParams.get('state'),
+    {cookie:cookie+'; '+jobCookie.split(';')[0]});
+  assert.equal(done.headers.get('location'),'/assistant-setup?id='+job);
+  assert.equal(row().g,1);
+  assert.equal(row().a,accountId,'assistant consent keeps the selected Cloudflare account');
   h.env.OPTION_ASSISTANT_BOOTSTRAP_ENABLED='false';
   const off=await h.request('/connect/cloudflare?purpose=assistant',{cookie});
   assert.equal(scopesOf(off).includes('workers-scripts.admin'),false);

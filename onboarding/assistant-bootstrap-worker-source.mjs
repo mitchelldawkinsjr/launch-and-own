@@ -28,6 +28,19 @@ function accessConfigured(env) {
     typeof env.KEK === 'string' && env.KEK.length >= 32);
 }
 
+function setupFlags(env) {
+  return {
+    ACCESS_TEAM_DOMAIN: Boolean(env.ACCESS_TEAM_DOMAIN),
+    ACCESS_AUD: Boolean(env.ACCESS_AUD),
+    OWNER_SUB: Boolean(env.OWNER_SUB),
+    ASSISTANT_ORIGIN: Boolean(env.ASSISTANT_ORIGIN),
+    KEK: typeof env.KEK === 'string' && env.KEK.length >= 32,
+    GH_APP_ID: Boolean(env.GH_APP_ID),
+    GH_INSTALLATION_ID: Boolean(env.GH_INSTALLATION_ID),
+    GH_APP_PRIVATE_KEY: Boolean(env.GH_APP_PRIVATE_KEY)
+  };
+}
+
 async function verifyAccessJwt(token, env, now) {
   if (typeof token !== 'string' || !/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) return null;
   const [h, p, s] = token.split('.');
@@ -73,9 +86,26 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/healthz' && request.method === 'GET') return send(200, 'ok');
-    if (!accessConfigured(env)) return send(503, 'Access not configured');
+    if (request.method === 'GET' && url.pathname === '/setup-status')
+      return asJson(accessConfigured(env) ? 200 : 503, {
+        access: accessConfigured(env) ? 'ok' : 'not_configured',
+        present: setupFlags(env),
+        shell: 'hosted-bootstrap'
+      });
+    if (!accessConfigured(env)) {
+      const present = setupFlags(env);
+      const missing = Object.keys(present).filter(k => !present[k] &&
+        ['ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'OWNER_SUB', 'ASSISTANT_ORIGIN', 'KEK'].includes(k));
+      return send(503, 'Access not configured. Missing: ' + (missing.join(', ') || 'unknown') +
+        '. Re-enter Access in Launch & Own assistant setup.');
+    }
     const claims = await verifyAccessJwt(request.headers.get('cf-access-jwt-assertion'), env, Date.now());
-    if (!claims || claims.sub !== env.OWNER_SUB) return send(403, 'Forbidden');
+    if (!claims) return send(403, 'Forbidden');
+    if (claims.sub !== env.OWNER_SUB) {
+      return send(403,
+        'Forbidden. Access signed you in as sub ' + claims.sub +
+        '. Paste that exact value into Your Access sub in Launch & Own, then save again.');
+    }
     if (request.method === 'POST' && url.pathname === '/self-check')
       return asJson(200, await selfCheck(env));
     if (request.method === 'GET' && url.pathname === '/status') {

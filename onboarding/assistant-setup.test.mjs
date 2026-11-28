@@ -7,7 +7,8 @@ import {
   assistantBootstrapEnabled, createAssistantBootstrapStore
 } from './assistant-bootstrap-store.mjs';
 import {
-  assistantResourceNames, consentMarkup, createAssistantResources
+  accessGuideMarkup, assistantResourceNames, consentMarkup, createAssistantResources,
+  githubAppGuideMarkup
 } from './assistant-bootstrap.mjs';
 import { ASSISTANT_BOOTSTRAP_WORKER_SOURCE } from './assistant-bootstrap-worker-source.mjs';
 import { cloudflareScopes } from './worker.mjs';
@@ -26,6 +27,31 @@ test('assistant scopes never join sign-in; only purpose=assistant when flag on',
   assert.deepEqual(assistantScopes({ ...env, OPTION_ASSISTANT_BOOTSTRAP_ENABLED: 'false' }), []);
   assert.equal(assistantScopesGranted(env, 'account-settings.read page.write d1.write workers-scripts.admin ai.write'), true);
   assert.equal(assistantScopesGranted(env, 'd1.write'), false);
+});
+
+test('access guide links use the customer Cloudflare account', () => {
+  const account = '46f8dacc1ed685e0ef54f0f192639b21';
+  const html = accessGuideMarkup({
+    siteSlug: 'wellness-with-bre-v2',
+    origin: 'https://lo-assistant-wellness-with-bre-v2.example.workers.dev',
+    accountId: account
+  });
+  assert.match(html, new RegExp('/' + account + '/one/settings'));
+  assert.match(html, new RegExp('/' + account + '/one/access-controls/apps'));
+  assert.match(html, /Self-hosted and private/);
+  assert.match(html, /Include → <strong>Emails<\/strong>/);
+  assert.match(html, /Action <strong>Allow<\/strong>/);
+});
+
+test('github app guide links to New GitHub App', () => {
+  const origin = 'https://lo-assistant-wellness-with-bre-v2.example.workers.dev';
+  const html = githubAppGuideMarkup({ appSlug: 'wellness-with-bre-v2-assistant', origin });
+  assert.match(html, /https:\/\/github\.com\/settings\/apps\/new/);
+  assert.match(html, /wellness-with-bre-v2-assistant/);
+  assert.match(html, /Generate a private key/);
+  assert.match(html, /lo-assistant-wellness-with-bre-v2\.example\.workers\.dev/);
+  assert.match(html, /Redirect URI:<\/strong> leave empty/);
+  assert.match(html, /uncheck <strong>Active<\/strong>/);
 });
 
 test('toolkit CTA only when flag on and site verified', () => {
@@ -121,6 +147,7 @@ test('resource names and consent copy stay honest', () => {
   assert.match(html, /your<\/strong> accounts/);
   assert.doesNotMatch(html, /free forever/i);
   assert.match(ASSISTANT_BOOTSTRAP_WORKER_SOURCE, /Access not configured/);
+  assert.match(ASSISTANT_BOOTSTRAP_WORKER_SOURCE, /Paste that exact value into Your Access sub/);
   assert.match(ASSISTANT_BOOTSTRAP_WORKER_SOURCE, /healthz/);
 });
 
@@ -160,4 +187,120 @@ test('createAssistantResources uploads Worker and never returns KEK', async () =
   assert.equal(result.workerOrigin, 'https://lo-assistant-site.acct.workers.dev');
   assert.doesNotMatch(JSON.stringify(result), /KEK|BEGIN PRIVATE/i);
   assert.ok(calls.some(c => c.method === 'PUT' && String(c.url).includes('/workers/scripts/')));
+});
+
+test('applyAccessVars writes and verifies Access bindings', async () => {
+  const { applyAccessVars } = await import('./assistant-bootstrap.mjs');
+  const account = 'a'.repeat(32);
+  let settings = {
+    bindings: [
+      { type: 'plain_text', name: 'ASSISTANT_ORIGIN', text: 'https://lo-assistant-site.acct.workers.dev' },
+      { type: 'secret_text', name: 'KEK' },
+      { type: 'secret_text', name: 'GH_APP_PRIVATE_KEY' }
+    ]
+  };
+  const fetchFn = async (url, init = {}) => {
+    if (String(url).endsWith('/settings') && (!init.method || init.method === 'GET'))
+      return Response.json({ success: true, result: settings });
+    if (String(url).includes('/workers/scripts/') && init.method === 'PUT' && init.body?.get) {
+      const meta = JSON.parse(await init.body.get('metadata').text());
+      settings = {
+        bindings: [
+          ...meta.bindings.filter(b => b.type === 'plain_text' || b.type === 'd1' || b.type === 'ai'),
+          { type: 'secret_text', name: 'KEK' },
+          { type: 'secret_text', name: 'GH_APP_PRIVATE_KEY' }
+        ]
+      };
+      return Response.json({ success: true, result: { id: 'lo-assistant-site' } });
+    }
+    if (String(url).endsWith('/secrets') && (!init.method || init.method === 'GET'))
+      return Response.json({ success: true, result: [{ name: 'KEK' }, { name: 'GH_APP_PRIVATE_KEY' }] });
+    return Response.json({ success: true, result: {} });
+  };
+  await applyAccessVars({
+    accountId: account, workerName: 'lo-assistant-site',
+    d1Id: '11111111-1111-1111-1111-111111111111', cloudflareToken: 'cf',
+    teamDomain: 'https://Team.Example.Cloudflareaccess.com/',
+    aud: 'aud-1', ownerSub: 'sub-1',
+    origin: 'https://lo-assistant-site.acct.workers.dev/', fetchFn
+  });
+  const access = settings.bindings.find(b => b.name === 'ACCESS_TEAM_DOMAIN');
+  assert.equal(access?.text, 'team.example.cloudflareaccess.com');
+});
+
+test('applyGithubInstall keeps Access vars and does not dual-bind installation id', async () => {
+  const { applyGithubInstall } = await import('./assistant-bootstrap.mjs');
+  const account = 'a'.repeat(32);
+  const calls = [];
+  const fetchFn = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method || 'GET', body: init.body });
+    if (String(url).endsWith('/settings'))
+      return Response.json({
+        success: true,
+        result: {
+          bindings: [
+            { type: 'plain_text', name: 'ACCESS_TEAM_DOMAIN', text: 'team.cloudflareaccess.com' },
+            { type: 'plain_text', name: 'ACCESS_AUD', text: 'aud-1' },
+            { type: 'plain_text', name: 'OWNER_SUB', text: 'sub-1' },
+            { type: 'secret_text', name: 'KEK' },
+            { type: 'secret_text', name: 'GH_APP_PRIVATE_KEY' }
+          ]
+        }
+      });
+    if (String(url).includes('/workers/scripts/') && init.method === 'PUT') {
+      const meta = JSON.parse(await init.body.get('metadata').text());
+      const names = meta.bindings.map(b => b.name + ':' + b.type);
+      assert.deepEqual(meta.keep_bindings, ['secret_text']);
+      assert.ok(names.includes('GH_INSTALLATION_ID:plain_text'));
+      assert.ok(names.includes('ACCESS_AUD:plain_text'));
+      assert.ok(!names.includes('GH_INSTALLATION_ID:secret_text'));
+      assert.ok(!names.includes('KEK:secret_text'));
+      return Response.json({ success: true, result: { id: 'lo-assistant-site' } });
+    }
+    return Response.json({ success: true, result: {} });
+  };
+  await applyGithubInstall({
+    accountId: account, workerName: 'lo-assistant-site',
+    d1Id: '11111111-1111-1111-1111-111111111111', cloudflareToken: 'cf',
+    installationId: '99', repoId: '42', appId: '7',
+    origin: 'https://lo-assistant-site.acct.workers.dev', fetchFn
+  });
+  assert.equal(calls.filter(c => String(c.url).includes('/secrets')).length, 0);
+});
+
+test('createAssistantResources reuses an existing Worker instead of failing', async () => {
+  const account = 'a'.repeat(32);
+  let putCount = 0;
+  const fetchFn = async (url, init = {}) => {
+    if (url === 'https://api.github.com/repos/ada/site-assistant')
+      return Response.json({ private: true, full_name: 'ada/site-assistant' });
+    if (url.includes('/d1/database?name='))
+      return Response.json({
+        success: true,
+        result: [{ uuid: '11111111-1111-1111-1111-111111111111', name: 'lo-assistant-site' }]
+      });
+    if (url.includes('/d1/database/') && url.endsWith('/query'))
+      return Response.json({ success: true, result: [{ success: true }] });
+    if (url.endsWith('/workers/subdomain') && (!init.method || init.method === 'GET'))
+      return Response.json({ success: true, result: { subdomain: 'acct' } });
+    if (url.endsWith('/workers/scripts') && (!init.method || init.method === 'GET'))
+      return Response.json({ success: true, result: [{ id: 'lo-assistant-site' }] });
+    if (url.includes('/workers/scripts/lo-assistant-site') && init.method === 'PUT') {
+      putCount += 1;
+      return Response.json({ success: true, result: { id: 'lo-assistant-site' } });
+    }
+    if (url.includes('/subdomain') && init.method === 'POST')
+      return Response.json({ success: true, result: { enabled: true } });
+    if (String(url).endsWith('/healthz'))
+      return new Response('ok', { status: 200 });
+    return Response.json({ success: true, result: {} });
+  };
+  const result = await createAssistantResources({
+    siteSlug: 'site', ownerLogin: 'ada', websiteRepo: 'ada/esp-site',
+    upstreamSha: 'e'.repeat(40), accountId: account,
+    cloudflareToken: 'cf', githubToken: 'gh', fetchFn
+  });
+  assert.equal(result.workerName, 'lo-assistant-site');
+  assert.equal(putCount, 0, 'existing Worker is reused, not re-uploaded');
+  assert.deepEqual(result.createdThisRun, []);
 });
