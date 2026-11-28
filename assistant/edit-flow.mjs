@@ -1,5 +1,5 @@
 // Customer-owned assistant edit flow (M2 slice 2, #195). Same steps and library as the hosted flow:
-// read the live repo -> locate/validate -> sealed 15-minute ticket -> re-derive and review -> approve -> PR (never merge).
+// Read the live repo, validate and review the exact edit, then open a PR and merge it when the owner chooses publish.
 // Visual previews use expiring snapshots in the owner's D1. Every step re-reads GitHub, so a moved base fails closed.
 import { escape, UI_CSS } from '../onboarding/ui.mjs';
 import { editReviewMarkup } from '../onboarding/edit-review.mjs';
@@ -96,7 +96,7 @@ async function openReviewTicket(env, sub, raw, now) {
 // Same Stitch tokens as onboard, but customer-branded: no Launch & Own nav, beacon or remote assets (CSP allows inline style only).
 const page = (title, body, status = 200, { wide = false, omitTitle = false } = {}) => new Response('<!doctype html><html lang="en"><head><meta charset="utf-8">' +
   '<meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + escape(title) + ' | Your website assistant</title>' +
-  '<style>' + UI_CSS + '.as-tag{font-size:.82rem;color:var(--muted)}</style></head><body><a class="skip" href="#main">Skip to content</a>' +
+  '<style>' + UI_CSS + '.as-tag{font-size:.82rem;color:var(--muted)}.as-status-actions{display:flex;flex-wrap:wrap;gap:10px}</style></head><body><a class="skip" href="#main">Skip to content</a>' +
   '<header class="site-header"><div class="site-header-inner"><a class="brand brand-home" href="/"><span class="brand-mark" aria-hidden="true">AI</span><span>Your website assistant</span></a>' +
   '<span class="lo-badge lo-badge-cf">Runs in your Cloudflare account</span></div></header>' +
   '<main id="main" class="shell' + (wide ? ' shell-wide' : '') + '">' + (omitTitle ? body : '<div class="card"><h1 class="page-title">' + escape(title) + '</h1>' + body + '</div>') + '</main>' +
@@ -354,12 +354,25 @@ async function prStatus(env, site, url, { sub, fetchFn, now }) {
   const ticket = await openTicket(env, 'status', sub, url.searchParams.get('ticket'), now);
   const { token } = await mintInstallationToken({ ...site, fetchFn, now: () => now });
   const out = await readImportedPullRequest(ticket.receipt, { githubToken: token, fetchFn, number: ticket.number, headCommitSha: ticket.headCommitSha, installation: true });
-  const screen = editReviewMarkup({ proposal: { v: 1, summary: ticket.summary, edits: ticket.edits }, binding: { proposalDigest: ticket.proposalDigest, artifactDigest: ticket.receipt.artifactDigest, baseCommitSha: ticket.receipt.baseCommitSha }, status: out.status === 'failed' ? 'failed' : out.status, now });
-  const blocked = ticket.mergeNote === 'stale_base' ? 'Your website changed after you approved, so it was not published automatically. '
-    : ticket.mergeNote ? 'GitHub did not allow an automatic merge, so it was not published. ' : '';
-  const next = out.status === 'merged' ? '<p>Published: merged into your website\'s <code>main</code> branch. Cloudflare Pages is publishing it; check your live site in a minute.</p>'
-    : out.status === 'pr_open' ? '<p>' + escape(blocked) + 'The pull request is open for you to review and merge in GitHub.</p>' : '';
-  return page('Change status', screen + next + '<p><a href="' + escape(out.pullRequest) + '" target="_blank" rel="noopener noreferrer">Open the pull request</a> (opens in a new tab)</p>');
+  const details = editReviewMarkup({
+    proposal: { v: 1, summary: ticket.summary, edits: ticket.edits },
+    binding: { proposalDigest: ticket.proposalDigest, artifactDigest: ticket.receipt.artifactDigest, baseCommitSha: ticket.receipt.baseCommitSha },
+    status: out.status, showProgress: false, now
+  });
+  const editedPage = ticket.edits.find(edit => edit.path.startsWith('public/') && /\.html?$/i.test(edit.path))?.path.slice('public/'.length);
+  const editorUrl = editedPage ? '/?page=' + encodeURIComponent(editedPage) : '/';
+  const blocked = ticket.mergeNote === 'stale_base' ? 'Your website changed after you approved. '
+    : ticket.mergeNote ? 'GitHub did not allow an automatic merge. ' : '';
+  const [title, message] = {
+    merged: ['Change merged', 'GitHub merged your change. Cloudflare Pages deploys your website from the main branch.'],
+    pr_open: ['Pull request open', blocked + 'The pull request is open for you to review and merge in GitHub.'],
+    rejected: ['Pull request closed', 'GitHub shows that the pull request was closed before it merged.'],
+    failed: ['Pull request changed', 'The pull request changed after approval. You can review it in GitHub.']
+  }[out.status];
+  return page(title, '<p>' + escape(message) + '</p>' +
+    '<p class="as-status-actions"><a class="btn" href="' + escape(editorUrl) + '">Back to editor</a>' +
+    '<a class="btn btn-secondary" href="' + escape(out.pullRequest) + '" target="_blank" rel="noopener noreferrer">Open the pull request<span class="lo-sr"> (opens in a new tab)</span></a></p>' +
+    '<details><summary>Change details</summary>' + details + '</details>');
 }
 
 /** Routes after the Worker has verified Access, the owner and (for POST) origin + CSRF. Returns null for unknown routes. */

@@ -37,7 +37,7 @@ function isAddedImage(edit){
 
 /** status: §4 status; code: optional §4 failure code; approve: {action, csrf} renders the approval form when status is 'previewed';
  * previewOrigin: the isolated preview origin, the only origin the preview link may point to. now: ms clock, for tests. */
-export function editReviewMarkup({proposal,binding,status='previewed',code,approve,previewOrigin,ticket,now=Date.now()}={}){
+export function editReviewMarkup({proposal,binding,status='previewed',code,approve,previewOrigin,ticket,showProgress=true,now=Date.now()}={}){
   if(!Array.isArray(proposal?.edits)||!proposal.edits.every(e=>own(KINDS,e?.kind)&&[e.path,e.find,e.replace].every(v=>typeof v==='string'))
      ||!binding||!SHA.test(binding.baseCommitSha||'')||!DIGEST.test(binding.proposalDigest||'')||!DIGEST.test(binding.artifactDigest||'')
      ||!(own(TERMINAL,status)||STEPS.some(([s])=>s===status))||(code!=null&&!own(CODES,code))
@@ -63,14 +63,14 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
     ?('<h3>'+(live?'Files in this visual edit':'Files that were proposed')+' ('+proposal.edits.length+')</h3>'+
       (pages.length?'<p class="er-group-label">Pages</p><ul class="er-files" aria-label="Updated pages">'+pages.map(visualRow).join('')+'</ul>':'')+
       (images.length?'<p class="er-group-label">Images</p><ul class="er-files" aria-label="New images">'+images.map(visualRow).join('')+'</ul>':'')+
-      '<p class="er-note">Open the exact preview to see the full page. This approval still binds only these files.</p>')
+      (live?'<p class="er-note">Open the exact preview to see the full page. This approval still binds only these files.</p>':''))
     :('<h3>'+(live?'What will change':'What was proposed')+' ('+proposal.edits.length+')</h3><ul class="er-changes">'+proposal.edits.map(change).join('')+'</ul>');
   const preview=previewHref
     ?'<p><a class="btn btn-secondary" href="'+escape(previewHref)+'" target="_blank" rel="noopener noreferrer">Open the exact preview</a></p><p class="er-note">Opens a private preview of exactly these files. Your live site is unchanged.</p>':'';
   const at=STEPS.findIndex(([s])=>s===status);
-  const timeline='<ol class="er-steps" aria-label="Change progress">'+STEPS.map(([s,label],i)=>{
+  const timeline=showProgress?'<ol class="er-steps" aria-label="Change progress">'+STEPS.map(([s,label],i)=>{
     const state=at<0?'':i<at||status==='live'?'is-done':i===at?'is-active':'';
-    return '<li class="'+state+'"'+(state==='is-active'?' aria-current="step"':'')+'>'+label+'</li>';}).join('')+'</ol>';
+    return '<li class="'+state+'"'+(state==='is-active'?' aria-current="step"':'')+'>'+label+'</li>';}).join('')+'</ol>':'';
   const problem=own(TERMINAL,status)||why!=null
     ?'<p role="alert"><strong>'+(own(TERMINAL,status)?TERMINAL[status]:'Needs attention')+'.</strong> '+(why!=null?CODES[why]:'Something went wrong. Nothing was published.')+'</p>':'';
   if(ticket!=null&&!TICKET.test(ticket))throw new TypeError('Unknown edit review shape');
@@ -85,10 +85,10 @@ export function editReviewMarkup({proposal,binding,status='previewed',code,appro
       '<button type="submit" name="action" value="pr" class="btn-secondary">Open a pull request instead</button></form>'+
       '<p class="er-note"><strong>Approve and publish</strong> commits exactly this change to your website\'s <code>main</code> branch and merges it, and Cloudflare Pages publishes it. Every other file stays the same. If your site changed since this preview, nothing is published. Want to review it in GitHub first? Choose <strong>Open a pull request instead</strong> and merge it yourself. This approval works once.</p>':'';
   const expires=Number.isSafeInteger(binding.expiresAt)?new Date(binding.expiresAt*1000).toISOString():'';
-  return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">Review this change</h2>'+
+  return '<section class="er" aria-labelledby="er-title"><h2 id="er-title">'+(status==='previewed'?'Review this change':'Change summary')+'</h2>'+
     '<p class="er-summary">'+escape(proposal.summary||'Proposed change')+'</p>'+problem+timeline+
     changesBlock+
-    '<p class="muted">Every other file stays exactly the same.</p>'+preview+form+
+    (live?'<p class="muted">Every other file stays exactly the same.</p>':'')+preview+form+
     '<details><summary>Approval details</summary><ul class="er-facts"><li>Based on version <code>'+escape(binding.baseCommitSha.slice(0,12))+'</code></li>'+
     '<li>Preview fingerprint <code>'+escape(binding.artifactDigest.slice(0,12))+'…</code></li>'+
     (expires?'<li>Preview expires <time datetime="'+expires+'">'+expires.replace('T',' ').slice(0,16)+' UTC</time></li>':'')+'</ul></details></section>';
