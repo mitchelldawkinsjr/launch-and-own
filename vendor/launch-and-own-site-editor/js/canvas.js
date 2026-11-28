@@ -165,6 +165,11 @@ window.Canvas = (function() {
       }
     }, true);
 
+    // Middle-clicking a link must not trigger the browser's new-tab action.
+    body.addEventListener('auxclick', (e) => {
+      if (e.target.closest?.('a')) e.preventDefault();
+    }, true);
+
     // Also catch any other navigation attempts (form submit, etc.)
     body.addEventListener('submit', (e) => {
       e.preventDefault();

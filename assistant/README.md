@@ -58,7 +58,7 @@ Open the assistant's address. Prefer the visual editor: edit on the canvas, prev
 
 Plain-language requests ("open Saturdays 10 to 4") use your own Workers AI allowance and are an **owner opt-in** (`AI_EDITS`). The default model, `@cf/openai/gpt-oss-120b`, met the 95% valid / 90% correct bar in 3 of 3 runs on the 8-case accuracy set (2026-11-26); `@cf/google/gemma-4-26b-a4b-it` is the cheaper fallback. When on, the daily budget is reserved before every model call, and the model's proposal goes through the same checks as a typed edit.
 
-**Preview scope in M2:** the review shows each changed file exactly as it would be published, fully sandboxed. A full rendered preview on a separate address is a follow-up (preview Worker is deferred in `provisioning/manifest.json`).
+**Preview scope in M2:** the review shows each changed file exactly as it would be published, fully sandboxed. Visual drafts are stored in your assistant's D1 database. Review links expire after 15 minutes, and the next visual preview clears expired drafts. A full rendered preview on a separate address is a follow-up (preview Worker is deferred in `provisioning/manifest.json`).
 
 ## Updates
 - Security / breaking / end-of-support: weekly Actions workflow opens a provenance-checked PR (ADR-004 A2).
