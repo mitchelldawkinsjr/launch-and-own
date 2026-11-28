@@ -24,13 +24,13 @@ const SITE = {
   'README.md': '# site\n'
 };
 
-function fakeGitHub({ repoId = 101 } = {}) {
+function fakeGitHub({ repoId = 101, files = SITE } = {}) {
   const sha1 = s => createHash('sha1').update(s).digest('hex');
   const blobs = new Map(), trees = new Map(), commits = new Map();
   const state = { history: [], refs: new Map(), pulls: [], main: null, tokenBodies: [] };
   return (async () => {
     const entries = [{ path: 'public', mode: '040000', type: 'tree', sha: '2'.repeat(40) }];
-    for (const [path, text] of Object.entries(SITE)) { const sha = await gitBlobSha(enc(text)); blobs.set(sha, enc(text)); entries.push({ path, mode: '100644', type: 'blob', sha }); }
+    for (const [path, text] of Object.entries(files)) { const sha = await gitBlobSha(enc(text)); blobs.set(sha, enc(text)); entries.push({ path, mode: '100644', type: 'blob', sha }); }
     const baseTree = sha1('tree0'); trees.set(baseTree, entries);
     state.main = sha1('commit0'); commits.set(state.main, { tree: baseTree, parent: null });
     const root = '/repos/tester/esp-willow', json = (d, s = 200) => Response.json(d, { status: s });
@@ -90,8 +90,8 @@ function fakeGitHub({ repoId = 101 } = {}) {
   })();
 }
 
-async function world({ ai, envExtra = {} } = {}) {
-  const gh = await fakeGitHub();
+async function world({ ai, files, envExtra = {} } = {}) {
+  const gh = await fakeGitHub({ files });
   const pair = await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
   gh.accessJwk = { ...(await crypto.subtle.exportKey('jwk', pair.publicKey)), kid: 'k1' };
   const clock = { t: T0 };
@@ -101,7 +101,26 @@ async function world({ ai, envExtra = {} } = {}) {
   };
   const db = new DatabaseSync(':memory:');
   db.exec(readFileSync(new URL('./migrations/0001_assistant.sql', import.meta.url), 'utf8'));
-  const DB = { raw: db, prepare: sql => ({ bind: (...a) => ({ first: async () => db.prepare(sql).get(...a) || null, run: async () => db.prepare(sql).run(...a), all: async () => ({ results: db.prepare(sql).all(...a) }) }) }) };
+  const statement = (sql, args = []) => ({
+    bind: (...values) => statement(sql, values),
+    first: () => db.prepare(sql).get(...args) || null,
+    run: () => db.prepare(sql).run(...args),
+    all: () => ({ results: db.prepare(sql).all(...args) })
+  });
+  const DB = {
+    prepare: statement,
+    async batch(statements) {
+      db.exec('BEGIN');
+      try {
+        const results = statements.map(item => item.run());
+        db.exec('COMMIT');
+        return results;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    }
+  };
   const aiCalls = [];
   const env = {
     ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD, OWNER_SUB: OWNER, ASSISTANT_ORIGIN: ORIGIN, KEK: 'k'.repeat(32), DB,
@@ -110,13 +129,14 @@ async function world({ ai, envExtra = {} } = {}) {
   };
   const cache = accessKeyCache({ fetchFn: gh.fetchFn, now: () => clock.t });
   const csrf = await csrfToken(env, OWNER);
-  const call = async (path, { method = 'GET', form, json } = {}) => handle(new Request(ORIGIN + path, {
+  const call = async (path, { method = 'GET', form, json, headers = {} } = {}) => handle(new Request(ORIGIN + path, {
     method,
     headers: {
       'cf-access-jwt-assertion': await token(),
       ...(method === 'POST' ? { origin: ORIGIN } : {}),
       ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
-      ...(json ? { 'content-type': 'application/json' } : {})
+      ...(json ? { 'content-type': 'application/json' } : {}),
+      ...headers
     },
     body: json ? JSON.stringify({ csrf, ...json }) : form ? new URLSearchParams({ csrf, ...form }) : undefined
   }), env, { fetchFn: gh.fetchFn, now: () => clock.t, cache });
@@ -290,12 +310,14 @@ test('an AI proposal too large for a review ticket fails clearly as too large', 
   assert.match(await res.text(), /too large/);
 });
 
-test('visual page save lists GitHub files, opens review without writing, and Approve and publish merges', async () => {
+test('visual title edit on a large page opens exact review without writing and publishes only after approval', async () => {
   // The canvas needs the ASSETS binding (hosted upgrade uploads it); without it the page says so and offers a read-only preview.
   const bare = await (await (await world()).call('/')).text();
   assert.match(bare, /Visual canvas is not on this Worker yet/);
   assert.doesNotMatch(bare, /\/site-editor\/index\.html\?id=site/);
-  const w = await world({ envExtra: { ASSETS: { fetch: async () => new Response('') } } });
+  const original = SITE['public/index.html'].replace('</head>', '<!--' + '\n page metadata'.repeat(6000) + ' --></head>');
+  const edited = original.replace('<title>Willow</title>', '<title>Harbor Lane</title>');
+  const w = await world({ files: { ...SITE, 'public/index.html': original }, envExtra: { ASSETS: { fetch: async () => new Response('') } } });
   const home = await (await w.call('/')).text();
   assert.match(home, /\/site-editor\/index\.html\?id=site/);
   assert.match(home, /Advanced: one exact text change/);
@@ -303,19 +325,30 @@ test('visual page save lists GitHub files, opens review without writing, and App
   assert.equal(listed.status, 200);
   assert.deepEqual((await listed.json()).files, ['about.html', 'contact.html', 'index.html', 'styles.css']);
   const before = writes(w.gh).length;
-  const visual = await w.call('/visual-preview', {
+  const snapshot = {
     method: 'POST',
     json: {
       id: 'site', page: 'index.html',
-      html: '<!doctype html><html><body><h1>Harbor Lane</h1></body></html>',
+      html: edited,
       images: []
     }
-  });
-  assert.equal(visual.status, 303, await visual.text());
+  };
+  const redirect = await w.call('/visual-preview', snapshot);
+  assert.equal(redirect.status, 303, await redirect.text());
+  assert.match(redirect.headers.get('location'), /^\/review\?ticket=/);
+  const visual = await w.call('/visual-preview', { ...snapshot, headers: { accept: 'application/json' } });
+  assert.equal(visual.status, 200);
+  const { reviewUrl } = await visual.json();
+  assert.match(reviewUrl, /^\/review\?ticket=/);
+  assert.ok(reviewUrl.length < 1000, 'page content stays out of the review URL');
+  assert.ok(w.db.prepare('SELECT COUNT(*) AS count FROM assistant_visual_previews').get().count > 2, 'large snapshots span multiple rows');
+  assert.equal(visual.headers.get('cache-control'), 'no-store');
   assert.equal(writes(w.gh).length, before, 'preview does not write GitHub');
-  const review = await (await w.call(visual.headers.get('location'))).text();
+  const review = await (await w.call(reviewUrl)).text();
   assert.match(review, /Updated page/);
   assert.match(review, /Approve and publish/);
+  const file = await w.call('/file?ticket=' + encodeURIComponent(w.hidden(review, 'ticket')) + '&path=index.html');
+  assert.equal(await file.text(), edited);
   const approved = await w.call('/approve', {
     method: 'POST',
     form: {
@@ -326,7 +359,7 @@ test('visual page save lists GitHub files, opens review without writing, and App
   });
   assert.equal(approved.status, 303, await approved.text());
   assert.equal(w.gh.merges.length, 1);
-  assert.match(await w.gh.blobText('public/index.html'), /Harbor Lane/);
+  assert.equal(await w.gh.blobText('public/index.html'), edited);
   const status = await (await w.call(approved.headers.get('location'))).text();
   assert.match(status, /You merged|Published|merged/);
   const scripted = await w.call('/visual-preview', {

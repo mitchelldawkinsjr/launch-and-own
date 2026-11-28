@@ -1,6 +1,6 @@
 // Customer-owned assistant edit flow (M2 slice 2, #195). Same steps and library as the hosted flow:
 // read the live repo -> locate/validate -> sealed 15-minute ticket -> re-derive and review -> approve -> PR (never merge).
-// Nothing is stored between steps except the single-use approval claim; every step re-reads GitHub, so a moved base fails closed.
+// Visual previews use expiring snapshots in the owner's D1. Every step re-reads GitHub, so a moved base fails closed.
 import { escape, UI_CSS } from '../onboarding/ui.mjs';
 import { editReviewMarkup } from '../onboarding/edit-review.mjs';
 import { assistantPromptMarkup, livePreviewUrl, VISUAL_EDITOR_CSS, visualEditorMarkup } from '../onboarding/visual-editor.mjs';
@@ -20,6 +20,7 @@ import { ImportedEditError } from '../imported/errors.mjs';
 import { MergeRefused, mergeVerifiedPullRequest } from '../pipeline/merge-approved-pr.mjs';
 import { mintInstallationToken } from './github-app.mjs';
 import { DEFAULT_DAILY_NEURONS, reserveNeurons } from './budget.mjs';
+import { readVisualPreview, storeVisualPreview } from './visual-preview-store.mjs';
 
 const KINDS = new Set(['text', 'link', 'business_info', 'css_color']);
 const REVIEW_SECONDS = 15 * 60, STATUS_SECONDS = 7 * 86400;
@@ -31,6 +32,23 @@ const PAGE_HEADERS = {
   'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer',
   'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'"
 };
+const ASSISTANT_EDITOR_CSS = `
+body:has(.assistant-editor){min-height:100dvh}
+body:has(.assistant-editor) .shell{min-height:0;padding:8px clamp(8px,1.4vw,20px) 12px}
+.assistant-editor{flex:1;display:flex;flex-direction:column;padding:clamp(12px,1.5vw,20px)}
+.assistant-editor .ve-stage{gap:10px}
+.assistant-editor .ve-ask textarea{padding-block:8px}
+.assistant-editor .ve-wrap{min-height:max(420px,60dvh);min-width:0}
+.assistant-editor .ve-preview{display:grid;grid-template-rows:minmax(0,1fr);min-width:0}
+.assistant-editor .ve-preview iframe{min-height:0}
+@media(max-width:800px){
+  .assistant-editor .ve-wrap,.assistant-editor .ve-preview{min-height:min(420px,65dvh)}
+}
+@media(min-width:365px) and (max-width:800px){
+  .assistant-editor .ve-ask-row{grid-template-columns:minmax(0,1fr) auto}
+  .assistant-editor .ve-ask button{padding-inline:12px}
+}
+`;
 const MESSAGES = {
   stale_base: 'Your website changed since this preview. Start again so the change is based on the latest version.',
   expired: 'This preview expired. Start again.', approval_mismatch: 'This approval does not match the preview. Start again.',
@@ -66,6 +84,13 @@ export async function openTicket(env, kind, sub, raw, now) {
   if (data?.k !== kind || data.sub !== sub) throw new ImportedEditError('approval_mismatch');
   if (!Number.isSafeInteger(data.exp) || data.exp <= Math.floor(now / 1000)) throw new ImportedEditError('expired');
   return data;
+}
+
+async function openReviewTicket(env, sub, raw, now) {
+  const ticket = await openTicket(env, 'review', sub, raw, now);
+  if (!ticket.snapshotDigest) return ticket;
+  const { changed, edits, snapshot } = await readVisualPreview(env.DB, ticket);
+  return { ...ticket, changed, edits, snapshot };
 }
 
 // Same Stitch tokens as onboard, but customer-branded: no Launch & Own nav, beacon or remote assets (CSP allows inline style only).
@@ -182,13 +207,20 @@ async function visualPreview(env, site, request, { sub, csrf, fetchFn, now }) {
     find: row.added ? 'New file' : 'Current page',
     replace: row.added ? 'New image' : 'Updated in the visual editor'
   }));
+  const approvalId = newApprovalId();
+  const snapshotDigest = await storeVisualPreview(env.DB, {
+    approvalId, expiresAt: Math.floor(now / 1000) + REVIEW_SECONDS, now,
+    snapshot: { changed: validated.changed, edits, snapshot }
+  });
   const ticket = await sealTicket(env, 'review', sub, {
-    mode: 'snapshot', repositoryId: site.repositoryId, baseCommitSha: live.revision.commitSha, requestId, summary, edits,
-    proposalDigest: validated.proposalDigest, artifactDigest: validated.artifactDigest, approvalId: newApprovalId(),
-    changed: validated.changed, snapshot
+    mode: 'snapshot', repositoryId: site.repositoryId, baseCommitSha: live.revision.commitSha, requestId, summary,
+    proposalDigest: validated.proposalDigest, artifactDigest: validated.artifactDigest, approvalId, snapshotDigest
   }, now);
-  if (ticket.length > 5900) throw new ImportedEditError('limit_exceeded');
-  return redirect('/review?ticket=' + encodeURIComponent(ticket));
+  const reviewUrl = '/review?ticket=' + encodeURIComponent(ticket);
+  if (request.headers.get('accept') === 'application/json') {
+    return Response.json({ reviewUrl }, { headers: { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
+  }
+  return redirect(reviewUrl);
 }
 
 const modelText = out => typeof out?.response === 'string' ? out.response : out?.response && typeof out.response === 'object' ? JSON.stringify(out.response) : out?.choices?.[0]?.message?.content ?? '';
@@ -204,14 +236,15 @@ async function home(env, site, url, { csrf, fetchFn, now }) {
   const iframeSrc = livePreviewUrl('/live/', activePage);
   const ai = env.AI_EDITS === 'on' && env.AI;
   const aiBlock = ai ? assistantPromptMarkup({ csrf, action: '/preview' }) : '';
-  const body = '<style>' + VISUAL_EDITOR_CSS + '</style>' +
-    '<p>Every change is previewed first. <strong>Nothing goes live until you approve it</strong>.</p>' +
+  const canvas = Boolean(env.ASSETS);
+  const body = '<style>' + VISUAL_EDITOR_CSS + (canvas ? ASSISTANT_EDITOR_CSS : '') + '</style>' +
     visualEditorMarkup({
       jobId: 'site', page: activePage, pages, iframeSrc, targets, picked, csrf,
       previewAction: '/preview', editorPath: '/', aiBlock,
-      canvas: Boolean(env.ASSETS)
+      notes: '<p>' + (canvas ? 'Choose Preview in the editor. ' : '') + '<strong>Nothing goes live until you approve it.</strong></p>',
+      canvas
     });
-  return page('Change your website', '<div class="card">' + body + '</div>', 200, { wide: true, omitTitle: true });
+  return page('Change your website', '<div class="card' + (canvas ? ' assistant-editor' : '') + '">' + body + '</div>', 200, { wide: true, omitTitle: true });
 }
 
 async function liveFile(site, url, { fetchFn, now }) {
@@ -266,7 +299,7 @@ async function preview(env, site, form, { sub, fetchFn, now }) {
 
 async function review(env, site, url, { sub, csrf, fetchFn, now }) {
   const raw = url.searchParams.get('ticket');
-  const ticket = await openTicket(env, 'review', sub, raw, now);
+  const ticket = await openReviewTicket(env, sub, raw, now);
   const { validated } = await reviewedTree(site, ticket, { fetchFn, now });
   const screen = editReviewMarkup({
     proposal: { v: 1, summary: ticket.summary, edits: ticket.edits },
@@ -278,7 +311,7 @@ async function review(env, site, url, { sub, csrf, fetchFn, now }) {
 }
 
 async function file(env, site, url, { sub, fetchFn, now }) {
-  const ticket = await openTicket(env, 'review', sub, url.searchParams.get('ticket'), now);
+  const ticket = await openReviewTicket(env, sub, url.searchParams.get('ticket'), now);
   const { validated } = await reviewedTree(site, ticket, { fetchFn, now });
   // Fully sandboxed, script-free response from the shared library (same as the hosted "exact changed file" view).
   const out = previewResponse({ credentialsIncluded: false, files: validated.files }, '/' + (url.searchParams.get('path') || ''));
@@ -286,7 +319,7 @@ async function file(env, site, url, { sub, fetchFn, now }) {
 }
 
 async function approve(env, site, form, { sub, fetchFn, now }) {
-  const ticket = await openTicket(env, 'review', sub, String(form.get('ticket') || ''), now);
+  const ticket = await openReviewTicket(env, sub, String(form.get('ticket') || ''), now);
   if (form.get('approvalId') !== ticket.approvalId || form.get('proposalDigest') !== ticket.proposalDigest || form.get('artifactDigest') !== ticket.artifactDigest) throw new ImportedEditError('approval_mismatch');
   const { token, revision, files, validated } = await reviewedTree(site, ticket, { fetchFn, now });
   const preview = await isolatePreview({ files: validated.files, baseCommitSha: revision.commitSha, githubUserId: revision.githubUserId, repositoryId: site.repositoryId, ownerLogin: site.owner });
