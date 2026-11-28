@@ -33,7 +33,10 @@
     "OPTION_FORMS_ENABLED": "true",
     "OPTION_ANALYTICS_ENABLED": "true",
     "OPTION_SITE_FILES_ENABLED": "true",
-    "CF_FORMS_SCOPES": "d1.write workers-scripts.admin"
+    "CF_FORMS_SCOPES": "d1.write workers-scripts.admin",
+    "OPTION_ASSISTANT_BOOTSTRAP_ENABLED": "true",
+    "CF_ASSISTANT_SCOPES": "d1.write workers-scripts.admin ai.write",
+    "ASSISTANT_UPSTREAM_SHA": "b9d5e076bca0fa5f113a093b0398880e3f6a3010"
   },
   "compatibility_flags": [
     "nodejs_compat"
@@ -76,6 +79,12 @@
     {
       "binding": "ZIP_ARTIFACTS",
       "bucket_name": "launch-and-own-zip-artifacts"
+    }
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "FUNNEL",
+      "dataset": "onboarding_funnel"
     }
   ]
 }

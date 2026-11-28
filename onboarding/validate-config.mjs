@@ -14,13 +14,14 @@ const REFERENCE_D1="00000000-0000-0000-0000-000000000000";
 const TABLES=["onboarding_flows","onboarding_sessions","onboarding_launches","onboarding_launch_receipts",
   "onboarding_launch_jobs","onboarding_launch_job_sessions","onboarding_option_approvals",
   "onboarding_option_executions","onboarding_forms_cost_privacy_approvals","onboarding_forms_provisioning",
-  "onboarding_pages_access","onboarding_imported_edit_approvals"];
+  "onboarding_pages_access","onboarding_imported_edit_approvals","onboarding_assistant_bootstrap"];
 const INDEXES=["idx_onboarding_flows_expires","idx_onboarding_sessions_expires","idx_onboarding_launches_session",
   "idx_onboarding_receipts_owner","idx_onboarding_receipts_expiry","idx_onboarding_jobs_due","idx_onboarding_jobs_owner",
   "idx_onboarding_jobs_expiry","idx_onboarding_job_sessions_session","idx_onboarding_launches_job",
   "idx_onboarding_option_approvals_owner","idx_onboarding_option_approvals_job",
   "idx_option_executions_owner","idx_option_executions_job_kind",
-  "idx_forms_cost_privacy_owner","idx_forms_cost_privacy_digest","idx_forms_provisioning_owner"];
+  "idx_forms_cost_privacy_owner","idx_forms_cost_privacy_digest","idx_forms_provisioning_owner",
+  "idx_assistant_bootstrap_owner"];
 const TRIGGERS=["onboarding_jobs_delete_previews","onboarding_clear_pages_access"];
 export function validateConfig(config){
   if(!config||typeof config!=="object"||Array.isArray(config))throw Error("Expected Wrangler config object");
@@ -48,7 +49,11 @@ export function validateConfig(config){
     throw Error("Disable workers.dev and preview URLs for the onboarding Worker");
   if(config.vars?.ONBOARDING_ORIGIN!=="https://onboard.360web.cloud")
     throw Error("ONBOARDING_ORIGIN must match the approved HTTPS Custom Domain");
-  return {status:"configuration-valid",worker:config.name,databaseId,databaseName:db[0].database_name};
+  const funnel=config.analytics_engine_datasets;
+  if(!Array.isArray(funnel)||funnel.length!==1||funnel[0]?.binding!=="FUNNEL"||funnel[0]?.dataset!=="onboarding_funnel")
+    throw Error("Onboarding Worker must bind Analytics Engine dataset onboarding_funnel as FUNNEL");
+  return {status:"configuration-valid",worker:config.name,databaseId,databaseName:db[0].database_name,
+    funnelDataset:funnel[0].dataset};
 }
 export async function checkRemoteSchema({accountId,token,databaseId,expectedDatabaseName="launch-and-own-onboarding-beta",fetchFn=fetch}){
   if(typeof accountId!=="string"||!/^[a-f0-9]{32}$/i.test(accountId))throw Error("CLOUDFLARE_ACCOUNT_ID must be 32 hex characters");
@@ -80,7 +85,7 @@ export async function checkRemoteSchema({accountId,token,databaseId,expectedData
   const columns=new Set(columnBody.result[0].results.map(x=>x.name));
   const required=["github_refresh_token_ct","github_token_expires_at","github_refresh_expires_at","github_refresh_locked_until",
     "cloudflare_refresh_token_ct","cloudflare_token_expires_at","cloudflare_refresh_expires_at","cloudflare_refresh_locked_until",
-    "cloudflare_forms_grant"];
+    "cloudflare_forms_grant","cloudflare_assistant_grant"];
   const absent=required.filter(x=>!columns.has(x));
   if(absent.length)throw Error("D1 token-rotation migration missing: "+absent.join(", "));
   // A correct physical D1 schema is insufficient when Wrangler's migration

@@ -79,3 +79,11 @@ These are different products, and this ADR decides only the first.
 - The setup guide and consent screen (provisioning plan) are customer-facing documents, not Launch & Own actions.
 - No change to `onboarding/wrangler.jsonc`, OAuth registrations or Domain secrets.
 - Support must say plainly that 360Web can help over a screen share as a paid service without ever holding the customer's Cloudflare token.
+
+## Amendment — hosted bootstrap pilot (owner-accepted, 2026-11-27)
+
+Owner accepted a **hosted bootstrap, then hand-off** product path for the onboard pilot (ADR-001 option **D**-style): Launch & Own may request elevated Cloudflare scopes only via incremental consent `/connect/cloudflare?purpose=assistant` (never at ordinary sign-in), create the private assistant repo / D1 / Worker in the customer's accounts during that session, then hand off. Launch & Own must **not** keep a durable Workers-admin refresh token for the assistant afterward. Access and GitHub App install remain guided manual steps.
+
+- Gate: `OPTION_ASSISTANT_BOOTSTRAP_ENABLED` (default off) and `CF_ASSISTANT_SCOPES` in onboarding Wrangler vars. Domain must confirm the OAuth client can request those scopes before flipping the flag in production.
+- M2 CLI (B1) remains the reference path for disposable-account proof and for customers who prefer wrangler.
+- Marketing and `distribution/release-matrix.json` stay **planned / owner invite beta** until guided acceptance — not public GA from owner-only evidence.

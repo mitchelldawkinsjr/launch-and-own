@@ -3,7 +3,9 @@ import {beginGitHubAppOAuth,completeGitHubAppOAuth} from '../pipeline/github-app
 import {
   CLOUDFLARE_WORKERS_PAGES_APP_SLUG,
   githubAppCanCreateRepositories,
-  githubAppInstallUrl
+  githubAppInstalledOnUser,
+  githubAppInstallUrl,
+  listUserGithubAppInstallations
 } from '../pipeline/github-app-installation.mjs';
 import {beginCloudflareOAuth,completeCloudflareOAuth,verifyCloudflareAccount,verifyCloudflarePagesAccess} from '../pipeline/cloudflare-oauth.mjs';
 import {verifyProviderConnections} from '../pipeline/authorization-checks.mjs';
@@ -48,9 +50,14 @@ import {
   loadCurrentManagedSitesPage,renderCurrentSitesSection,currentSiteDetails,
   inspectSealedManagedSource,renderCurrentSourcePage
 } from './toolkit-current-sites.mjs';
+import {recordFunnel,countryFromRequest} from './funnel-analytics.mjs';
+import {
+  assistantScopes,assistantScopesGranted,createAssistantSetupRoutes,toolkitAssistantCta
+} from './assistant-setup.mjs';
 
 const COOKIE_SESSION='__Host-esp_session';
 const COOKIE_LOGIN='__Host-esp_login';
+const COOKIE_ASSISTANT_JOB='__Host-esp_asst_job';
 // Cloudflare Web Analytics only (cookieless). No Google/third-party ad trackers.
 const textHeaders={
   'content-type':'text/html; charset=utf-8','cache-control':'no-store',
@@ -65,7 +72,7 @@ const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const cookie=(name,value,maxAge)=>`${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 const redirect=(path,setCookie)=>{
   const headers=new Headers({'location':path,'cache-control':'no-store','referrer-policy':'same-origin'});
-  if(setCookie)headers.append('set-cookie',setCookie);
+  for(const c of [].concat(setCookie||[]).filter(Boolean))headers.append('set-cookie',c);
   return new Response(null,{status:303,headers});
 };
 // opts are UI-only (pageShell); never pass them as the headers argument.
@@ -102,7 +109,7 @@ async function session(request,env){
   const record=await env.DB.prepare(`SELECT id_hash, github_user_id, github_login, github_token_ct,
     github_refresh_token_ct, github_token_expires_at, github_refresh_expires_at, cloudflare_token_ct,
     cloudflare_refresh_token_ct, cloudflare_token_expires_at, cloudflare_refresh_expires_at,
-    cloudflare_account_id, cloudflare_forms_grant, csrf_ct, expires_at, authorization_epoch FROM onboarding_sessions
+    cloudflare_account_id, cloudflare_forms_grant, cloudflare_assistant_grant, csrf_ct, expires_at, authorization_epoch FROM onboarding_sessions
     WHERE id_hash=? AND expires_at>?`).bind(hash,now()).first();
   if(!record)return null;
   const csrf=await unseal(env.TOKEN_ENCRYPTION_KEY,record.csrf_ct,'csrf:'+hash);
@@ -153,6 +160,7 @@ async function gitHubStart(request,env){
   const origin=baseUrl(env),nonce=randomToken();
   const {authorizationUrl,session:flow}=beginGitHubAppOAuth({clientId:env.GH_CLIENT_ID,redirectUri:origin+'/oauth/github/callback'});
   await saveFlow(env,{provider:'github',binding:nonce,...flow});
+  recordFunnel(env,'start_github',{country:countryFromRequest(request),path:'/connect/github'});
   return redirect(authorizationUrl,cookie(COOKIE_LOGIN,nonce,600));
 }
 async function gitHubCallback(request,env,current){
@@ -171,6 +179,7 @@ async function gitHubCallback(request,env,current){
   if(current){
     await env.DB.batch([createSession,env.DB.prepare('DELETE FROM onboarding_sessions WHERE id_hash=?').bind(current.hash)]);
   }else await createSession.run();
+  recordFunnel(env,'github_ok',{country:countryFromRequest(request),path:'/oauth/github/callback'});
   const response=redirect('/');
   response.headers.append('set-cookie',cookie(COOKIE_SESSION,raw,3600));
   response.headers.append('set-cookie',cookie(COOKIE_LOGIN,'',0));
@@ -178,14 +187,20 @@ async function gitHubCallback(request,env,current){
 }
 // D1 and Workers scope IDs come from the Cloudflare OAuth client registration (Domain).
 // Incremental consent (owner-approved 2026-11-26): they are requested only in the separate forms consent
-// (/connect/cloudflare?purpose=forms), never at sign-in. A malformed ID is dropped rather than sent.
+// (/connect/cloudflare?purpose=forms), never at sign-in. Assistant setup uses purpose=assistant the same way.
+// A malformed ID is dropped rather than sent.
 export function formsScopes(env){
   return env.OPTION_FORMS_ENABLED==='true'?String(env.CF_FORMS_SCOPES||'').trim().split(/\s+/)
     .filter(scope=>scope==='workers-scripts.admin'||/^[a-z0-9-]+\.(?:read|write)$/.test(scope)):[];
 }
-export function cloudflareScopes(env,{forms=false}={}){
+export {assistantScopes,assistantScopesGranted};
+export function cloudflareScopes(env,{forms=false,assistant=false}={}){
   const scopes=String(env.CF_SCOPES).trim().split(/\s+/);
-  return [...new Set([...scopes,...(forms?formsScopes(env):[])])];
+  return [...new Set([
+    ...scopes,
+    ...(forms?formsScopes(env):[]),
+    ...(assistant?assistantScopes(env):[])
+  ])];
 }
 export function formsScopesGranted(env,scope){
   // Cloudflare may omit the scope string; then the forms consent request is what was approved.
@@ -193,15 +208,31 @@ export function formsScopesGranted(env,scope){
   const granted=new Set(scope.trim().split(/\s+/));
   return formsScopes(env).every(s=>granted.has(s));
 }
+function cloudflarePurpose(request,env){
+  const asked=new URL(request.url).searchParams.get('purpose');
+  if(asked==='forms'&&formsScopes(env).length)return 'forms';
+  if(asked==='assistant'&&assistantScopes(env).length)return 'assistant';
+  return 'sign_in';
+}
 async function cloudflareStart(request,env,current){
   await limitAttempts(request,env);
   if(!current)return fail('Connect GitHub before connecting Cloudflare.',401);
-  // ?purpose=forms is the only way forms scopes are requested (owner turning on forms).
-  const purpose=new URL(request.url).searchParams.get('purpose')==='forms'&&formsScopes(env).length?'forms':'sign_in';
-  const origin=baseUrl(env),scopes=cloudflareScopes(env,{forms:purpose==='forms'});
+  const purpose=cloudflarePurpose(request,env);
+  const origin=baseUrl(env),scopes=cloudflareScopes(env,{
+    forms:purpose==='forms',assistant:purpose==='assistant'
+  });
   const {authorizationUrl,session:flow}=beginCloudflareOAuth({clientId:env.CF_CLIENT_ID,redirectUri:origin+'/oauth/cloudflare/callback',scopes});
   await saveFlow(env,{provider:'cloudflare',binding:current.hash,...flow,purpose});
-  return redirect(authorizationUrl);
+  if(purpose==='sign_in')recordFunnel(env,'start_cloudflare',{country:countryFromRequest(request),path:'/connect/cloudflare'});
+  // Remember which live site to resume after purpose=assistant consent.
+  let extraCookie=null;
+  if(purpose==='assistant'){
+    const jobId=new URL(request.url).searchParams.get('job');
+    extraCookie=isLaunchId(jobId)
+      ?cookie(COOKIE_ASSISTANT_JOB,jobId,600)
+      :cookie(COOKIE_ASSISTANT_JOB,'',0);
+  }
+  return redirect(authorizationUrl,extraCookie);
 }
 async function cloudflareCallback(request,env,current){
   if(!current)return fail('Your session expired. Connect GitHub again.',401);
@@ -210,13 +241,25 @@ async function cloudflareCallback(request,env,current){
   const {verifier,purpose}=await consumeFlow(env,{provider:'cloudflare',binding:current.hash,state:url.searchParams.get('state')});
   const token=await completeCloudflareOAuth({clientId:env.CF_CLIENT_ID,clientSecret:env.CF_CLIENT_SECRET,redirectUri:baseUrl(env)+'/oauth/cloudflare/callback',code:url.searchParams.get('code'),receivedState:url.searchParams.get('state'),expectedState:url.searchParams.get('state'),codeVerifier:verifier});
   const encrypted=await encryptGrant({grant:token,provider:'cloudflare',sessionHash:current.hash,encryptionKey:env.TOKEN_ENCRYPTION_KEY});
+  const formsGrant=purpose==='forms'&&formsScopesGranted(env,token.scope)?1:0;
+  const assistantGrant=purpose==='assistant'&&assistantScopesGranted(env,token.scope)?1:0;
+  // Incremental consent keeps the selected account; only a full Cloudflare reconnect clears it.
+  const keepAccount=purpose==='forms'||purpose==='assistant';
   const updated=await env.DB.prepare(`UPDATE onboarding_sessions SET cloudflare_token_ct=?, cloudflare_refresh_token_ct=?,
     cloudflare_token_expires_at=?, cloudflare_refresh_expires_at=?, cloudflare_refresh_locked_until=NULL,
-    cloudflare_account_id=NULL, cloudflare_forms_grant=?, authorization_epoch=authorization_epoch+1
+    cloudflare_account_id=${keepAccount?'cloudflare_account_id':'NULL'}, cloudflare_forms_grant=?, cloudflare_assistant_grant=?,
+    authorization_epoch=authorization_epoch+1
     WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
     .bind(encrypted.accessCipher,encrypted.refreshCipher,encrypted.accessExpiresAt,encrypted.refreshExpiresAt,
-      purpose==='forms'&&formsScopesGranted(env,token.scope)?1:0,current.hash,current.authorization_epoch,now()).first();
+      formsGrant,assistantGrant,current.hash,current.authorization_epoch,now()).first();
   if(!updated)throw Error('Cloudflare authorization changed while connecting');
+  if(purpose==='sign_in')recordFunnel(env,'cloudflare_ok',{country:countryFromRequest(request),path:'/oauth/cloudflare/callback'});
+  if(purpose==='assistant'){
+    const jobId=cookies(request)[COOKIE_ASSISTANT_JOB];
+    const clear=cookie(COOKIE_ASSISTANT_JOB,'',0);
+    if(isLaunchId(jobId))return redirect('/assistant-setup?id='+encodeURIComponent(jobId),clear);
+    return redirect('/toolkit',clear);
+  }
   return redirect('/');
 }
 async function accountOptions(env,current){
@@ -228,21 +271,32 @@ async function accountOptions(env,current){
   if(!data.success||!Array.isArray(data.result))throw Error('Cloudflare did not return a list of accounts');
   return data.result.filter(a=>typeof a.id==='string'&&/^[a-f\d]{32}$/i.test(a.id)).map(a=>({id:a.id,name:String(a.name||a.id)}));
 }
-async function home(env,current,notice){
+async function home(env,current,notice,request){
   const disconnectNotice=notice==='unconfirmed'?'<p role="alert">You are signed out here, but GitHub or Cloudflare may still show Launch &amp; Own as connected. Open your account settings on those sites and remove access if you want a full disconnect.</p>':notice==='complete'?'<p role="status">You are signed out, and GitHub and Cloudflare confirmed that Launch &amp; Own OAuth access was removed.</p>':'';
   const zipEnabled=zipPreviewConfigured(env);
-  if(!current)return view('Launch your website',landingMarkup({zipEnabled,setupHtml:`${disconnectNotice}<p>Nothing is published until you review a preview and approve it.</p>${providerConnectionCards()}<small>Sign in on GitHub and Cloudflare. Keep credentials out of chat.</small>`}),200,textHeaders,
-    {css:providerHelpCss+landingCss,wide:true,omitTitle:true,nav:'marketing'});
+  if(!current){
+    recordFunnel(env,'land',{country:countryFromRequest(request),path:'/'});
+    return view('Launch your website',landingMarkup({zipEnabled,setupHtml:`${disconnectNotice}<p>Nothing is published until you review a preview and approve it.</p>${providerConnectionCards()}<small>Sign in on GitHub and Cloudflare. Keep credentials out of chat.</small>`}),200,textHeaders,
+      {css:providerHelpCss+landingCss,wide:true,omitTitle:true,nav:'marketing'});
+  }
   let appInstalled=false;
+  let pagesAppInstalled=false;
   try{
     const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    const installations=await listUserGithubAppInstallations({accessToken:githubToken});
     appInstalled=await githubAppCanCreateRepositories({
-      accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login
+      accessToken:githubToken,appSlug:env.GH_APP_SLUG,githubLogin:current.github_login,installations
     });
-  }catch{appInstalled=false;}
-  // Launch & Own's user token cannot see Cloudflare's separate app install, so this is guidance only.
-  const pagesHint=appInstalled
-    ?`<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> on this account (separate from Launch &amp; Own). Install once with access to each site folder, then continue here.</p>`
+    pagesAppInstalled=githubAppInstalledOnUser({
+      installations,appSlug:CLOUDFLARE_WORKERS_PAGES_APP_SLUG,githubLogin:current.github_login
+    });
+  }catch{appInstalled=false;pagesAppInstalled=false;}
+  // Required callout only when the Workers & Pages app is missing. Once installed, stay quiet.
+  const pagesHint=appInstalled&&!pagesAppInstalled
+    ?`<div class="lo-callout lo-callout-warn" role="status"><p class="eyebrow"><span class="lo-badge">Required</span></p>`+
+      `<p><strong>Install Cloudflare's Workers &amp; Pages GitHub app</strong> on this account (separate from Launch &amp; Own). Without it, Pages cannot publish your site.</p>`+
+      `<p class="tk-actions"><a class="btn" href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Install Workers &amp; Pages app</a></p>`+
+      `<p class="muted">Install once with access to each site folder, then refresh this page.</p></div>`
     :'';
   const installHtml=appInstalled?'':`<p role="alert">One more GitHub step: install the Launch &amp; Own app so it can create a private place for your website files. Signing in alone is not enough.</p><p><a href="${escape(githubAppInstallUrl(env.GH_APP_SLUG))}">Install Launch &amp; Own on GitHub</a></p><p>After you install it, come back here and refresh the page.</p>`;
   const connected=!!current.cloudflare_token_ct;
@@ -374,6 +428,7 @@ async function selectAccount(request,env,current){
     WHERE id_hash=? AND authorization_epoch=? AND expires_at>? RETURNING id_hash`)
     .bind(accountId,accountId,current.hash,current.authorization_epoch,now()).first();
   if(!updated)throw Error('Cloudflare authorization changed while selecting the account');
+  recordFunnel(env,'account_selected',{country:countryFromRequest(request),path:'/account'});
   return redirect(pagesDenied?pagesAccessPath:'/');
 }
 
@@ -457,6 +512,7 @@ async function preview(request,env,current){
     VALUES(?,?,?,?,?,?,'preview',?,?,?)`)
     .bind(id,current.hash,site.name,current.cloudflare_account_id,current.github_login,
       JSON.stringify({...plan,site,analytics:true}),ts,ts,renderSite(site)).run();
+  recordFunnel(env,'preview',{country:countryFromRequest(request),path:'/preview'});
   return redirect('/review?id='+encodeURIComponent(id));
 }
 async function uploadZip(request,env,current){
@@ -491,6 +547,7 @@ async function uploadZip(request,env,current){
       AND expires_at>? RETURNING id`)
     .bind(id,name,JSON.stringify({...plan,zip,analytics:true}),time,time,current.hash,current.authorization_epoch,current.cloudflare_account_id,time).first();
   if(!staged)return fail('Your connection changed. Review your account selection and upload again.',409);
+  recordFunnel(env,'zip_preview',{country:countryFromRequest(request),path:'/upload'});
   return redirect(reviewPath(id));
 }
 async function assertHistoryAccess(env,current){
@@ -676,6 +733,14 @@ async function review(env,current,id){
   const website='https://esp-'+slug+'-site.pages.dev';
   const pagesAccess=item.status==='preview'?await getPagesAccess(env,current):null;
   const verifyExisting=pagesAccess?.mode==='read';
+  let pagesAppInstalled=false;
+  try{
+    const githubToken=await getFreshAccessToken({env,session:current,provider:'github'});
+    const installations=await listUserGithubAppInstallations({accessToken:githubToken});
+    pagesAppInstalled=githubAppInstalledOnUser({
+      installations,appSlug:CLOUDFLARE_WORKERS_PAGES_APP_SLUG,githubLogin:current.github_login
+    });
+  }catch{pagesAppInstalled=false;}
   const statusLabel={
     preview:'Ready for your approval',
     queued:'Creating your site',
@@ -685,6 +750,11 @@ async function review(env,current,id){
     needs_reauthorization:'Reconnect required'
   };
   const analyticsOn=JSON.parse(item.plan_json).analytics===true;
+  const pagesAppHint=pagesAppInstalled?'':
+    `<div class="lo-callout lo-callout-warn" role="status"><p class="eyebrow"><span class="lo-badge">Required</span></p>`+
+    `<p><strong>Install Cloudflare's Workers &amp; Pages GitHub app</strong> with access to that private folder. Without it, Pages cannot publish.</p>`+
+    `<p class="tk-actions"><a class="btn" href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Install Workers &amp; Pages app</a> `+
+    `<a class="btn-secondary btn" href="https://github.com/settings/installations">Review GitHub app installs</a></p></div>`;
   const details=`<p><strong>Website name:</strong> ${escape(item.customer_name)}</p>`+
     `<p><strong>GitHub account:</strong> ${escape(item.github_login)}</p>`+
     `<p><strong>Private files folder:</strong> <code>${escape('esp-'+slug)}</code> (only you can see this on GitHub)</p>`+
@@ -693,7 +763,7 @@ async function review(env,current,id){
     (verifyExisting
       ? '<p>With your approval, Launch &amp; Own will check the existing Pages project and verify that it published the exact version you reviewed.</p>'
       : '<p>If you approve, Launch &amp; Own will create that private folder, publish this exact preview to your Cloudflare account, and retry if a step needs another pass while you stay signed in. Later edits to the live branch can update the public site.</p>')+
-    `<p>Cloudflare also needs its <a href="${escape(githubAppInstallUrl(CLOUDFLARE_WORKERS_PAGES_APP_SLUG))}">Workers &amp; Pages GitHub app</a> installed with access to that private folder. <a href="https://github.com/settings/installations">Review your GitHub app installs</a> if publishing gets stuck.</p>`;
+    pagesAppHint;
   const previewLink='<p><a href="/site-preview?id='+encodeURIComponent(item.id)+'" target="_blank" rel="noopener">Open the exact preview</a> (new tab)</p>';
   let status=item.status;
   let controls='';
@@ -787,6 +857,7 @@ async function approve(request,env,current,context){
   if(item.legacy_receipt_id&&!item.job_id&&!receipt)throw Error('This history entry expired');
   if(!await approveJob(env,{preview:item,session:current,snapshot,receipt,time,pagesAccessId}))
     return fail('This launch changed or its target already has an approved launch. Check your launches.',409);
+  recordFunnel(env,'approve',{country:countryFromRequest(request),path:'/approve'});
   queueAttempt(context,env,snapshot.id,current.hash);
   return redirect(reviewPath(item.id));
 }
@@ -830,6 +901,7 @@ const siteUpdates=createSiteUpdateRoutes({view,fail,button,escape,formData,asser
 const siteFiles=createSiteFilesRoutes({view,fail,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const importedEdits=createImportedEditRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
 const siteOptions=createSiteOptionsRoutes({view,fail,button,escape,formData,assertCsrf,baseUrl,limitAttempts,assertHistoryAccess,now});
+const assistantSetup=createAssistantSetupRoutes({view,fail,escape,button,assertCsrf,formData,now,redirect});
 const OPTION_ACTIVATION_HINT={
   provider_source_sha_changed:'GitHub main has a new commit since this launch was verified. Reopen the launch review and run verify again, or merge the site update you started, then turn this on.',
   provider_permission_required:'Cloudflare rejected the change. Disconnect and reconnect Cloudflare, allow Pages and account access, then try again.',
@@ -1020,7 +1092,7 @@ async function handleFetch(request,env,context){
       if(url.origin!==baseUrl(env))return fail('This service requires its registered HTTPS origin.',400);
       const current=await session(request,env);
       if(request.method==='GET'){
-        if(url.pathname==='/')return await home(env,current,url.searchParams.get('disconnect'));
+        if(url.pathname==='/')return await home(env,current,url.searchParams.get('disconnect'),request);
         if(url.pathname==='/connect/github')return await gitHubStart(request,env);
         if(url.pathname==='/oauth/github/callback')return await gitHubCallback(request,env,current);
         if(url.pathname==='/connect/cloudflare')return await cloudflareStart(request,env,current);
@@ -1050,6 +1122,7 @@ async function handleFetch(request,env,context){
         if(url.pathname==='/imported-edit-status')return await importedEdits.status(env,current,url.searchParams.get('ticket'));
         if(url.pathname==='/form-connect')return await importedEdits.connectForm(env,current,url.searchParams.get('id'));
         if(url.pathname==='/site-options')return await siteOptions.page(env,current,url.searchParams.get('id'));
+        if(url.pathname==='/assistant-setup')return await assistantSetup.page(env,current,request);
       }
       if(request.method==='POST'){
         if(url.pathname==='/agent-link')return await confirmAgentLink(request,env,current,{view,fail,escape},{assertCsrf,formData,now});
@@ -1079,6 +1152,12 @@ async function handleFetch(request,env,context){
         if(url.pathname==='/site-options-execute')return await applyApprovedOption(request,env,current);
         // Retired #121 direct-write endpoint: a stored review cannot authorize a provider mutation.
         if(url.pathname==='/site-options-apply')return fail('Reopen site options. A separate operator-approved execution grant is now required.',403);
+        if(url.pathname==='/assistant-setup/consent')return await assistantSetup.consent(request,env,current);
+        if(url.pathname==='/assistant-setup/create')return await assistantSetup.create(request,env,current);
+        if(url.pathname==='/assistant-setup/access')return await assistantSetup.access(request,env,current);
+        if(url.pathname==='/assistant-setup/github-app')return await assistantSetup.githubApp(request,env,current);
+        if(url.pathname==='/assistant-setup/install')return await assistantSetup.install(request,env,current);
+        if(url.pathname==='/assistant-setup/deploy-app')return await assistantSetup.deployApp(request,env,current);
       }
       return fail('Page not found',404);
     }catch(error){

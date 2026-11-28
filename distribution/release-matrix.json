@@ -56,6 +56,22 @@
         "Customer-owned assistant visual parity is planned with the assistant surface, not a separate public claim"
       ]
     },
+    "customer_owned_assistant": {
+      "label": "Customer-owned website assistant (hosted bootstrap pilot)",
+      "implementation": "merged",
+      "access": "not_available",
+      "verification": "ci_only",
+      "evidence": [
+        "https://github.com/mitchelldawkinsjr/launch-and-own/pull/170",
+        "https://github.com/mitchelldawkinsjr/launch-and-own/issues/165"
+      ],
+      "blockers": [
+        "OPTION_ASSISTANT_BOOTSTRAP_ENABLED stays false until Domain confirms purpose=assistant OAuth scopes on the Launch & Own Cloudflare client",
+        "Owner invite beta only after Domain flag-on + disposable-account walkthrough; not public GA",
+        "Independent consenting customer acceptance still required before access upgrades (#165/#21)",
+        "Marketing Maintain/Grow copy remains planned until orchestration accepts a matrix access change"
+      ]
+    },
     "portable_skill": {
       "label": "Portable agent skill (instructions only)",
       "implementation": "merged",

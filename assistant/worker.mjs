@@ -52,26 +52,59 @@ async function selfCheck(env, fetchFn) {
   }
 }
 
+/** Access JWT from the assertion header, or CF_Authorization cookie (Workers Access POSTs often only have the cookie). */
+function accessJwtFromRequest(request) {
+  const header = request.headers.get('cf-access-jwt-assertion');
+  if (typeof header === 'string' && header) return header;
+  const cookie = request.headers.get('cookie') || '';
+  const match = cookie.match(/(?:^|;\s*)CF_Authorization=([^;]+)/);
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); } catch { return match[1]; }
+}
+
+function sameOrigin(value, expected) {
+  const a = String(value || '').replace(/\/+$/, '');
+  const b = String(expected || '').replace(/\/+$/, '');
+  return Boolean(a) && a === b;
+}
+
 export async function handle(request, env, { fetchFn = fetch, now = () => Date.now(), cache } = {}) {
   const url = new URL(request.url);
   if (url.pathname === '/healthz' && request.method === 'GET') return send(200, 'ok');
   if (!accessConfigured(env)) return send(503, 'Access not configured');
 
   cache ??= (keyCache ??= accessKeyCache({ fetchFn }));
-  const claims = await verifyAccessJwt(request.headers.get('cf-access-jwt-assertion'), { teamDomain: env.ACCESS_TEAM_DOMAIN, aud: env.ACCESS_AUD, cache, now });
+  const claims = await verifyAccessJwt(accessJwtFromRequest(request), { teamDomain: env.ACCESS_TEAM_DOMAIN, aud: env.ACCESS_AUD, cache, now });
   // Owner identity is {provider: 'cloudflare_access', id: sub}; this deployment has exactly one owner.
-  if (!claims || claims.sub !== env.OWNER_SUB) return send(403, 'Forbidden');
+  if (!claims) return send(403, 'Forbidden (access token). Sign in again at the assistant URL, then retry.');
+  if (claims.sub !== env.OWNER_SUB) {
+    return send(403,
+      'Forbidden. Access signed you in as sub ' + claims.sub +
+      '. Paste that exact value into Your Access sub in Launch & Own, then save again.');
+  }
 
   const csrf = await csrfToken(env, claims.sub);
   let form = null;
   if (request.method === 'POST') {
-    if (request.headers.get('origin') !== env.ASSISTANT_ORIGIN) return send(403, 'Forbidden');
+    // Access + CSRF gate the owner. Reject a cross-site Origin when present; absence is OK
+    // (Access often strips Origin; pages use referrer-policy that omits Referer).
+    const sameHost = url.origin.replace(/\/+$/, '');
+    const allowed = String(env.ASSISTANT_ORIGIN || '').replace(/\/+$/, '') || sameHost;
+    const got = String(request.headers.get('origin') || '').replace(/\/+$/, '');
+    let refererHost = '';
+    try { refererHost = new URL(request.headers.get('referer') || '').origin.replace(/\/+$/, ''); } catch { /* ignore */ }
+    const hostOk = (value) => sameOrigin(value, allowed) || sameOrigin(value, sameHost);
+    if (got && got !== 'null' && !hostOk(got))
+      return send(403, 'Forbidden (origin). Got ' + got + '; expected ' + allowed + '.');
+    if ((!got || got === 'null') && refererHost && !hostOk(refererHost))
+      return send(403, 'Forbidden (origin). Got referer ' + refererHost + '; expected ' + allowed + '.');
     if (url.pathname === '/visual-preview') {
       const edit = await editRoute(request, url, null, env, { sub: claims.sub, csrf, fetchFn, now: now() });
       return edit || send(404, 'Not found');
     }
     form = await request.formData().catch(() => null);
-    if (!form || !constantTimeEqual(form.get('csrf'), csrf)) return send(403, 'Forbidden');
+    if (!form || !constantTimeEqual(form.get('csrf'), csrf))
+      return send(403, 'Forbidden (csrf). Reload the assistant home page and try again.');
     if (url.pathname === '/self-check') return asJson(200, await selfCheck(env, fetchFn));
   } else if (request.method !== 'GET') return send(405, 'Method not allowed');
 

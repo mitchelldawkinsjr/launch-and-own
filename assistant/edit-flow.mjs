@@ -202,7 +202,8 @@ async function home(env, site, url, { csrf, fetchFn, now }) {
     '<p>Every change is previewed first. <strong>Nothing goes live until you approve it</strong>.</p>' +
     visualEditorMarkup({
       jobId: 'site', page: activePage, pages, iframeSrc, targets, picked, csrf,
-      previewAction: '/preview', editorPath: '/', aiBlock
+      previewAction: '/preview', editorPath: '/', aiBlock,
+      canvas: Boolean(env.ASSETS)
     });
   return page('Change your website', body);
 }

@@ -18,6 +18,16 @@ Its customer journey: connect GitHub, connect Cloudflare, choose an account, **c
 
 Customer login and launch approval are separate actions. Never paste provider tokens into chat or commit them to GitHub.
 
+## Private assistant bootstrap (owner / invite beta)
+
+Hosted setup for the customer-owned assistant is gated by `OPTION_ASSISTANT_BOOTSTRAP_ENABLED` (default **false**) and `CF_ASSISTANT_SCOPES`. When Domain enables it after confirming the OAuth client can request those scopes, a live-site toolkit CTA opens `/assistant-setup`: consent → `/connect/cloudflare?purpose=assistant` → create private repo / D1 / Worker in the owner's accounts → guided Access + GitHub App paste → hand-off to their assistant URL. Ordinary sign-in scopes stay unchanged. Marketing Maintain/Grow copy stays **planned** until the release matrix access stage changes. See [ADR-001 amendment](../docs/design/personal-assistant/adr-001-cloudflare-scopes.md) and migration `0015_assistant_bootstrap.sql`.
+
+## Onboarding traffic (no Google Analytics)
+
+The marketing host uses cookieless **Cloudflare Web Analytics** (`ONBOARD_WEB_ANALYTICS_TOKEN` secret) for page views. Separately, the Worker writes anonymous **setup funnel** steps to Workers Analytics Engine dataset `onboarding_funnel` (binding `FUNNEL`): `land` → `start_github` → `github_ok` → `start_cloudflare` → `cloudflare_ok` → `account_selected` → `preview` / `zip_preview` → `approve`. Each point stores step, country code and path only. Query recent totals with `CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node onboarding/funnel-report.mjs [hours]` (Account Analytics Read).
+
+**First deploy:** if Wrangler returns code `10089`, open [Workers → Analytics Engine](https://dash.cloudflare.com/?to=/:account/workers/analytics-engine) for the product account and click **Enable** once (account gate; free plan). Then redeploy. Datasets are created on first write.
+
 ## Selected beta onboarding hostname
 
 The approved onboarding origin is **`https://onboard.360web.cloud`**. GitHub callback: `https://onboard.360web.cloud/oauth/github/callback`; Cloudflare callback: `https://onboard.360web.cloud/oauth/cloudflare/callback`. The other agent owns the Cloudflare zone, Worker Custom Domain and OAuth provider app settings. The old `onboard.mitchelldawkins.com` URL is **not** an approved alternative. Domain has since verified the sole Worker Custom Domain, HTTPS and the public OAuth redirects for `onboard.360web.cloud`. This does **not** prove the GitHub repository/Pages launch flow works end to end. Coordinate with [domain handoff](../docs/HANDOFF_DOMAIN_OAUTH.md), and do not edit live DNS as part of backend changes.

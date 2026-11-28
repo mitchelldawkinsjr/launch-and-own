@@ -49,7 +49,7 @@ button:hover,.btn:hover{background:var(--blue-deep)}
 .lo-page{display:grid;gap:28px}
 ::selection{background:#BFDBFE;color:var(--ink)}
 input,textarea,select{caret-color:var(--blue)}
-.lo-page>.lo-panel,.lo-dual>*,.lo-infra>*,.opt-module,.lo-step-card,.lo-checklist,.lo-pr-card,.lo-own-card,.lo-howto,.tk-block{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.lo-page>.lo-panel,.lo-dual>*,.lo-infra>*,.opt-module,.lo-step-card,.lo-checklist,.lo-pr-card,.lo-own-card,.lo-howto{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
 .lo-panel{padding:clamp(18px,3vw,28px)}
 .lo-panel>h2{margin:0 0 10px;font-size:1.2rem;letter-spacing:-.015em}
 .lo-dual{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px;margin:0}
@@ -112,13 +112,16 @@ input,textarea,select{caret-color:var(--blue)}
 .lo-pr-card,.lo-own-card,.lo-howto{padding:22px;display:grid;gap:14px}
 .lo-pr-card>h2,.lo-own-card>h2,.lo-howto>h2{margin:0;font-size:1.2rem;letter-spacing:-.015em}
 .lo-howto .lo-steps{margin-top:4px}
-.tk-site{background:transparent;border:0;border-radius:0;padding:0;margin:0;overflow:visible;box-shadow:none;display:grid;gap:16px}
-.tk-site .tk-tabs{margin:0;padding:5px;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
+.lo-page>.lo-panel:has(.tk-site){background:transparent;border:0;box-shadow:none;padding:0}
+.lo-page>.lo-panel:has(.tk-site)>h2{margin:0 0 6px}
+.lo-page>.lo-panel:has(.tk-site)>.muted{margin:0 0 18px}
+.tk-site{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:clamp(16px,2.5vw,24px);margin:0 0 22px;overflow:visible;display:grid;gap:16px}
+.tk-site .tk-tabs{margin:0;padding:5px;border:1px solid var(--line);border-radius:14px;background:var(--surface-low);box-shadow:none}
 .tk-site .tk-panel{padding:0;border:0;margin:0;display:grid;gap:16px}
 .tk-site .tk-panel>h3{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .tk-site .tk-actions{display:flex;flex-wrap:wrap;gap:10px;margin:0}
-.tk-block{padding:20px 22px}
-.tk-block>h3,.tk-block>h4{margin:0 0 12px;font-size:1.12rem}
+.tk-block{padding:0;margin:0;background:transparent;border:0;box-shadow:none;display:grid;gap:12px}
+.tk-block>h3,.tk-block>h4,.tk-block>.lo-section-title{margin:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em;color:var(--muted)}
 .opt-group{margin:0;padding:0;border:0;background:transparent;box-shadow:none;display:grid;gap:14px}
 .opt-phase-head{display:grid;gap:6px}
 .opt-phase-head>h2,.opt-group>h2{margin:0;font-size:1.25rem;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
@@ -151,7 +154,7 @@ input,textarea,select{caret-color:var(--blue)}
 .lo-edit{display:grid;gap:18px;max-width:720px}
 .lo-edit .lo-panel{padding:clamp(18px,3vw,28px)}
 .shell-wide .lo-page{max-width:1024px;margin:0 auto;width:100%}
-.tk-site-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 18px;padding:20px 22px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.tk-site-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 18px;padding:0;background:transparent;border:0;border-radius:0;box-shadow:none}
 .tk-site-head h2{padding:0;margin:0;font-size:clamp(1.25rem,2.5vw,1.55rem);letter-spacing:-.02em}
 .tk-site-head .pill{margin:0}
 .tk-site-head .tk-actions{margin:0}

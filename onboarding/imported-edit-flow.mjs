@@ -60,7 +60,22 @@ const SAFE={
   'limit_exceeded':'That change is over the limit for this page.',
   'invalid_output':'That edit was not a valid text, link, business-info, or color change.',
   'missing_local_dependency':'That change points at a file the site does not have.',
-  'unrelated_change':'That change touched a file outside the edit. No pull request was opened.'
+  'unrelated_change':'That change touched a file outside the edit. No pull request was opened.',
+  'github-write-failed':'GitHub could not save the change. Confirm the Launch & Own GitHub App is installed on this website repo, then try again.',
+  'github-access-required':'Reconnect GitHub, then start a fresh preview.',
+  'pull-request-unreadable':'GitHub could not open the pull request. Confirm the Launch & Own app still has Contents and Pull requests access on this repo.',
+  'pull-request-needs-review':'An open update already exists for this site. Finish or close it on GitHub, then try again.',
+  'file-set-mismatch':'The preview no longer matches the site files. Start a fresh preview.',
+  'commit-mismatch':'GitHub rejected the update commit. Start a fresh preview.',
+  'tree-unreadable':'The current website files could not be read. No pull request was opened.',
+  'base-content-mismatch':'GitHub main changed. Start a fresh preview.',
+  'blob-mismatch':'GitHub rejected a file upload. Start a fresh preview.',
+  'tree-mismatch':'GitHub rejected the update tree. Start a fresh preview.',
+  'site-too-large':'That site is too large to edit from this page.',
+  'unsupported-tree':'This site’s file layout cannot be edited from this page.',
+  'invalid-site-files':'The current website files could not be read. No pull request was opened.',
+  'revision-must-be-read':'The current website files could not be read. No pull request was opened.',
+  'approval-required':'Approve the exact preview again before publishing.'
 };
 const KIND_LABEL={
   text:'visible text',
@@ -119,10 +134,18 @@ export function createImportedEditRoutes({view,fail,button,escape,formData,asser
     };
   }
   function safeFailure(error){
+    const code=String(error?.code||error?.message||'unknown').slice(0,120);
+    console.error(JSON.stringify({event:'imported_edit_failed',code,name:error?.name||null}));
     if(error instanceof PreviewBuildPolicyUnavailable)
       return fail('The edit paused before any GitHub change. Confirm automatic preview builds are off, then review the preview again.',409);
     if(error instanceof ImportedEditError)
       return fail(SAFE[error.code]||'The imported edit was refused. No pull request was opened.',400);
+    if(/authorization changed|Reconnect GitHub|select your Cloudflare|credentials|token|401|403/i.test(code))
+      return fail('GitHub or Cloudflare access changed. Reconnect on Setup, then open the editor and preview again.',401);
+    if(/rate.?limit|secondaryRate/i.test(code))
+      return fail('GitHub rate-limited the request. Wait a minute and try a fresh preview.',429);
+    if(/upload expired|could not be read|no longer matches|WebsiteZip/i.test(code))
+      return fail('The stored website files could not be read for this preview. Return to the toolkit and try again.',409);
     return fail('The imported edit could not be prepared. No pull request was opened.',409);
   }
   async function ownedZip(env,current,id){
