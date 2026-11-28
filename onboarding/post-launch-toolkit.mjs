@@ -126,7 +126,7 @@ export function historyToolkitCapabilities({
         'Needs a domain name and inbox you control.'),
     seo_bundle: filesOn
       ? cap('available_opt_in', 'owner_seo_files_ready',
-        'Open Optional features, save an SEO request, then Turn on SEO starter.')
+        'Open Optional features and choose Turn on SEO starter to review any missing search engine files.')
       : cap('not_available', 'separate_reviewed_artifact_needed',
         'Extra search-listing setup is a separate reviewed update.'),
     contact_forms: formsOn

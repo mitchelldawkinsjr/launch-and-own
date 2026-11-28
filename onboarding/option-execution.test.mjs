@@ -548,30 +548,34 @@ test('visitor insights reuse an existing analytics site and leave hand-changed b
   assert.deepEqual(changed.writes,[],'a hand-changed project is refused before any write, and never patched');
 });
 
-test('stored SEO and redirect requests get a Turn on link only when site files are enabled',async t=>{
+test('SEO has one direct action when site files are enabled',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   Object.assign(h.env,{OPTION_EXECUTION_ENABLED:'true',OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_SITE_FILES_ENABLED:'true'});
   const {tenant,jobId}=await live(h,t);
-  const row=await store(h,tenant,jobId,'seo',{seoConsent:'true'});
   const page=async()=>await (await h.request('/site-options?id='+jobId,{cookie:tenant.cookie})).text();
-  assert.match(await page(),new RegExp('href="/site-options-files-turn-on\\?approvalId='+row.id+'">Turn on SEO starter'));
+  const html=await page();
+  assert.match(html,new RegExp('href="/site-options-files-turn-on\\?id='+jobId+'">Turn on SEO starter'));
+  assert.doesNotMatch(html,/Review SEO request|name="seoConsent"/);
+  const row=await store(h,tenant,jobId,'seo',{seoConsent:'true'});
   h.env.OPTION_SITE_FILES_ENABLED='false';
   assert.doesNotMatch(await page(),/Turn on SEO starter/);
+  assert.equal((await h.request('/site-options-files-turn-on?id='+jobId,{cookie:tenant.cookie})).status,404);
   assert.equal((await h.request('/site-options-files-turn-on?approvalId='+row.id,{cookie:tenant.cookie})).status,404);
   const res=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest:'a'.repeat(64),action:'publish'});
   assert.equal(res.status,404,'publishing is refused while the flag is off');
 });
 
-test('owner reviews the exact SEO files, then Approve and publish adds only those files and merges',async t=>{
+test('direct SEO review preserves existing robots.txt and adds the missing sitemap after approval',async t=>{
   const h=harness();t.after(()=>h.sqlite.close());
   Object.assign(h.env,{OPTION_EXECUTION_ENABLED:'true',OPTION_OWNER_ACTIVATION_ENABLED:'true',OPTION_SITE_FILES_ENABLED:'true'});
   const {tenant,jobId}=await live(h,t);
-  const row=await store(h,tenant,jobId,'seo',{seoConsent:'true'});
   const job=h.sqlite.prepare('SELECT * FROM onboarding_launch_jobs WHERE id = ?').get(jobId);
   const {managedRepositoryDescription}=await import('../pipeline/managed-site-repository.mjs');
   const {gitBlobSha}=await import('../imported/bytes.mjs');
   const repo='/repos/'+job.github_login+'/esp-'+job.site_slug, BASE='a'.repeat(40), HEAD='d'.repeat(40);
-  const writes=[];let blobs=[];
+  const writes=[];
+  let blobSha;
+  const paths=['public/index.html','public/menu.html','public/robots.txt'];
   const real=h.fetchFn;
   h.fetchFn=globalThis.fetch=async(url,init={})=>{
     const u=new URL(url),p=u.pathname,m=init.method||'GET',body=init.body?JSON.parse(init.body):undefined;
@@ -582,37 +586,62 @@ test('owner reviews the exact SEO files, then Approve and publish adds only thos
       owner:{login:job.github_login},description:managedRepositoryDescription(job.site_slug,jobId)});
     if(r==='/branches/main')return ok({commit:{sha:BASE}});
     if(r==='/git/commits/'+BASE)return ok({sha:BASE,tree:{sha:'b'.repeat(40)}});
-    if(r.startsWith('/git/trees/'))return ok({truncated:false,tree:[{path:'public/index.html',type:'blob'},{path:'public/menu.html',type:'blob'}]});
-    if(r==='/git/blobs'){const sha=await gitBlobSha(Uint8Array.from(atob(body.content),c=>c.charCodeAt(0)));blobs.push(sha);return ok({sha});}
-    if(r==='/git/trees')return ok({sha:'c'.repeat(40)});
+    if(r.startsWith('/git/trees/'))return ok({truncated:false,tree:paths.map(path=>({path,type:'blob'}))});
+    if(r==='/git/blobs'){blobSha=await gitBlobSha(Uint8Array.from(atob(body.content),c=>c.charCodeAt(0)));return ok({sha:blobSha});}
+    if(r==='/git/trees'){
+      assert.deepEqual(body.tree,[{path:'public/sitemap.xml',mode:'100644',type:'blob',sha:blobSha}]);
+      return ok({sha:'c'.repeat(40)});
+    }
     if(r==='/git/commits')return ok({sha:HEAD});
     if(r==='/git/refs')return ok({});
-    if(r==='/commits/'+HEAD)return ok({parents:[{sha:BASE}],files:['public/robots.txt','public/sitemap.xml'].map((filename,i)=>({filename,status:'added',sha:blobs[i]}))});
+    if(r==='/commits/'+HEAD)return ok({parents:[{sha:BASE}],files:[{filename:'public/sitemap.xml',status:'added',sha:blobSha}]});
     if(r==='/pulls')return ok({number:3,html_url:'https://github.com'+repo+'/pull/3',head:{sha:HEAD}});
     if(r==='/pulls/3/merge')return ok({merged:true,sha:'9'.repeat(40)});
     throw new Error('unexpected '+m+' '+r);
   };
-  const review=await h.request('/site-options-files-turn-on?approvalId='+row.id,{cookie:tenant.cookie});
+  const reviewUrl='/site-options-files-turn-on?id='+jobId;
+  assert.equal((await h.request(reviewUrl)).status,404);
+  const review=await h.request(reviewUrl,{cookie:tenant.cookie});
   const html=await review.text();
   assert.equal(review.status,200,html.slice(0,400));
-  assert.match(html,/public\/robots\.txt/);
+  assert.match(html,/Your site already has <code>public\/robots\.txt<\/code>/);
+  assert.match(html,/<h2><code>public\/sitemap\.xml<\/code><\/h2>/);
+  assert.doesNotMatch(html,/<h2><code>public\/robots\.txt/);
   assert.match(html,/&lt;loc&gt;https:\/\/esp-[a-z0-9-]+-site\.pages\.dev\/menu&lt;\/loc&gt;/);
   assert.deepEqual(writes,[],'reviewing writes nothing');
+  assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS total FROM onboarding_option_approvals WHERE kind = 'seo'").get().total,0);
+  const legacy=await store(h,tenant,jobId,'seo',{seoConsent:'true'});
+  const legacyReview=await h.request('/site-options-files-turn-on?approvalId='+legacy.id,{cookie:tenant.cookie});
+  assert.equal(legacyReview.status,200,'existing saved links still open');
+  assert.match(await legacyReview.text(),/<h2><code>public\/sitemap\.xml<\/code><\/h2>/);
+  assert.deepEqual(writes,[]);
+  const seoTicket=html.match(/name="seoTicket" value="([A-Za-z0-9_-]+)"/)[1];
   const digest=html.match(/name="digest" value="([a-f0-9]{64})"/)[1];
-  const res=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest,action:'publish'});
-  const done=await res.text();
-  assert.equal(res.status,200,done.slice(0,400));
-  assert.match(done,/Published/);
-  assert.deepEqual(writes,['POST /git/blobs','POST /git/blobs','POST /git/trees','POST /git/commits','POST /git/refs','POST /pulls','PUT /pulls/3/merge']);
-
-  writes.length=0;
+  const publish=extra=>post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,seoTicket,digest,action:'publish',...extra});
   h.resourceState.pages.source.config.preview_deployment_setting='all';
-  const previews=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest,action:'publish'});
+  const previews=await publish();
   assert.equal(previews.status,409);
   assert.match(await previews.text(),/Turn off automatic preview builds/);
   assert.deepEqual(writes,[],'with preview builds on, no branch is pushed');
   h.resourceState.pages.source.config.preview_deployment_setting='none';
-  const stale=await post(h,'/site-options-files-publish',tenant.cookie,{csrf:tenant.csrf,approvalId:row.id,digest:'0'.repeat(64),action:'publish'});
+  const stale=await publish({digest:'0'.repeat(64)});
   assert.equal(stale.status,409);
   assert.deepEqual(writes,[],'a digest that does not match the current files writes nothing');
+
+  const res=await publish();
+  const done=await res.text();
+  assert.equal(res.status,200,done.slice(0,400));
+  assert.match(done,/Files merged/);
+  assert.deepEqual(writes,['POST /git/blobs','POST /git/trees','POST /git/commits','POST /git/refs','POST /pulls','PUT /pulls/3/merge']);
+
+  paths.push('public/sitemap.xml');
+  writes.length=0;
+  const already=await h.request(reviewUrl,{cookie:tenant.cookie});
+  const existing=await already.text();
+  assert.equal(already.status,200);
+  assert.match(existing,/Search engine files already exist/);
+  assert.match(existing,/Back to site options/);
+  assert.doesNotMatch(existing,/action="\/site-options-files-publish"/);
+  assert.equal((await publish()).status,409);
+  assert.deepEqual(writes,[],'existing files cause no writes');
 });

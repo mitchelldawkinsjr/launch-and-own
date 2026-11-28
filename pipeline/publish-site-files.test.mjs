@@ -9,7 +9,7 @@ const BASE = 'a'.repeat(40), TREE = 'b'.repeat(40), NEXT_TREE = 'c'.repeat(40), 
 const JOB = '11111111-2222-4333-8444-555555555555';
 const owner = 'willow', repoName = 'esp-willow', repositoryId = 42;
 
-function github({paths = ['public/index.html', 'public/about/index.html'], mergeStatus = 200, extraHeadFile = false, mainMoves = false} = {}) {
+function github({paths = ['public/index.html', 'public/about/index.html'], directories = [], mergeStatus = 200, extraHeadFile = false, mainMoves = false} = {}) {
   const calls = [];
   let blobs = [], mainReads = 0;
   const fetchFn = async (url, init = {}) => {
@@ -21,7 +21,8 @@ function github({paths = ['public/index.html', 'public/about/index.html'], merge
       owner: {login: owner}, description: managedRepositoryDescription('willow', JOB)});
     if (path.endsWith('/branches/main')) return ok({commit: {sha: mainMoves && ++mainReads > 1 ? 'e'.repeat(40) : BASE}});
     if (path.endsWith('/git/commits/' + BASE)) return ok({sha: BASE, tree: {sha: TREE}});
-    if (path.endsWith('/git/trees/' + TREE)) return ok({truncated: false, tree: paths.map(p => ({path: p, type: 'blob'}))});
+    if (path.endsWith('/git/trees/' + TREE)) return ok({truncated: false, tree: [
+      ...paths.map(path => ({path, type: 'blob'})), ...directories.map(path => ({path, type: 'tree'}))]});
     if (path.endsWith('/git/blobs') && method === 'POST') {
       const sha = await gitBlobSha(Uint8Array.from(atob(body.content), c => c.charCodeAt(0)));
       blobs.push(sha); return ok({sha});
@@ -60,10 +61,13 @@ test('"open a pull request instead" never merges; a blocked merge leaves the PR 
   assert.equal(blocked.merged, false); assert.equal(blocked.mergeNote, 'merge_blocked');
 });
 
-test('refuses before any write when the site changed, a file exists, or the head has another change', async () => {
+test('refuses an outdated review or repository and prevents unrelated changes from reaching a PR', async () => {
   for (const [opts, extra, code, writes] of [
     [{paths: ['public/index.html']}, {}, 'approval_digest_mismatch', false],
-    [{paths: ['public/index.html', 'public/about/index.html', 'public/robots.txt']}, {}, 'file_exists', false],
+    [{paths: ['public/index.html', 'public/about/index.html', 'public/robots.txt']}, {}, 'approval_digest_mismatch', false],
+    [{paths: ['public/index.html', 'public/robots.txt', 'public/sitemap.xml']}, {}, 'already_present', false],
+    [{directories: ['public/sitemap.xml']}, {}, 'file_exists', false],
+    [{}, {approvedBaseSha: 'f'.repeat(40)}, 'approval_digest_mismatch', false],
     [{extraHeadFile: true}, {}, 'unrelated_change', true],
     [{}, {repositoryId: 43}, 'repository_mismatch', false]
   ]) {

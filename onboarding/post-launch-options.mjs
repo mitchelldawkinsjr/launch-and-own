@@ -351,18 +351,16 @@ export function createSiteOptionsRoutes({
       ? button('/site-options-activate', label, current.csrf,
           '<input type="hidden" name="approvalId" value="' + escape(row.id) + '">')
       : '';
-    // SEO and redirects: review the exact new files, then publish (files exist afterwards, so a repeat is refused).
-    const filesTurnOn = (row, label) => row && siteFilesEnabled(env)
-      ? '<p><a class="btn" href="/site-options-files-turn-on?approvalId=' + escape(row.id) + '">' + label + '</a></p>' : '';
+    const filesEnabled = siteFilesEnabled(env);
     const domainHost = storedDomainHostname(rows);
     const mailboxDefault = onboardingMailbox(job, current, domainHost);
     const website = 'https://esp-' + escape(job.site_slug) + '-site.pages.dev';
-    const storedCount = Object.keys(byKind).length;
+    const storedCount = Object.keys(byKind).filter(kind => kind !== 'seo').length;
     const notice = '<header class="lo-hero" aria-labelledby="opt-hero-title">' +
       '<p class="eyebrow"><span class="lo-badge lo-badge-lo">Optional features</span>' +
       '<span class="lo-badge lo-badge-gh">GitHub</span><span class="lo-badge lo-badge-cf">Cloudflare</span></p>' +
       '<h1 id="opt-hero-title">Optional features for ' + escape(job.customer_name) + '</h1>' +
-      '<p>Save each request first. Nothing goes live until you turn it on after review—still bound to the exact hostname, mailbox, or plan you approved.</p>' +
+      '<p>Review each feature before you turn it on. Some features need a saved request with details such as your hostname or forwarding address.</p>' +
       '<div class="lo-toolbar"><a class="btn-secondary btn" href="' + website + '">View live site</a>' +
       '<a class="btn-secondary btn" href="/toolkit">Back to toolkit</a></div></header>' +
       '<div class="lo-stat-grid" role="group" aria-label="Optional features summary">' +
@@ -467,13 +465,9 @@ export function createSiteOptionsRoutes({
       '</section>';
     const seoSection =
       '<section class="opt-module"><h3>SEO starter <span class="tag tag-safe">Files only</span></h3>' +
-      '<p>Save a request for search basics: a robots.txt file and a sitemap of your pages. Turning it on only adds those two files after you review them; your pages are not edited.</p>' +
-      stored(byKind.seo, 'SEO') +
-      filesTurnOn(byKind.seo, 'Turn on SEO starter') +
-      button('/site-options-prepare', 'Review SEO request', current.csrf,
-        hidden(job.id, 'seo') +
-        '<label><input type="checkbox" name="seoConsent" value="true" required> ' +
-        'Save this request for review.</label>') +
+      '<p>Review and add any missing search engine files for your site, including <code>robots.txt</code> and a sitemap.</p>' +
+      (filesEnabled ? '<p><a class="btn" href="/site-options-files-turn-on?id=' + encodeURIComponent(job.id) + '">Turn on SEO starter</a></p>'
+        : '<p>SEO starter is currently unavailable.</p>') +
       '</section>';
     const redirectsSection =
       '<section class="opt-module"><h3>Redirects <span class="tag tag-safe">URL rules</span></h3>' +
@@ -481,7 +475,7 @@ export function createSiteOptionsRoutes({
         ? '<p>Same-host redirects for <code>' + escape(domainHost) +
           '</code>. We set them up after a review and your approval.</p>' +
           stored(byKind.redirects, 'redirect') +
-          filesTurnOn(byKind.redirects, 'Turn on redirects') +
+          (filesEnabled && byKind.redirects ? '<p><a class="btn" href="/site-options-files-turn-on?approvalId=' + escape(byKind.redirects.id) + '">Turn on redirects</a></p>' : '') +
           button('/site-options-prepare', 'Review redirect request', current.csrf,
             hidden(job.id, 'redirects') +
             '<input type="hidden" name="hostname" value="' + escape(domainHost) + '">' +
@@ -510,7 +504,7 @@ export function createSiteOptionsRoutes({
       '<div class="opt-grid">' + analyticsSection + previewSection + '</div></div>';
     const ribbon = '<div class="opt-ribbon" role="region" aria-label="Stored requests">' +
       '<div><h3>Stored requests stay with this site</h3>' +
-      '<p>Each module saves a digest-bound request first. Nothing deploys in bulk — turn features on one at a time after review.</p></div>' +
+      '<p>Continue saved requests from their feature cards.</p></div>' +
       '<div class="opt-ribbon-actions"><span class="lo-badge">' + storedCount + ' stored</span>' +
       '<a class="btn-secondary btn" href="/toolkit">Back to toolkit</a>' +
       '<a class="btn-secondary btn" href="/history">Launch history</a></div></div>';
