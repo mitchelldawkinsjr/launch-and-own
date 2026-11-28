@@ -7,7 +7,7 @@
     "@codemirror/view": "6.26.3",
     "diff": "5.2.0",
     "isomorphic-git": "1.27.2",
-    "lucide": "0.460.0",
+    "lucide": "1.82.0",
     "esbuild": "0.24.0",
     "buffer": "6.0.3"
   },
@@ -24,6 +24,6 @@
     "codemirror.js": "7ec883758a7098765e4a27a727bbe03389eb73b9502291aeea044d1c0a9d0eb0",
     "diff.js": "0b161b4fbd66e65a2a9b9460731b71276cf88d7f82f87b47c304e99c19928571",
     "isomorphic-git.js": "f58fc56606dabf71b3c2d399402e98363a34d3ec02a83128ab78806bed007286",
-    "lucide.min.js": "1b22c6c04a1c69b75a41c64c7ea992657e8f628dabd6324984ffc61c3761a56a"
+    "lucide.min.js": "336d992b3e1b801bafda1b81fc4addd665a2c43816226c2aa096f09f7d17895e"
   }
 }

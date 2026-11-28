@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const PINS = {
   codemirror: '6.0.1', '@codemirror/lang-html': '6.4.9', '@codemirror/theme-one-dark': '6.1.2',
   '@codemirror/state': '6.4.1', '@codemirror/view': '6.26.3', diff: '5.2.0', 'isomorphic-git': '1.27.2',
-  lucide: '0.460.0', esbuild: '0.24.0', buffer: '6.0.3' // buffer: browser polyfill isomorphic-git needs (esm.sh ?bundle did the same)
+  lucide: '1.82.0', esbuild: '0.24.0', buffer: '6.0.3' // buffer: browser polyfill isomorphic-git needs (esm.sh ?bundle did the same)
 };
 const ENTRIES = ['codemirror', '@codemirror/lang-html', '@codemirror/theme-one-dark', '@codemirror/state', '@codemirror/view', 'diff', 'isomorphic-git'];
 const fileFor = spec => spec.replace(/^@/, '').replace(/\//g, '-');
