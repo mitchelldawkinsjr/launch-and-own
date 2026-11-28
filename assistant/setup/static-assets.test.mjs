@@ -54,3 +54,21 @@ test('bundled site-editor assets include the editor shell and pass manifest chec
   assert.ok(paths.includes('/index.html') && paths.includes('/js/editor.js'));
   await assetManifest(SITE_EDITOR_ASSETS);
 });
+
+test('site editor loads no CDN code and every editor CSP pins the current importmap hash', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const root = new URL('../../', import.meta.url);
+  const html = readFileSync(new URL('vendor/launch-and-own-site-editor/index.html', root), 'utf8');
+  assert.doesNotMatch(html, /<script[^>]+src="https?:|"https?:\/\/[^"]+\.js"/);
+  assert.doesNotMatch(readFileSync(new URL('vendor/launch-and-own-site-editor/css/editor.css', root), 'utf8'), /@import\s+url\(['"]?https?:/);
+  const importmap = /<script type="importmap">([\s\S]*?)<\/script>/.exec(html)[1];
+  const hash = "'sha256-" + createHash('sha256').update(importmap).digest('base64') + "'";
+  for (const file of ['assistant/worker.mjs', 'onboarding/worker.mjs', 'scripts/serve-onboarding-mock.mjs']) {
+    const source = readFileSync(new URL(file, root), 'utf8');
+    assert.ok(source.includes("script-src 'self' " + hash), file + ' CSP must pin the importmap hash');
+    assert.doesNotMatch(source, /unpkg\.com|esm\.sh/, file);
+  }
+  for (const spec of Object.values(JSON.parse(importmap).imports))
+    assert.ok(SITE_EDITOR_ASSETS.some(f => f.path === spec.replace(/^\./, '')), spec + ' must be bundled');
+});

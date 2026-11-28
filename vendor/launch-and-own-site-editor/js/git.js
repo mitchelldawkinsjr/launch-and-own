@@ -10,7 +10,7 @@ window.GitDiff = (function() {
 
   async function ensureLib() {
     if (git) return git;
-    // ?bundle ships the buffer/path shims isomorphic-git needs in browsers
+    // lib/isomorphic-git.js is vendored with a Buffer polyfill (scripts/vendor-site-editor-libs.mjs)
     git = await import('isomorphic-git');
     return git;
   }

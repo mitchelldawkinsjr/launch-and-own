@@ -1,5 +1,5 @@
 /* ---------- Theme tokens (monochromatic, Roboto) ---------- */
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@200;400;500;700&display=swap');
+/* No remote font import: owner admin pages make no third-party requests (ADR-005); Roboto is used only if installed locally. */
 
 :root {
   /* Dark (default) */

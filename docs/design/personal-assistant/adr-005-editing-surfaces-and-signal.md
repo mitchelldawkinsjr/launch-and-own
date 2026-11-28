@@ -1,6 +1,6 @@
 # ADR-005: Where owners edit, and what Launch & Own may see
 
-- **Status:** Proposed, 2026-11-27. It needs the owner's acceptance, recorded the same way as ADR-004. The opt-in signal in tier 3 also needs a Domain/OAuth review before anyone builds it.
+- **Status:** **Accepted by the owner, 2026-11-27.** The opt-in signal in tier 3 still needs a Domain/OAuth review before anyone builds it.
 - **Relates to:** #165, ADR-001 (customer-run deploy), ADR-002 (per-customer GitHub App), ADR-004 (the update channel reads GitHub, not Launch & Own)
 - **Date:** 2026-11-27 · Claude Opus 5.5
 
@@ -24,7 +24,7 @@ Rules:
 
 ## Consequences
 - Marketing copy says owners can keep editing in the toolkit or move to their assistant, and that Launch & Own wouldn't track assistant use. The assistant stays "planned" until the release matrix says otherwise.
-- The site editor still loads CodeMirror, diff, isomorphic-git (esm.sh, pinned versions) and lucide (`unpkg.com/lucide@latest`, **unpinned**) from third-party CDNs inside owner-only admin pages. That has to be fixed by vendoring or pinning with integrity checks before the assistant canvas counts as accepted. It's tracked as a follow-up and isn't solved by this ADR.
+- The site editor's third-party libraries (CodeMirror, diff, isomorphic-git, lucide) are bundled into `vendor/launch-and-own-site-editor/lib/` by `scripts/vendor-site-editor-libs.mjs`, with exact pins and file hashes in `lib/LIBS.json`. The editor CSPs on onboard, the assistant and the local mock allow only `'self'` plus the importmap hash. Owner admin pages load no CDN code.
 
 ## Rejected
 - **Hosted-only editing:** breaks the ownership promise and the design in #170.
