@@ -291,7 +291,11 @@ test('an AI proposal too large for a review ticket fails clearly as too large', 
 });
 
 test('visual page save lists GitHub files, opens review without writing, and Approve and publish merges', async () => {
-  const w = await world();
+  // The canvas needs the ASSETS binding (hosted upgrade uploads it); without it the page says so and offers a read-only preview.
+  const bare = await (await (await world()).call('/')).text();
+  assert.match(bare, /Visual canvas is not on this Worker yet/);
+  assert.doesNotMatch(bare, /\/site-editor\/index\.html\?id=site/);
+  const w = await world({ envExtra: { ASSETS: { fetch: async () => new Response('') } } });
   const home = await (await w.call('/')).text();
   assert.match(home, /\/site-editor\/index\.html\?id=site/);
   assert.match(home, /Advanced: one exact text change/);

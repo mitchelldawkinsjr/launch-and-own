@@ -116,7 +116,7 @@ export async function handle(request, env, { fetchFn = fetch, now = () => Date.n
       assetUrl.search = '';
       const response = await env.ASSETS.fetch(new Request(assetUrl, { method: 'GET' }));
       const headers = new Headers(response.headers);
-      headers.set('content-security-policy', "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-src 'self' https://*.pages.dev https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
+      headers.set('content-security-policy', "default-src 'none'; script-src 'self' 'sha256-w/2imsdarei1j5pi6r+IEiosLFkxX04hdaM1u/629po='; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self'; worker-src 'self'; frame-src 'self' https://*.pages.dev https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'");
       headers.delete('x-frame-options');
       return new Response(response.body, { status: response.status, headers });
     }

@@ -1,7 +1,7 @@
 // Customer-owned assistant edit flow (M2 slice 2, #195). Same steps and library as the hosted flow:
 // read the live repo -> locate/validate -> sealed 15-minute ticket -> re-derive and review -> approve -> PR (never merge).
 // Nothing is stored between steps except the single-use approval claim; every step re-reads GitHub, so a moved base fails closed.
-import { escape } from '../onboarding/ui.mjs';
+import { escape, UI_CSS } from '../onboarding/ui.mjs';
 import { editReviewMarkup } from '../onboarding/edit-review.mjs';
 import { assistantPromptMarkup, livePreviewUrl, VISUAL_EDITOR_CSS, visualEditorMarkup } from '../onboarding/visual-editor.mjs';
 import { defaultEditorPage, editablePages, listEditTargets, pickEditTarget } from '../imported/targets.mjs';
@@ -68,9 +68,15 @@ export async function openTicket(env, kind, sub, raw, now) {
   return data;
 }
 
-const page = (title, body, status = 200) => new Response('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-  '<title>' + escape(title) + '</title><body style="font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem">' +
-  '<p><a href="/">Your website assistant</a></p><h1>' + escape(title) + '</h1>' + body + '</body></html>', { status, headers: PAGE_HEADERS });
+// Same Stitch tokens as onboard, but customer-branded: no Launch & Own nav, beacon or remote assets (CSP allows inline style only).
+const page = (title, body, status = 200, { wide = false, omitTitle = false } = {}) => new Response('<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+  '<meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + escape(title) + ' | Your website assistant</title>' +
+  '<style>' + UI_CSS + '.as-tag{font-size:.82rem;color:var(--muted)}</style></head><body><a class="skip" href="#main">Skip to content</a>' +
+  '<header class="site-header"><div class="site-header-inner"><a class="brand brand-home" href="/"><span class="brand-mark" aria-hidden="true">AI</span><span>Your website assistant</span></a>' +
+  '<span class="lo-badge lo-badge-cf">Runs in your Cloudflare account</span></div></header>' +
+  '<main id="main" class="shell' + (wide ? ' shell-wide' : '') + '">' + (omitTitle ? body : '<div class="card"><h1 class="page-title">' + escape(title) + '</h1>' + body + '</div>') + '</main>' +
+  '<footer class="site-footer"><div class="site-footer-inner"><span>Nothing goes live until you approve it.</span><span class="as-tag">Built with Launch &amp; Own</span></div></footer></body></html>',
+  { status, headers: PAGE_HEADERS });
 const redirect = location => new Response(null, { status: 303, headers: { location, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
 
 function failure(error) {
@@ -205,7 +211,7 @@ async function home(env, site, url, { csrf, fetchFn, now }) {
       previewAction: '/preview', editorPath: '/', aiBlock,
       canvas: Boolean(env.ASSETS)
     });
-  return page('Change your website', body);
+  return page('Change your website', '<div class="card">' + body + '</div>', 200, { wide: true, omitTitle: true });
 }
 
 async function liveFile(site, url, { fetchFn, now }) {

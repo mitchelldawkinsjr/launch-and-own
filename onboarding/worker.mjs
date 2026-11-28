@@ -1052,7 +1052,7 @@ async function activateOwnerOption(request,env,current){
 // style/img/font https: so the edit canvas srcdoc can paint the owner's page (it inherits this CSP).
 // Scripts stay locked to the editor; the canvas iframe has no allow-scripts.
 // frame-src includes pages.dev for the Preview (eye) viewer and common embeds.
-const SITE_EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-src 'self' https://*.pages.dev https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
+const SITE_EDITOR_CSP = "default-src 'none'; script-src 'self' 'sha256-w/2imsdarei1j5pi6r+IEiosLFkxX04hdaM1u/629po='; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self'; worker-src 'self'; frame-src 'self' https://*.pages.dev https://www.youtube.com https://www.youtube-nocookie.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
 
 async function siteEditorAsset(request, env, url) {
   if (!env.ASSETS || typeof env.ASSETS.fetch !== 'function') return fail('The page editor is unavailable.', 404);

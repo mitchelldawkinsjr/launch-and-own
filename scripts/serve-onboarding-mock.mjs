@@ -9,7 +9,7 @@ import {pathToFileURL, fileURLToPath} from 'node:url';
 import {base64Decode, base64Encode, gitBlobSha} from '../imported/bytes.mjs';
 import {approvePreview, connectTenant, newPreview, post} from '../onboarding/worker-test-support.mjs';
 
-const EDITOR_CSP = "default-src 'none'; script-src 'self' https://unpkg.com https://esm.sh 'sha256-AfmJSc5QuvGDXyNSsWg0p+yPCEM4Ax7GPPUQflvqTMQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://esm.sh https://unpkg.com; worker-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
+const EDITOR_CSP = "default-src 'none'; script-src 'self' 'sha256-w/2imsdarei1j5pi6r+IEiosLFkxX04hdaM1u/629po='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'";
 
 function memoryBucket() {
   const data = new Map();

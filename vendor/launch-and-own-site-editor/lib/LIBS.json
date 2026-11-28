@@ -1,0 +1,29 @@
+{
+  "pins": {
+    "codemirror": "6.0.1",
+    "@codemirror/lang-html": "6.4.9",
+    "@codemirror/theme-one-dark": "6.1.2",
+    "@codemirror/state": "6.4.1",
+    "@codemirror/view": "6.26.3",
+    "diff": "5.2.0",
+    "isomorphic-git": "1.27.2",
+    "lucide": "1.82.0",
+    "esbuild": "0.24.0",
+    "buffer": "6.0.3"
+  },
+  "files": {
+    "chunk-76A42BLM.js": "fde4cfe5a1dcf9aef51c9a1b35bfdec98b25214856eb842651ada2776848d124",
+    "chunk-L5L3RCLM.js": "670cd79bad1dc3f9cf0dd7b16c432c1a456b7987c0c87374fa9bbc80879c77c6",
+    "chunk-LPBDXIQP.js": "a7cd9071f2ed0415a7f67cc13201dfc6f4b228910ca0beaff04d981c20681680",
+    "chunk-M5WQHSM6.js": "54025149456df0bdd165171c24af7e34b58b783f8dccd730232dac6d19ab850d",
+    "chunk-V5N4ZSBE.js": "4f557090c17d287bc13f2946c722838d8f108fc3df1fdfb3f1ba80d08b9ecb4c",
+    "codemirror-lang-html.js": "2e8f51b69545cabb32281a3458b5d804283d3d46c5ad239bf62561c1922fc899",
+    "codemirror-state.js": "0c5019c4fe99a8fb264cb149d4ff2ec7353ab88e63fc8e0abeeb5c5d5e4cf5ff",
+    "codemirror-theme-one-dark.js": "2f5a04a4c1cf60f4b2cd338bb3d590122ba40064972debbb1cf2cca10cdee9e6",
+    "codemirror-view.js": "64d7bc976bab97d29ae83f957483e385442fdb7ad99b83649074a067d4739299",
+    "codemirror.js": "7ec883758a7098765e4a27a727bbe03389eb73b9502291aeea044d1c0a9d0eb0",
+    "diff.js": "0b161b4fbd66e65a2a9b9460731b71276cf88d7f82f87b47c304e99c19928571",
+    "isomorphic-git.js": "f58fc56606dabf71b3c2d399402e98363a34d3ec02a83128ab78806bed007286",
+    "lucide.min.js": "336d992b3e1b801bafda1b81fc4addd665a2c43816226c2aa096f09f7d17895e"
+  }
+}

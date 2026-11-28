@@ -10,6 +10,7 @@ Author: Claude Code · Claude Opus 5.5 (`claude-opus-5-5`), 2026-11-24. Reviewer
 | [ADR-002 GitHub credential model](adr-002-github-credential-model.md) | Per-customer App, shared Launch & Own App, or a fine-grained token |
 | [ADR-003 Assistant code location](adr-003-assistant-code-location.md) | Separate private repo vs a directory in the website repo |
 | [ADR-004 Update channel](adr-004-update-channel.md) | Owner-approved update PRs, version pinning, security fixes, deprecation |
+| [ADR-005 Editing surfaces and signal](adr-005-editing-surfaces-and-signal.md) | Hosted toolkit vs assistant editing, editor parity, no default telemetry (accepted 2026-11-27) |
 | [Threat model](threat-model.md) | Bootstrap, Access, token lifetimes, replay and isolation, prompt injection, quota, revocation, uninstall |
 | [Provisioning plan](provisioning-plan.md) | Resource manifest, consent and cost screen, resume and rollback, free-tier limits with sources |
 | [M1 security checks](m1-security-checks.md) | 21 adversarial unit-level checks for the WS1–3 implementation, using fixtures and mocks only |
