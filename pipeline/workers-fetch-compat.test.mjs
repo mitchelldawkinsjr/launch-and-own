@@ -8,11 +8,12 @@ test("every api.github.com caller sends a User-Agent header",()=>{
   const checked=[];
   for(const dir of ["pipeline","onboarding","site","scripts"]){
     for(const name of readdirSync(new URL("../"+dir,import.meta.url))){
-      if(!name.endsWith(".mjs")||name.includes("test"))continue;
+      // Generated embeds quote headers as \"user-agent\"; skip them — real callers live in assistant/.
+      if(!name.endsWith(".mjs")||name.includes("test")||/-bundle-source\.mjs$/.test(name))continue;
       const source=readFileSync(new URL(`../${dir}/${name}`,import.meta.url),"utf8");
       if(!source.includes("https://api.github.com"))continue;
       checked.push(name);
-      assert.match(source,/["']user-agent["']\s*:\s*["']launch-and-own["']/i,`${dir}/${name} calls GitHub without a User-Agent`);
+      assert.match(source,/["']user-agent["']\s*:\s*["']launch-and-own/i,`${dir}/${name} calls GitHub without a User-Agent`);
     }
   }
   assert.ok(checked.length>=5,"expected the known GitHub API callers to be checked");
